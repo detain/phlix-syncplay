@@ -1,0 +1,295 @@
+/**
+ * SyncPlay message types and per-message payload interfaces.
+ *
+ * This is the SHARED, CANONICAL mirror of the PHP server's
+ * `src/Session/SyncPlay/Messages.php`. Every message type string and every
+ * wire field name (snake_case) must match the server byte-for-byte.
+ *
+ * Canonical decisions (see SPEC.md for the full rationale):
+ * - Every message `type` is prefixed `syncplay_` with an UNDERSCORE separator.
+ *   (Roku's `syncplay.` dot prefix is WRONG and must not be used.)
+ * - `protocol_version` is `1` and is included on every message.
+ * - Wire field names are snake_case (e.g. `group_id`, `member_id`,
+ *   `current_media_id`, `playback_position`, `server_time`, `client_time`).
+ */
+
+/**
+ * All 19 SyncPlay message type constants, mirroring
+ * `Phlix\Session\SyncPlay\Messages::TYPE_*` exactly.
+ */
+export const SYNCPLAY_MESSAGE_TYPES = {
+  // --- Group management ---
+  GROUP_CREATE: 'syncplay_group_create',
+  GROUP_JOIN: 'syncplay_group_join',
+  GROUP_LEAVE: 'syncplay_group_leave',
+  GROUP_STATE: 'syncplay_group_state',
+  GROUP_LIST: 'syncplay_group_list',
+
+  // --- Playback control ---
+  PLAYBACK_PLAY: 'syncplay_playback_play',
+  PLAYBACK_PAUSE: 'syncplay_playback_pause',
+  PLAYBACK_SEEK: 'syncplay_playback_seek',
+  PLAYBACK_QUEUE: 'syncplay_playback_queue',
+  PLAYBACK_SYNC: 'syncplay_playback_sync',
+
+  // --- Chat ---
+  CHAT: 'syncplay_chat',
+  TYPING: 'syncplay_typing',
+
+  // --- Host management ---
+  HOST_TRANSFER: 'syncplay_host_transfer',
+  HOST_ELECT: 'syncplay_host_elect',
+
+  // --- Time synchronization ---
+  TIME_PING: 'syncplay_time_ping',
+  TIME_PONG: 'syncplay_time_pong',
+  TIME_SYNC: 'syncplay_time_sync',
+
+  // --- Informational ---
+  ERROR: 'syncplay_error',
+  INFO: 'syncplay_info',
+} as const;
+
+/** Union of every valid SyncPlay message type string. */
+export type SyncPlayMessageType =
+  (typeof SYNCPLAY_MESSAGE_TYPES)[keyof typeof SYNCPLAY_MESSAGE_TYPES];
+
+/**
+ * The current SyncPlay protocol version. Mirrors
+ * `Messages::PROTOCOL_VERSION` and `TimeSync::PROTOCOL_VERSION` (both `1`).
+ */
+export const PROTOCOL_VERSION = 1;
+
+/**
+ * Ordered list of all valid message type strings (mirrors
+ * `Messages::VALID_TYPES`). Useful for validation and exhaustiveness tests.
+ */
+export const ALL_MESSAGE_TYPES: readonly SyncPlayMessageType[] = [
+  SYNCPLAY_MESSAGE_TYPES.GROUP_CREATE,
+  SYNCPLAY_MESSAGE_TYPES.GROUP_JOIN,
+  SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE,
+  SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+  SYNCPLAY_MESSAGE_TYPES.GROUP_LIST,
+  SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY,
+  SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PAUSE,
+  SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+  SYNCPLAY_MESSAGE_TYPES.PLAYBACK_QUEUE,
+  SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+  SYNCPLAY_MESSAGE_TYPES.CHAT,
+  SYNCPLAY_MESSAGE_TYPES.TYPING,
+  SYNCPLAY_MESSAGE_TYPES.HOST_TRANSFER,
+  SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+  SYNCPLAY_MESSAGE_TYPES.TIME_PING,
+  SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+  SYNCPLAY_MESSAGE_TYPES.TIME_SYNC,
+  SYNCPLAY_MESSAGE_TYPES.ERROR,
+  SYNCPLAY_MESSAGE_TYPES.INFO,
+];
+
+/** True if `type` is one of the 19 valid SyncPlay message types. */
+export function isValidMessageType(type: string): type is SyncPlayMessageType {
+  return (ALL_MESSAGE_TYPES as readonly string[]).includes(type);
+}
+
+/**
+ * Playback state values used in `playback_state` (mirrors GroupState
+ * `STATE_PLAYING`/`STATE_PAUSED`; `stopped` is the client default before any
+ * state is known).
+ */
+export type PlaybackState = 'playing' | 'paused' | 'stopped';
+
+// ---------------------------------------------------------------------------
+// Domain models
+// ---------------------------------------------------------------------------
+
+/**
+ * A SyncPlay group member, as carried in `group.members[]` on the wire.
+ * Field names are snake_case to match the server (`getState()` member shape).
+ */
+export interface SyncPlayMember {
+  id: string;
+  name: string;
+  is_host: boolean;
+  joined_at: number;
+}
+
+/**
+ * The SyncPlay group model, as carried under the `group` key of a
+ * GROUP_STATE message (the server emits `GroupState::getState()` here).
+ */
+export interface SyncPlayGroup {
+  id: string;
+  name: string;
+  members: SyncPlayMember[];
+  host_id: string | null;
+  current_media_id: string | null;
+  playback_position: number;
+  playback_state: PlaybackState;
+  has_password?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Common message envelope
+// ---------------------------------------------------------------------------
+
+/** Fields present on every framed SyncPlay message. */
+export interface BaseMessage {
+  type: SyncPlayMessageType;
+  protocol_version: number;
+  /** Sender wall-clock at send time, ms. Optional on the wire. */
+  timestamp?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Client -> server payloads (the body merged into the envelope)
+// ---------------------------------------------------------------------------
+
+export interface GroupCreatePayload {
+  group_name: string;
+  member_id?: string;
+  member_name?: string;
+  /** SHA-256 hex of the password (optional). */
+  password_hash?: string;
+}
+
+export interface GroupJoinPayload {
+  group_id: string;
+  member_id?: string;
+  member_name?: string;
+  password_hash?: string;
+}
+
+export interface GroupLeavePayload {
+  group_id: string;
+  member_id: string;
+}
+
+export interface GroupListPayload {
+  // No fields; a bare request for the list of groups.
+  [key: string]: never;
+}
+
+export interface PlaybackPlayPayload {
+  group_id: string;
+  member_id: string;
+  position: number;
+  server_time: number;
+}
+
+export interface PlaybackPausePayload {
+  group_id: string;
+  member_id: string;
+  position: number;
+  server_time: number;
+}
+
+export interface PlaybackSeekPayload {
+  group_id: string;
+  member_id: string;
+  from_position: number;
+  to_position: number;
+  server_time: number;
+}
+
+export interface PlaybackQueueItem {
+  media_id: string;
+  media_info?: Record<string, unknown>;
+}
+
+export interface PlaybackQueuePayload {
+  group_id: string;
+  queue: PlaybackQueueItem[];
+  member_id?: string;
+}
+
+export interface PlaybackSyncPayload {
+  group_id: string;
+  member_id: string;
+  position: number;
+  is_playing: boolean;
+  server_time: number;
+}
+
+export interface ChatPayload {
+  group_id: string;
+  member_id: string;
+  message: string;
+}
+
+export interface TypingPayload {
+  group_id: string;
+  member_id: string;
+  is_typing: boolean;
+}
+
+export interface HostTransferPayload {
+  group_id: string;
+  current_host_id: string;
+  new_host_id: string;
+}
+
+export interface TimePingPayload {
+  /** Client local wall-clock at ping time, ms. This is t1. */
+  client_time: number;
+}
+
+// ---------------------------------------------------------------------------
+// Server -> client payloads
+// ---------------------------------------------------------------------------
+
+/**
+ * GROUP_STATE as the server actually emits it (SyncPlayManager::handleGroupCreate
+ * / handleGroupJoin): the full group is nested under `group`, and the recipient's
+ * own member id is in `your_id`. NOTE: the server does NOT flatten group fields
+ * onto the envelope — Windows' flat reader is a divergence.
+ */
+export interface GroupStatePayload {
+  group: SyncPlayGroup;
+  your_id?: string;
+}
+
+/**
+ * HOST_ELECT as the server emits it on host departure
+ * (SyncPlayManager::leaveGroup → broadcastToGroup).
+ */
+export interface HostElectPayload {
+  elected_id: string | null;
+  elected_by: string;
+}
+
+/**
+ * TIME_PONG as the server emits it (TimeSync::processPing).
+ * IMPORTANT: there is NO `server_receive_time` / t3 field. `server_time` IS the
+ * server receive time (t2). The client must derive RTT from t1 and t4 alone.
+ */
+export interface TimePongPayload {
+  /** Echoed client t1. */
+  client_time: number;
+  /** Server receive time t2 (ms). */
+  server_time: number;
+  protocol_version: number;
+}
+
+/** ERROR message (Messages::error). */
+export interface ErrorPayload {
+  /** Server uses `error_code` in Messages::error; sendError uses `code`. */
+  error_code?: string;
+  code?: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * INFO message (Messages::info / broadcastToGroup INFO). A member JOIN is
+ * delivered as an INFO carrying `member_id` + `member_name` — the server does
+ * NOT emit a dedicated `syncplay_member_joined` type (that is a Tizen invention).
+ */
+export interface InfoPayload {
+  message: string;
+  member_id?: string;
+  member_name?: string;
+  data?: Record<string, unknown>;
+}
+
+/** A decoded raw message: the envelope plus arbitrary payload fields. */
+export type RawMessage = BaseMessage & Record<string, unknown>;
