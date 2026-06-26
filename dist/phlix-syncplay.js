@@ -198,13 +198,13 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 	}
 	leaveGroup() {
 		this.group !== null && (this.dispatch(e.GROUP_LEAVE, {
-			group_id: this.group.id,
+			group_id: this.group.group_id,
 			member_id: this.memberId
 		}), this.group = null);
 	}
 	sendPlay(t) {
 		this.group !== null && this.dispatch(e.PLAYBACK_PLAY, {
-			group_id: this.group.id,
+			group_id: this.group.group_id,
 			member_id: this.memberId,
 			position: t,
 			server_time: this.getSynchronizedTime()
@@ -212,7 +212,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 	}
 	sendPause(t) {
 		this.group !== null && this.dispatch(e.PLAYBACK_PAUSE, {
-			group_id: this.group.id,
+			group_id: this.group.group_id,
 			member_id: this.memberId,
 			position: t,
 			server_time: this.getSynchronizedTime()
@@ -220,7 +220,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 	}
 	sendSeek(t, n) {
 		this.group !== null && this.dispatch(e.PLAYBACK_SEEK, {
-			group_id: this.group.id,
+			group_id: this.group.group_id,
 			member_id: this.memberId,
 			from_position: t,
 			to_position: n,
@@ -229,7 +229,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 	}
 	reportPosition(t, n) {
 		this.group !== null && this.dispatch(e.PLAYBACK_SYNC, {
-			group_id: this.group.id,
+			group_id: this.group.group_id,
 			member_id: this.memberId,
 			position: t,
 			is_playing: n,
@@ -290,14 +290,17 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 			joined_at: typeof e.joined_at == "number" ? e.joined_at : 0
 		})) : [];
 		this.group = {
-			id: n.id,
-			name: n.name,
+			group_id: n.group_id,
+			group_name: n.group_name,
 			members: r,
+			member_count: n.member_count,
 			host_id: n.host_id ?? null,
 			current_media_id: n.current_media_id ?? null,
+			current_media_duration: n.current_media_duration ?? null,
 			playback_position: n.playback_position ?? 0,
 			playback_state: n.playback_state ?? "stopped",
-			has_password: n.has_password
+			created_at: n.created_at,
+			last_activity_at: n.last_activity_at
 		}, this.options.onState?.(this.group, t.your_id);
 	}
 	handlePlayback(e, t) {

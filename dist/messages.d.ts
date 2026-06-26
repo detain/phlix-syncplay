@@ -52,11 +52,11 @@ export declare const ALL_MESSAGE_TYPES: readonly SyncPlayMessageType[];
 /** True if `type` is one of the 19 valid SyncPlay message types. */
 export declare function isValidMessageType(type: string): type is SyncPlayMessageType;
 /**
- * Playback state values used in `playback_state` (mirrors GroupState
- * `STATE_PLAYING`/`STATE_PAUSED`; `stopped` is the client default before any
- * state is known).
+ * Playback state values used in `playback_state`, mirroring GroupState
+ * `STATE_PLAYING` / `STATE_PAUSED` / `STATE_BUFFERING` / `STATE_STOPPED`.
+ * `stopped` is also the client default before any state is known.
  */
-export type PlaybackState = 'playing' | 'paused' | 'stopped';
+export type PlaybackState = 'playing' | 'paused' | 'buffering' | 'stopped';
 /**
  * A SyncPlay group member, as carried in `group.members[]` on the wire.
  * Field names are snake_case to match the server (`getState()` member shape).
@@ -70,15 +70,31 @@ export interface SyncPlayMember {
 /**
  * The SyncPlay group model, as carried under the `group` key of a
  * GROUP_STATE message (the server emits `GroupState::getState()` here).
+ *
+ * Field names mirror `GroupState::getState()` EXACTLY: the group identity uses
+ * `group_id` / `group_name` (NOT `id` / `name` — those belong to the members).
+ * getState() always emits: group_id, group_name, member_count, members[],
+ * host_id, current_media_id, current_media_duration, playback_position,
+ * playback_state, queue, created_at, last_activity_at.
  */
 export interface SyncPlayGroup {
-    id: string;
-    name: string;
+    group_id: string;
+    group_name: string;
     members: SyncPlayMember[];
+    member_count?: number;
     host_id: string | null;
     current_media_id: string | null;
+    /** Duration of the current media in ms (useful for clamping positions). */
+    current_media_duration?: number | null;
     playback_position: number;
     playback_state: PlaybackState;
+    created_at?: number;
+    last_activity_at?: number;
+    /**
+     * NOT emitted by `GroupState::getState()` (and therefore never present on a
+     * group_state message). Only the `listGroups()` summary carries it. Kept
+     * optional here so a listGroups consumer can reuse this type without breakage.
+     */
     has_password?: boolean;
 }
 /** Fields present on every framed SyncPlay message. */

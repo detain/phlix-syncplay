@@ -116,20 +116,27 @@ member_id: string
 
 `syncplay_group_state` (server → client) — **nested**, the historical trap
 ```
-group: {
-  id: string
-  name: string
+group: {                            (verbatim GroupState::getState())
+  group_id: string                  (NOT `id` — that's a members-only field)
+  group_name: string                (NOT `name`)
+  member_count: number
+  members: [ { id, name, is_host, joined_at }, ... ]
   host_id: string | null
   current_media_id: string | null
+  current_media_duration: number    (ms; useful for clamping positions)
   playback_position: number
-  playback_state: "playing" | "paused" | "stopped"
-  members: [ { id, name, is_host, joined_at }, ... ]
-  has_password?: boolean
+  playback_state: "playing" | "paused" | "buffering" | "stopped"
+  queue: [ { media_id, media_info, added_at, added_by }, ... ]
+  created_at: number
+  last_activity_at: number
 }
 your_id?: string           (the recipient's own member id)
 ```
 > The server emits the full group under `group` and the recipient id under
-> `your_id`. It does NOT flatten group fields onto the envelope.
+> `your_id`. It does NOT flatten group fields onto the envelope. The group
+> identity uses `group_id` / `group_name`; only the **members** use `id` / `name`.
+> `has_password` is NOT emitted here — it appears only in the `listGroups()`
+> summary, never on a `group_state` message.
 
 `syncplay_group_list` (client → server) — bare request, no fields.
 

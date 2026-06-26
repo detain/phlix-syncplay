@@ -3,6 +3,25 @@
 All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-06-26
+
+### Fixed
+
+- **GROUP_STATE interop (critical):** `SyncPlayGroup` now uses `group_id` /
+  `group_name` to match the server's `GroupState::getState()`, which emits the
+  group identity under those keys (NOT `id` / `name` — those belong to the
+  members). Previously `client.ts` read `group.id` / `group.name`, which are
+  `undefined` against the live server, silently losing group identity and the
+  display name. The `group_state` handler now reads `group.group_id` /
+  `group.group_name` and also surfaces `member_count`, `current_media_duration`
+  (useful for clamping positions), `created_at`, and `last_activity_at` — all
+  always-emitted by `getState()`. `SPEC.md` updated to the exact emitted shape.
+- **`buffering` playback state:** added `'buffering'` to the `PlaybackState`
+  union to mirror `GroupState::STATE_BUFFERING = 'buffering'`, which a
+  `playback_state` can legitimately carry.
+- Documented that `SyncPlayGroup.has_password` is a `listGroups()`-only summary
+  field and is never present on a `group_state` message.
+
 ## [0.1.0]
 
 Initial release — the single shared, canonical SyncPlay protocol + NTP

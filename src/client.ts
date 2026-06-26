@@ -154,7 +154,7 @@ export class SyncPlayClient {
       return;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE, {
-      group_id: this.group.id,
+      group_id: this.group.group_id,
       member_id: this.memberId,
     });
     this.group = null;
@@ -167,7 +167,7 @@ export class SyncPlayClient {
       return;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY, {
-      group_id: this.group.id,
+      group_id: this.group.group_id,
       member_id: this.memberId,
       position,
       server_time: this.getSynchronizedTime(),
@@ -179,7 +179,7 @@ export class SyncPlayClient {
       return;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PAUSE, {
-      group_id: this.group.id,
+      group_id: this.group.group_id,
       member_id: this.memberId,
       position,
       server_time: this.getSynchronizedTime(),
@@ -191,7 +191,7 @@ export class SyncPlayClient {
       return;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK, {
-      group_id: this.group.id,
+      group_id: this.group.group_id,
       member_id: this.memberId,
       from_position: fromPosition,
       to_position: toPosition,
@@ -205,7 +205,7 @@ export class SyncPlayClient {
       return;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC, {
-      group_id: this.group.id,
+      group_id: this.group.group_id,
       member_id: this.memberId,
       position,
       is_playing: isPlaying,
@@ -313,14 +313,17 @@ export class SyncPlayClient {
       : [];
 
     this.group = {
-      id: group.id,
-      name: group.name,
+      group_id: group.group_id,
+      group_name: group.group_name,
       members,
+      member_count: group.member_count,
       host_id: group.host_id ?? null,
       current_media_id: group.current_media_id ?? null,
+      current_media_duration: group.current_media_duration ?? null,
       playback_position: group.playback_position ?? 0,
       playback_state: group.playback_state ?? 'stopped',
-      has_password: group.has_password,
+      created_at: group.created_at,
+      last_activity_at: group.last_activity_at,
     };
 
     this.options.onState?.(this.group, payload.your_id);
