@@ -1,0 +1,46 @@
+/**
+ * Message framing — the CANONICAL on-the-wire envelope.
+ *
+ * A framed SyncPlay message is a flat JSON object:
+ *
+ *     { "type": "syncplay_...", "protocol_version": 1, "timestamp": 123, ...payload }
+ *
+ * The payload fields are spread at the TOP LEVEL of the object. This matches
+ * what the PHP server reads (`$payload['member_id']`, `$payload['position']`,
+ * ...) and what `Messages::*` factory methods produce.
+ *
+ * DEPRECATED: the Tizen client wraps sends as `{ type, data, timestamp }`,
+ * nesting all fields under `data`. The server does NOT read `data`, so those
+ * messages silently fail. That wrapper is deprecated and MUST NOT be used.
+ * `decodeMessage` tolerates and unwraps it for backward compatibility only.
+ */
+import { type RawMessage, type SyncPlayMessageType } from './messages';
+/** A clock source. Injected so the module stays pure and deterministic. */
+export type NowFn = () => number;
+/**
+ * Encode a message into the canonical RAW JSON object.
+ *
+ * The result is a plain object (NOT a JSON string) so the transport layer can
+ * serialize it however it likes. Payload fields are spread at the top level;
+ * `type` and `protocol_version` are always set; `timestamp` is taken from the
+ * injected clock.
+ *
+ * @param type    A valid SyncPlay message type.
+ * @param payload The message body (top-level fields).
+ * @param now     Clock source for the `timestamp` field.
+ */
+export declare function encodeMessage(type: SyncPlayMessageType, payload: Record<string, unknown>, now: NowFn): RawMessage;
+/**
+ * Decode an inbound message into a flat RawMessage.
+ *
+ * Accepts either a JSON string or an already-parsed object. Tolerates (and
+ * unwraps) the deprecated Tizen `{ type, data, timestamp }` envelope: if a
+ * `data` object is present alongside `type`, its fields are hoisted to the top
+ * level so downstream routing always sees a flat message.
+ *
+ * Returns `null` for anything that is not a JSON object carrying a string
+ * `type`.
+ */
+export declare function decodeMessage(raw: unknown): RawMessage | null;
+/** Serialize a raw message object to a JSON string for transmission. */
+export declare function serializeMessage(message: RawMessage): string;
