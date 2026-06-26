@@ -1,0 +1,14 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "noEmit": false,
+        "declaration": true,
+        "declarationDir": "./dist",
+        "rootDir": "src",
+        "emitDeclarationOnly": true,
+        "noUnusedLocals": false,
+        "noUnusedParameters": false
+    },
+    "include": ["src/**/*.ts", "src/**/*.d.ts"],
+    "exclude": ["test/**/*", "src/**/*.test.ts"]
+}

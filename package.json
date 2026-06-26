@@ -1,0 +1,55 @@
+{
+  "name": "@phlix/syncplay",
+  "version": "0.1.0",
+  "description": "Framework-agnostic SyncPlay wire protocol + NTP time-sync for Phlix JS clients (mobile, windows, tizen). The single shared, canonical implementation of the SyncPlay protocol — the server is the source of truth. No framework deps; WebSocket and clock are injected.",
+  "type": "module",
+  "main": "./dist/phlix-syncplay.umd.cjs",
+  "module": "./dist/phlix-syncplay.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/phlix-syncplay.js",
+      "require": "./dist/phlix-syncplay.umd.cjs",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json && vite build && tsc --declaration --emitDeclarationOnly -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^25.9.1",
+    "@vitest/coverage-v8": "^4.1.8",
+    "eslint": "^9.39.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.46.0",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "github:detain/phlix-syncplay"
+  },
+  "author": "detain",
+  "keywords": [
+    "phlix",
+    "syncplay",
+    "watch-party",
+    "ntp",
+    "time-sync",
+    "websocket",
+    "wire-protocol"
+  ],
+  "license": "MIT"
+}
