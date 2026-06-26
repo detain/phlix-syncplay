@@ -41,12 +41,16 @@ function groupStateMessage(hostId: string, yourId: string): RawMessage {
     protocol_version: 1,
     your_id: yourId,
     group: {
-      id: 'sp_abc',
-      name: 'Movie Night',
+      group_id: 'sp_abc',
+      group_name: 'Movie Night',
+      member_count: 2,
       host_id: hostId,
       current_media_id: 'media_1',
+      current_media_duration: 0,
       playback_position: 0,
       playback_state: 'paused',
+      created_at: 1700000000,
+      last_activity_at: 1700000000,
       members: [
         { id: hostId, name: 'Host', is_host: true, joined_at: 1 },
         { id: 'me', name: 'Tester', is_host: false, joined_at: 2 },
@@ -106,7 +110,8 @@ describe('SyncPlayClient — handleIncoming group_state', () => {
     expect(h.states).toHaveLength(1);
     const { group, yourId } = h.states[0];
     expect(yourId).toBe('me');
-    expect(group.id).toBe('sp_abc');
+    expect(group.group_id).toBe('sp_abc');
+    expect(group.group_name).toBe('Movie Night');
     expect(group.host_id).toBe('host1');
     expect(group.members.find((m) => m.id === 'host1')?.is_host).toBe(true);
     expect(group.members.find((m) => m.id === 'me')?.is_host).toBe(false);
@@ -117,6 +122,20 @@ describe('SyncPlayClient — handleIncoming group_state', () => {
     const h = makeHarness();
     h.client.handleIncoming(groupStateMessage('me', 'me'));
     expect(h.client.isHost()).toBe(true);
+  });
+
+  it('preserves the buffering playback_state and group_id/group_name on the group', () => {
+    const h = makeHarness();
+    const msg = groupStateMessage('host1', 'me');
+    (msg.group as { playback_state: string }).playback_state = 'buffering';
+    h.client.handleIncoming(msg);
+
+    const group = h.client.getGroup();
+    expect(group?.group_id).toBe('sp_abc');
+    expect(group?.group_name).toBe('Movie Night');
+    expect(group?.playback_state).toBe('buffering');
+    expect(group?.member_count).toBe(2);
+    expect(group?.current_media_duration).toBe(0);
   });
 });
 

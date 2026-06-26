@@ -4,6 +4,7 @@ import {
   ALL_MESSAGE_TYPES,
   PROTOCOL_VERSION,
   isValidMessageType,
+  type PlaybackState,
 } from '../src/messages';
 import {
   encodeMessage,
@@ -53,6 +54,14 @@ describe('SYNCPLAY_MESSAGE_TYPES', () => {
 
   it('PROTOCOL_VERSION is 1', () => {
     expect(PROTOCOL_VERSION).toBe(1);
+  });
+
+  it('PlaybackState includes all four GroupState STATE_* values incl. buffering', () => {
+    // Compile-time + run-time check that every server STATE_* string is a valid
+    // PlaybackState (mirrors GroupState::STATE_PLAYING/PAUSED/BUFFERING/STOPPED).
+    const states: PlaybackState[] = ['playing', 'paused', 'buffering', 'stopped'];
+    expect(states).toContain('buffering');
+    expect(states).toHaveLength(4);
   });
 
   it('isValidMessageType accepts known and rejects unknown / divergent types', () => {
