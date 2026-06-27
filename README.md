@@ -1,5 +1,11 @@
 # @phlix/syncplay
 
+[![CI](https://github.com/detain/phlix-syncplay/actions/workflows/ci.yml/badge.svg)](https://github.com/detain/phlix-syncplay/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/detain/phlix-syncplay/graph/badge.svg)](https://codecov.io/gh/detain/phlix-syncplay)
+[![Version](https://img.shields.io/github/v/tag/detain/phlix-syncplay?label=version&sort=semver)](https://github.com/detain/phlix-syncplay/tags)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
 The single shared, canonical implementation of the **Phlix SyncPlay** wire
 protocol + NTP time-sync for JavaScript clients (mobile / React Native,
 windows / Electron, tizen / webpack).
