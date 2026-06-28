@@ -417,7 +417,7 @@ A correct server MUST:
 comparing the inbound frame's `member_id` against this client's `memberId` (see
 the echo-suppression checks in `handlePlayback` and `handleSeek` in
 `src/client.ts`). This is **safe only because the server is expected to set the
-true sender id on rebroadcast (§9.3)**.
+true sender id on rebroadcast (§9 item 3)**.
 
 If the server failed to overwrite the sender id, a malicious peer could spoof
 *your* `member_id` on a legitimate command and cause your client to silently
