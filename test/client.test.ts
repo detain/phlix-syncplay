@@ -18,6 +18,7 @@ function makeHarness(memberId = 'me') {
   const errors: Array<{ code: string; message: string }> = [];
   const joined: Array<{ id: string; name: string }> = [];
   const hostChanges: Array<string | null> = [];
+  const disconnects: number[] = [];
 
   const client = new SyncPlayClient({
     send: (m) => sent.push(m),
@@ -30,9 +31,10 @@ function makeHarness(memberId = 'me') {
     onError: (code, message) => errors.push({ code, message }),
     onMemberJoined: (m) => joined.push(m),
     onHostChanged: (h) => hostChanges.push(h),
+    onDisconnect: () => disconnects.push(1),
   });
 
-  return { client, sent, clock, states, syncs, commands, errors, joined, hostChanges };
+  return { client, sent, clock, states, syncs, commands, errors, joined, hostChanges, disconnects };
 }
 
 function groupStateMessage(hostId: string, yourId: string): RawMessage {
@@ -268,6 +270,85 @@ describe('SyncPlayClient — host election, info (member joins), errors', () => 
     h.client.handleIncoming(null);
     expect(spy).not.toHaveBeenCalled();
     expect(h.states).toHaveLength(0);
+  });
+});
+
+describe('SyncPlayClient — onDisconnect / reconnect reset (B4)', () => {
+  it('clears time-sync samples, group, and outstanding ping, and fires onDisconnect', () => {
+    const h = makeHarness();
+
+    // Seed an established session: a group + a couple of accepted time samples.
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.clock.set(1000);
+    h.client.pingTime();
+    h.clock.set(1001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: 1100,
+    });
+    expect(h.client.getGroup()).not.toBeNull();
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+
+    h.client.onDisconnect();
+
+    // (1) group forgotten, (2) samples + drift reset, (3) callback fired.
+    expect(h.client.getGroup()).toBeNull();
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(h.client.getTimeSync().getDriftRate()).toBe(1.0);
+    expect(h.disconnects).toEqual([1]);
+  });
+
+  it('clears lastPingSendTime so a stray pong from the dead connection is ignored', () => {
+    const h = makeHarness();
+
+    // An outstanding ping is in flight when the socket drops.
+    h.clock.set(1000);
+    h.client.pingTime();
+
+    h.client.onDisconnect();
+
+    // A late pong that omits client_time would, with a live lastPingSendTime,
+    // fall back to it and seed a sample. After onDisconnect cleared it, t1 is
+    // null and the pong is dropped — no sample, no onSync.
+    h.clock.set(1001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      server_time: 1100,
+    });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(h.syncs).toHaveLength(0);
+  });
+
+  it('is safe to call with no group and no callback configured', () => {
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 0,
+      memberId: 'me',
+    });
+    expect(() => client.onDisconnect()).not.toThrow();
+    expect(client.getGroup()).toBeNull();
+    expect(client.getTimeSync().getSampleCount()).toBe(0);
+  });
+
+  it('supports the documented re-join recovery sequence after a reset', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.onDisconnect();
+    expect(h.client.getGroup()).toBeNull();
+
+    // Recovery: re-join, then resume pinging.
+    h.sent.length = 0;
+    h.client.joinGroup('sp_abc');
+    expect(h.sent.at(-1)).toMatchObject({
+      type: 'syncplay_group_join',
+      group_id: 'sp_abc',
+      member_id: 'me',
+    });
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    expect(h.client.getGroup()).not.toBeNull();
   });
 });
 

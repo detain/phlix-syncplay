@@ -438,3 +438,56 @@ it is acceptable **only** under the §9 contract that the server replaces the
 sender id with the authenticated one before rebroadcast. This caveat is the
 reason the suppression key is `member_id`; see also Step B6 (host recompute),
 which trusts the same server-set ids.
+
+---
+
+## 10. Reconnect & resume recovery
+
+`@phlix/syncplay` owns **no socket and no timers** — the consumer's transport
+opens, closes, and reconnects the WebSocket. The library only models the
+SyncPlay *state* that depends on a live connection, and exposes one method to
+reset it.
+
+### 10.1 The transient state a disconnect invalidates
+
+When the underlying WebSocket closes or errors, three pieces of client state
+become stale and MUST be discarded before reconnecting:
+
+1. **Time-sync samples + drift** — a reconnect may take a new network path, so
+   offsets/drift measured on the dead connection would corrupt the first
+   post-reconnect sync. `TimeSync.reset()` clears samples and restores
+   `driftRate = 1.0`.
+2. **Group membership** — the server-side membership is gone once the socket
+   drops; the client's `group` must become `null` until a fresh
+   `syncplay_group_state` arrives.
+3. **The outstanding ping** — a late `time_pong` from the dead connection must
+   not seed a sample, so the recorded send time (`lastPingSendTime`) is dropped.
+
+### 10.2 Required recovery sequence
+
+```
+socket close / error
+        │
+        ▼
+client.onDisconnect()          // reset TimeSync, group = null, drop ping
+        │
+        ▼
+(consumer) reconnect WebSocket // with backoff — see README
+        │
+        ▼
+client.joinGroup(groupId, …)   // re-establish membership; awaits group_state
+        │
+        ▼
+resume periodic client.pingTime()   // rebuild the time-sync window
+```
+
+`SyncPlayClient.onDisconnect()` performs steps 1–3 of §10.1 and then invokes the
+optional `onDisconnect` consumer callback (a UI hook, e.g. a "reconnecting…"
+banner). It does **not** reconnect, re-join, or schedule any timer.
+
+### 10.3 Backoff is a transport (consumer) concern
+
+The reconnect **retry/backoff timer** is owned by the consumer's transport layer,
+not by this library (it has no socket and schedules no timers). The recommended
+exponential-backoff recipe lives in the README ("Reconnect recovery"); this spec
+only mandates the ordering in §10.2.

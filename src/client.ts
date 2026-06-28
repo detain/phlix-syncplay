@@ -70,6 +70,13 @@ export interface SyncPlayClientOptions {
   onHostChanged?: (newHostId: string | null) => void;
   onError?: (code: string, message: string) => void;
   onInfo?: (message: string) => void;
+  /**
+   * Invoked by {@link SyncPlayClient.onDisconnect} after the client's transient
+   * state has been cleared, so the consumer can update its UI (e.g. show a
+   * "reconnecting…" indicator). This library owns no socket; the consumer calls
+   * {@link SyncPlayClient.onDisconnect} from its transport's close/error path.
+   */
+  onDisconnect?: () => void;
 }
 
 export class SyncPlayClient {
@@ -244,6 +251,30 @@ export class SyncPlayClient {
     const t1 = this.now();
     this.lastPingSendTime = t1;
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.TIME_PING, { client_time: t1 });
+  }
+
+  // --- Connection lifecycle ------------------------------------------------
+
+  /**
+   * Reset all transient connection state. The consumer MUST call this when the
+   * underlying WebSocket closes or errors, BEFORE attempting to reconnect.
+   *
+   * It (1) clears the {@link TimeSync} samples + drift (a fresh connection has a
+   * new network path, so stale offsets/drift would corrupt the first post-
+   * reconnect sync), (2) forgets the current group (the server-side membership
+   * is gone once the socket drops), and (3) drops any outstanding ping so a late
+   * pong from the dead connection cannot seed a bogus sample.
+   *
+   * RECOVERY SEQUENCE (see SPEC §10 / README "Reconnect recovery"):
+   *   socket close/error → `onDisconnect()` → reconnect → re-`joinGroup(...)`
+   *   → resume periodic `pingTime()`. Reconnect *backoff* (the retry timer) is a
+   *   transport concern owned by the consumer; this library schedules no timers.
+   */
+  onDisconnect(): void {
+    this.timeSync.reset();
+    this.group = null;
+    this.lastPingSendTime = null;
+    this.options.onDisconnect?.();
   }
 
   // --- Inbound -------------------------------------------------------------

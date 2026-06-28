@@ -5,7 +5,41 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`SyncPlayClient.onDisconnect()` + `onDisconnect` callback (B4):** added a
+  public `onDisconnect(): void` method that resets all transient connection
+  state when the consumer's WebSocket closes or errors — it (1) calls
+  `TimeSync.reset()` (clears stale offset samples + drift so a new network path
+  cannot corrupt the first post-reconnect sync), (2) sets the current `group` to
+  `null` (server-side membership is gone once the socket drops), and (3) clears
+  the recorded `lastPingSendTime` so a late `time_pong` from the dead connection
+  cannot seed a bogus sample. A new optional `onDisconnect?` option on
+  `SyncPlayClientOptions` is invoked afterwards as a consumer UI hook. The
+  library still owns **no socket and no timers** — reconnect/backoff is the
+  consumer's transport concern. **No wire field, message-type string, or
+  time-sync math changed.** Added tests asserting that after seeding samples + a
+  group, `onDisconnect()` leaves `getGroup() === null`,
+  `getTimeSync().getSampleCount() === 0`, `getDriftRate() === 1.0`, the callback
+  fires once, and a subsequent stray pong (no `client_time`) is ignored
+  (verifying `lastPingSendTime` was cleared); plus a no-group/no-callback safety
+  case and the documented re-join recovery sequence.
+
 ### Changed
+
+- **Memoize time-sync window aggregates (P3):** `TimeSync` now caches the
+  computed `{offset, latency, isStable}` keyed by a monotonic "samples version"
+  integer bumped in `addSample` (accept) and `reset()`. `getOffset` /
+  `getLatency` / `isStable` recompute lazily on the first access after a version
+  bump and return the cached value otherwise (the pure computations moved into
+  private `computeOffset` / `computeLatency` / `computeIsStable`). `getStatus`
+  calls all three per accepted pong, so this avoids re-slicing and re-iterating
+  the recent window three times for an unchanged dataset. **Pure performance
+  optimization — the returned numbers/booleans are byte-for-byte identical to
+  recomputing on every call;** public signatures are unchanged. Added tests
+  asserting cached values equal freshly-computed ones, that a value read before
+  an `addSample` differs after it (cache invalidates), and that `reset()` does
+  not leave stale aggregates.
 
 - **Clamp `driftRate` into `[0.99, 1.01]` (B1):** `TimeSync.updateDriftRate` now
   clamps the EMA result into `[DRIFT_RATE_MIN = 0.99, DRIFT_RATE_MAX = 1.01]`
@@ -59,6 +93,15 @@ adheres to [Semantic Versioning](https://semver.org/).
   `createGroup` / `joinGroup` / the playback senders and at both echo-suppression
   sites (`handlePlayback` / `handleSeek`) noting the §9.1 dependency on the
   server-set sender id. Comment-only; no behavioral source change.
+- **Reconnect & resume recovery (B4 / P2-as-DOC):** added `SPEC.md` §10
+  documenting the WS-reconnect recovery sequence — `socket close →
+  client.onDisconnect() → reconnect → joinGroup(...) → resume pingTime()` — and
+  what transient state a disconnect invalidates. `README.md` gains a "Reconnect
+  recovery" section with the same ordering plus a recommended **exponential
+  backoff with full jitter** recipe; the usage example wires the new
+  `onDisconnect` callback. The reconnect *backoff timer* is explicitly a
+  consumer/transport concern (this library schedules no timers) — flagged as
+  documentation-only for P2 in this repo.
 
 ## [0.1.1] - 2026-06-26
 

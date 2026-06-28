@@ -70,6 +70,7 @@ const client = new SyncPlayClient({
   onMemberJoined: ({ id, name }) => {},
   onHostChanged: (hostId) => {},
   onError: (code, message) => {},
+  onDisconnect: () => { /* UI hook, e.g. show a "reconnecting…" banner */ },
 });
 
 ws.onmessage = (e) => client.handleIncoming(e.data);
@@ -83,6 +84,54 @@ client.sendPlay(positionMs);
 client.sendPause(positionMs);
 client.sendSeek(fromMs, toMs);
 client.reportPosition(positionMs, isPlaying);
+```
+
+### Reconnect recovery
+
+This library owns **no socket and no timers** — your transport opens, closes, and
+reconnects the WebSocket. When the socket drops, call `client.onDisconnect()`
+*before* reconnecting. It resets the time-sync samples + drift, forgets the
+current group, and drops the outstanding ping so a late pong from the dead
+connection cannot seed a bogus sample (then fires the optional `onDisconnect`
+callback for your UI). It does NOT reconnect or re-join.
+
+The required ordering (also in [`SPEC.md` §10](./SPEC.md#10-reconnect--resume-recovery)):
+
+```
+socket close → client.onDisconnect() → reconnect → joinGroup(...) → resume pingTime()
+```
+
+**Backoff is your transport's job** (this lib schedules no timers). Recommended
+recipe — exponential backoff with full jitter, capped, reset on a clean open:
+
+```ts
+const BASE_MS = 1000;   // first retry delay
+const MAX_MS = 30_000;  // cap
+let attempt = 0;
+let timer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleReconnect() {
+  const expo = Math.min(MAX_MS, BASE_MS * 2 ** attempt);
+  const delay = Math.random() * expo;        // full jitter
+  attempt += 1;
+  timer = setTimeout(connect, delay);
+}
+
+function connect() {
+  const ws = new WebSocket(URL);
+  ws.onmessage = (e) => client.handleIncoming(e.data);
+  ws.onopen = () => {
+    attempt = 0;                              // reset backoff on success
+    client.joinGroup(savedGroupId, savedPasswordHash);
+    // resume your periodic pingTime() scheduler here
+  };
+  const onDrop = () => {
+    client.onDisconnect();                    // reset client state FIRST
+    scheduleReconnect();
+  };
+  ws.onclose = onDrop;
+  ws.onerror = onDrop;
+}
 ```
 
 ### Lower-level pieces
