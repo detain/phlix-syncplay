@@ -5,6 +5,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Reject non-positive-time / negative RTT samples (B3):** `TimeSync.addSample`
+  now rejects any sample whose computed `rtt < 0` (in addition to the existing
+  `rtt > MAX_ACCEPTABLE_RTT` rejection). A negative rtt — e.g. a pong whose
+  `clientReceive < clientSend`, or a server gap `t3 - t2` larger than the
+  round-trip — would yield a negative one-way latency and a corrupt offset, so
+  it is now discarded (`addSample` returns `false`, no sample stored). The guard
+  is strict (`< 0`), so `rtt === 0` (the same-process / test path) is still
+  accepted. **Client-side hardening only:** no wire field, message-type string,
+  or time-sync math changed; this only drops bad samples and cannot desync from
+  a correct server. Added tests covering the negative-rtt rejection, the
+  `rtt === 0` acceptance, and an explicit high-RTT (`rtt > MAX`) rejection,
+  bringing `addSample` to full branch coverage.
+
 ### Documentation
 
 - **Security model (S1):** added `SPEC.md` §8 "Security model" stating that this

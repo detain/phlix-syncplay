@@ -17,7 +17,8 @@
  *   oneWay = rtt / 2
  *   offset = t2 - t1 + oneWay        // add to local time to get server time
  *
- * Samples with `rtt > MAX_ACCEPTABLE_RTT` are rejected. `getOffset()` returns a
+ * Samples with `rtt < 0` (corrupt: negative one-way latency) or
+ * `rtt > MAX_ACCEPTABLE_RTT` are rejected. `getOffset()` returns a
  * weighted mean (weight = 1/rtt, favouring low-RTT samples) over the most
  * recent `OFFSET_SAMPLE_COUNT` samples. Sync is "stable" once at least
  * `OFFSET_SAMPLE_COUNT` samples exist AND the variance of recent offsets is
@@ -72,7 +73,8 @@ export class TimeSync {
    * @param serverResp    t3 — server response time (ms); pass t2 when the
    *                      server pong carries no separate response timestamp.
    * @param clientReceive t4 — client receive time (ms)
-   * @returns true if the sample was accepted, false if rejected (rtt too high).
+   * @returns true if the sample was accepted, false if rejected (rtt < 0 or
+   *          rtt > MAX_ACCEPTABLE_RTT).
    */
   addSample(
     clientSend: number,
@@ -82,7 +84,10 @@ export class TimeSync {
   ): boolean {
     const rtt = clientReceive - clientSend - (serverResp - serverRecv);
 
-    if (rtt > MAX_ACCEPTABLE_RTT) {
+    // Reject a negative rtt: it would yield a negative one-way latency and a
+    // corrupt offset. `< 0` is strict so rtt === 0 is still accepted (the
+    // same-process / test path where the server can legitimately emit rtt 0).
+    if (rtt < 0 || rtt > MAX_ACCEPTABLE_RTT) {
       return false;
     }
 

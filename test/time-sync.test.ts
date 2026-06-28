@@ -88,6 +88,69 @@ describe('TimeSync.addSample — server formula', () => {
     expect(ts.getOffset()).toBe(0);
   });
 
+  it('rejects a sample at exactly MAX_ACCEPTABLE_RTT + 1 (high-RTT branch)', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+
+    // rtt = (MAX+1) - 0 - 0 = MAX+1 > MAX → rejected.
+    const accepted = ts.addSample(0, 0, 0, MAX_ACCEPTABLE_RTT + 1);
+    expect(accepted).toBe(false);
+    expect(ts.getSampleCount()).toBe(0);
+  });
+
+  it('rejects samples producing rtt < 0 (negative one-way latency)', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+
+    // clientReceive (t4) < clientSend (t1) → rtt = 990 - 1000 - 0 = -10 < 0.
+    const accepted = ts.addSample(1000, 1100, 1100, 990);
+    expect(accepted).toBe(false);
+    expect(ts.getSampleCount()).toBe(0);
+    expect(ts.getOffset()).toBe(0);
+  });
+
+  it('rejects a sample whose negative rtt comes from the server gap (t3 - t2)', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+
+    // rtt = 1001 - 1000 - (1110 - 1100) = 1 - 10 = -9 < 0 → rejected.
+    expect(ts.addSample(1000, 1100, 1110, 1001)).toBe(false);
+    expect(ts.getSampleCount()).toBe(0);
+  });
+
+  it('accepts a valid sample with rtt === 0 (same-process / test path)', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+
+    // rtt = 1000 - 1000 - 0 = 0 → accepted (the `< 0` guard is strict).
+    const accepted = ts.addSample(1000, 1100, 1100, 1000);
+    expect(accepted).toBe(true);
+    expect(ts.getSampleCount()).toBe(1);
+    // oneWay = 0; offset = 1100 - 1000 + 0 = 100.
+    expect(ts.getOffset()).toBe(100);
+  });
+
+  it('still accepts an ordinary valid sample (positive rtt within bounds)', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+
+    // rtt = 1001 - 1000 - 0 = 1 → accepted.
+    expect(ts.addSample(1000, 1100, 1100, 1001)).toBe(true);
+    expect(ts.getSampleCount()).toBe(1);
+  });
+
+  it('caps the rolling buffer at 2x OFFSET_SAMPLE_COUNT (shift branch)', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+
+    // Push more than 2x the sample count; the oldest samples are dropped.
+    for (let i = 0; i < OFFSET_SAMPLE_COUNT * 2 + 3; i++) {
+      clock.advance(1000);
+      ts.addSample(0, 100, 100, 1);
+    }
+    expect(ts.getSampleCount()).toBe(OFFSET_SAMPLE_COUNT * 2);
+  });
+
   it('returns zero offset/latency before any samples', () => {
     const ts = new TimeSync(makeClock().now);
     expect(ts.getOffset()).toBe(0);
