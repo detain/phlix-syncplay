@@ -25,8 +25,17 @@
  * < 50ms. Drift is an EMA: `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`.
  *
  * The clock is INJECTED (`now`) so this class is pure and deterministic — it
- * never calls `Date.now()` itself. `timestamp` units match the server: seconds
- * (PHP `microtime(true)`), which only affects the drift `timeDelta` scaling.
+ * never calls `Date.now()` itself.
+ *
+ * ## Clock contract (units)
+ *
+ * `now()` MUST return **epoch milliseconds** (same scale as `Date.now()`).
+ * Every quad timestamp (`t1`..`t4`) passed to `addSample`, every `position` /
+ * `serverTime` / `now` argument, and the computed `offset`/`latency` are all in
+ * **milliseconds**. The only seconds-scaled value is `OffsetSample.timestamp`,
+ * which is stored as `now() / 1000` purely so the drift `timeDelta` lands on
+ * the server's per-second `microtime(true)` scale — see `addSample`. That
+ * `/ 1000` is correct ONLY because `now()` is ms; do not feed a seconds clock.
  */
 
 /** Number of recent samples averaged for offset/latency/stability. */
@@ -41,12 +50,29 @@ export const STABILITY_VARIANCE_THRESHOLD = 50;
 /** Drift EMA smoothing factor (lower = smoother, slower to adapt). */
 export const DRIFT_CORRECTION_FACTOR = 0.1;
 
+/**
+ * Lower bound for the drift-rate multiplier. A `driftRate` below this would
+ * mean the playback clock runs *slower* than wall-clock by more than 1%, and
+ * any value `< 1.0` risks `getAdjustedPosition` moving the playhead BACKWARDS
+ * for a forward-elapsed interval. Clamping the EMA into `[MIN, MAX]` is
+ * client-side hardening against noisy/forged offset sequences and does not
+ * change what is sent on the wire.
+ */
+export const DRIFT_RATE_MIN = 0.99;
+
+/** Upper bound for the drift-rate multiplier (≤1% fast). See DRIFT_RATE_MIN. */
+export const DRIFT_RATE_MAX = 1.01;
+
 /** Protocol version for time-sync messages (mirrors TimeSync::PROTOCOL_VERSION). */
 export const TIME_SYNC_PROTOCOL_VERSION = 1;
 
 import type { NowFn } from './framing';
 
-/** A single offset measurement. `timestamp` is in SECONDS (matches PHP). */
+/**
+ * A single offset measurement. `offset` and `rtt` are in **milliseconds**;
+ * `timestamp` is in **seconds** (`now() / 1000`), matching the server's
+ * `microtime(true)` per-second scale used only for the drift `timeDelta`.
+ */
 export interface OffsetSample {
   offset: number;
   rtt: number;
@@ -59,7 +85,9 @@ export class TimeSync {
   private readonly now: NowFn;
 
   /**
-   * @param now Clock source (epoch ms). Required — no implicit `Date.now()`.
+   * @param now Clock source returning **epoch milliseconds** (same scale as
+   *            `Date.now()`). Required — no implicit `Date.now()`. The drift
+   *            math presumes ms; see the class-level "Clock contract" note.
    */
   constructor(now: NowFn) {
     this.now = now;
@@ -98,7 +126,10 @@ export class TimeSync {
     this.samples.push({
       offset,
       rtt,
-      // Seconds, mirroring PHP microtime(true), used only for drift timeDelta.
+      // `now()` is epoch MILLISECONDS (see the class "Clock contract" note);
+      // we store `now() / 1000` so the drift `timeDelta` is in SECONDS, the
+      // same per-second scale as the server's `microtime(true)`. This `/ 1000`
+      // is the units bridge — it presumes a ms clock and must not be removed.
       timestamp: this.now() / 1000,
     });
 
@@ -200,6 +231,13 @@ export class TimeSync {
     const drift = offsetDelta / timeDelta;
 
     this.driftRate = 1.0 + (DRIFT_CORRECTION_FACTOR * drift) / 1000;
+
+    // Clamp into [DRIFT_RATE_MIN, DRIFT_RATE_MAX]. A noisy or forged offset
+    // sequence could otherwise push the raw EMA out of range; a value < 1.0 in
+    // particular would let getAdjustedPosition move the playhead backwards for
+    // a forward-elapsed interval. Client-side hardening only — the wire is
+    // unaffected.
+    this.driftRate = Math.min(DRIFT_RATE_MAX, Math.max(DRIFT_RATE_MIN, this.driftRate));
   }
 
   /** Current drift-rate multiplier (1.0 = no drift). */

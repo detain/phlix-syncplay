@@ -21,7 +21,14 @@ import {
   type SyncPlayMessageType,
 } from './messages';
 
-/** A clock source. Injected so the module stays pure and deterministic. */
+/**
+ * A clock source, injected so the module stays pure and deterministic.
+ *
+ * CONTRACT: `now()` MUST return **epoch milliseconds** (the same scale as
+ * `Date.now()`). The framing `timestamp` field is emitted in milliseconds and
+ * `TimeSync`'s drift math presumes a ms clock (it converts via `now() / 1000`
+ * to reach the server's per-second scale). Do NOT inject a seconds clock.
+ */
 export type NowFn = () => number;
 
 /**

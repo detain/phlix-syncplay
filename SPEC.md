@@ -276,7 +276,15 @@ oneWay = rtt / 2
 offset = t2 - t1 + oneWay        // add offset to local time → server time
 ```
 
-- Reject the sample if `rtt > MAX_ACCEPTABLE_RTT`.
+**Clock contract.** The injected `now()` MUST return **epoch milliseconds**
+(same scale as `Date.now()`). All quad timestamps (`t1`..`t4`), positions,
+durations, `offset`, and `latency` are in milliseconds. The one seconds-scaled
+value is each sample's stored `timestamp`, computed as `now() / 1000` solely so
+the drift `timeDelta` matches the server's per-second `microtime(true)` scale.
+That `/ 1000` is the units bridge and is correct only because `now()` is ms —
+do not inject a seconds clock.
+
+- Reject the sample if `rtt < 0` or `rtt > MAX_ACCEPTABLE_RTT`.
 - Keep a rolling buffer of up to `2 * OFFSET_SAMPLE_COUNT` samples.
 - **Offset** = weighted mean over the last `OFFSET_SAMPLE_COUNT` samples,
   weight `= 1 / max(1, rtt)` (favours low-RTT samples).
@@ -285,8 +293,12 @@ offset = t2 - t1 + oneWay        // add offset to local time → server time
   offsets `< 50`.
 - **Drift** (EMA): over the recent window,
   `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`, where `timeDelta`
-  is in seconds. `1.0` = no drift. (Windows + Mobile omitted drift; it is
-  restored here.)
+  is in seconds (see the clock contract above). `1.0` = no drift. (Windows +
+  Mobile omitted drift; it is restored here.) The result is then **clamped into
+  `[0.99, 1.01]`** (`DRIFT_RATE_MIN` / `DRIFT_RATE_MAX`) so a noisy or forged
+  offset sequence cannot drive the rate out of range — a rate `< 1.0` would let
+  the adjusted position run backwards for a forward-elapsed interval. The clamp
+  is client-side hardening and changes nothing on the wire.
 - **Adjusted position**:
   `position + (synchronizedNow - serverTime) * driftRate`.
 
