@@ -3,6 +3,24 @@
 All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Documentation
+
+- **Security model (S1):** added `SPEC.md` §8 "Security model" stating that this
+  library performs no auth/authz, that the WebSocket connection MUST be
+  authenticated **before** any `syncplay_*` frame, and that `password_hash` is an
+  unsalted, **replayable** SHA-256 group gate (not an identity). `README.md` gains
+  a Security section linking to the new SPEC sections. No source behavior change.
+- **Server-derived identity contract (S2):** added `SPEC.md` §9 documenting that
+  `member_id` / host ids are self-asserted on the wire and that a correct server
+  MUST derive the effective identity from the authenticated connection, authorize
+  host-only actions by connection identity (not the claimed id), and set the true
+  sender id on rebroadcast. Added doc-comments in `src/client.ts` above
+  `createGroup` / `joinGroup` / the playback senders and at both echo-suppression
+  sites (`handlePlayback` / `handleSeek`) noting the §9.1 dependency on the
+  server-set sender id. Comment-only; no behavioral source change.
+
 ## [0.1.1] - 2026-06-26
 
 ### Fixed

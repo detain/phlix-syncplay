@@ -25,6 +25,27 @@ the source of truth** — this package mirrors it exactly.
 
 See [`SPEC.md`](./SPEC.md) for the full wire-protocol documentation.
 
+## Security
+
+**This library performs NO authentication and NO authorization** — it is a
+transport-agnostic protocol codec with no socket and no view of credentials.
+All security is a **server responsibility**:
+
+- The server MUST authenticate the WebSocket connection **before** accepting any
+  `syncplay_*` frame.
+- `password_hash` (on `createGroup` / `joinGroup`) is an unsalted SHA-256 hex
+  string that is **replayable** — a weak *group gate*, never an identity.
+- `member_id` / host ids are **self-asserted on the wire**; the server MUST
+  derive the effective identity from the authenticated connection and authorize
+  host-only actions by connection identity, not by the client-claimed id.
+- Peer-supplied display strings (`group_name`, `member_name`, chat/info
+  `message`) are passed through unescaped — **consumers MUST sanitize before
+  rendering**.
+
+See [`SPEC.md` §8 Security model](./SPEC.md#8-security-model) and
+[§9 Server-derived identity contract](./SPEC.md#9-server-derived-identity-contract-member_id--host_id)
+for the full contract.
+
 ## Install
 
 ```bash

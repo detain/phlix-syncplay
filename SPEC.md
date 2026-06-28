@@ -328,3 +328,101 @@ Tizen's `syncplay_member_joined` / `syncplay_member_left` types are
 The canonical decisions: underscore `syncplay_` prefix, flat RAW JSON framing,
 `protocol_version = 1`, nested `group_state`, and member events via INFO /
 HOST_ELECT (never dedicated member types).
+
+---
+
+## 8. Security model
+
+`@phlix/syncplay` is a **transport-agnostic protocol codec and client-state
+orchestrator. It performs NO authentication and NO authorization, and MUST NOT
+be relied on for either.** The library never opens a socket, never sees
+credentials, and cannot verify who is on the other end of the wire. Every
+security guarantee in SyncPlay is a **server responsibility**. The points below
+enumerate what the server MUST enforce; the client merely mirrors the wire
+shapes.
+
+### 8.1 Authenticate the connection BEFORE any `syncplay_*` frame
+
+The server MUST authenticate the WebSocket connection **before** it accepts or
+acts on any `syncplay_*` frame. A connection that has not completed
+authentication MUST NOT be allowed to create/join a group, issue playback
+commands, or receive group broadcasts. Do not treat the first `syncplay_*`
+message as implicitly authenticated.
+
+Recommended: a server **nonce-challenge handshake** — the server issues a
+single-use nonce, the client returns a signature/token bound to that nonce over
+the connection, and only then is the connection promoted to "authenticated" and
+permitted to send protocol frames. The authenticated identity established here
+is what the server uses for §9 identity derivation.
+
+### 8.2 `password_hash` is a weak group gate, not identity
+
+`password_hash` (sent on `syncplay_group_create` / `syncplay_group_join`; see
+`src/client.ts` `createGroup` / `joinGroup`) is an **unsalted SHA-256 hex
+string of the group password**. It is:
+
+- **replayable** — anyone who observes one valid `password_hash` on the wire (or
+  guesses it from an unsalted dictionary) can re-send it verbatim to enter the
+  group;
+- **not an identity** — it authenticates *knowledge of a group secret*, nothing
+  about *who* the connection belongs to;
+- therefore only a **weak gate on group membership**, never a substitute for the
+  authenticated connection of §8.1.
+
+The server MUST treat `password_hash` purely as an optional group-entry gate and
+MUST derive member/host identity from the authenticated connection (§9), never
+from possession of a `password_hash`.
+
+### 8.3 Consumer-side display-string responsibility
+
+(Cross-reference for the later XSS contract step.) Peer-influenceable display
+strings — `group_name`, `member_name`, chat/info `message` — pass through this
+library untouched. Consumers MUST escape/sanitize them before rendering in any
+UI; this DOM-free library deliberately does not mutate display strings.
+
+---
+
+## 9. Server-derived identity contract (`member_id` / `host_id`)
+
+`member_id` and the various host ids (`current_host_id` / `new_host_id` in
+`syncplay_host_transfer`, and the `member_id` carried on every playback command)
+are **self-asserted by the client on the wire**. In `@phlix/syncplay` they are
+populated from the constructor `memberId` option (see `createGroup`,
+`joinGroup`, and the playback senders in `src/client.ts`). **A client-supplied
+id is a convenience/echo value only and MUST NOT be trusted for authorization.**
+
+A correct server MUST:
+
+1. **Derive the effective `member_id` from the authenticated connection** (§8.1)
+   and use that derived id for all authorization decisions. It MUST IGNORE the
+   client-supplied `member_id` for any access-control purpose (it may use it only
+   to detect obvious self-references / for logging).
+
+2. **Authorize host-only actions by connection identity, not by claimed id.**
+   Host-only commands (`syncplay_playback_play` / `_pause` / `_seek` /
+   `_sync` and `syncplay_host_transfer`) MUST be authorized by checking that the
+   *authenticated connection* is the current host — never by trusting the
+   `member_id` / `current_host_id` fields the client placed in the frame. For
+   host transfer, the server authorizes the transfer by the connection's
+   authenticated identity and sets the resulting host id authoritatively.
+
+3. **Set the true sender id on rebroadcast.** When the server rebroadcasts a
+   command to the group, it MUST stamp the authoritative sender `member_id`
+   (derived from the sender's authenticated connection), overwriting whatever the
+   sender claimed.
+
+### 9.1 Echo-suppression depends on the server-set sender id
+
+`@phlix/syncplay` suppresses its *own* echoed playback/seek commands by
+comparing the inbound frame's `member_id` against this client's `memberId` (see
+the echo-suppression checks in `handlePlayback` and `handleSeek` in
+`src/client.ts`). This is **safe only because the server is expected to set the
+true sender id on rebroadcast (§9.3)**.
+
+If the server failed to overwrite the sender id, a malicious peer could spoof
+*your* `member_id` on a legitimate command and cause your client to silently
+drop it (a denial-of-action). The client cannot defend against this on its own —
+it is acceptable **only** under the §9 contract that the server replaces the
+sender id with the authenticated one before rebroadcast. This caveat is the
+reason the suppression key is `member_id`; see also Step B6 (host recompute),
+which trusts the same server-set ids.
