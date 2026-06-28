@@ -4,6 +4,8 @@ import {
   OFFSET_SAMPLE_COUNT,
   MAX_ACCEPTABLE_RTT,
   DRIFT_CORRECTION_FACTOR,
+  DRIFT_RATE_MIN,
+  DRIFT_RATE_MAX,
   TIME_SYNC_PROTOCOL_VERSION,
 } from '../src/time-sync';
 
@@ -37,6 +39,13 @@ describe('TimeSync constants', () => {
     expect(MAX_ACCEPTABLE_RTT).toBe(1000);
     expect(DRIFT_CORRECTION_FACTOR).toBe(0.1);
     expect(TIME_SYNC_PROTOCOL_VERSION).toBe(1);
+  });
+
+  it('exposes the drift-rate clamp bounds (B1)', () => {
+    expect(DRIFT_RATE_MIN).toBe(0.99);
+    expect(DRIFT_RATE_MAX).toBe(1.01);
+    expect(DRIFT_RATE_MIN).toBeLessThan(1.0);
+    expect(DRIFT_RATE_MAX).toBeGreaterThan(1.0);
   });
 });
 
@@ -251,6 +260,105 @@ describe('TimeSync drift', () => {
     // offsetDelta = 110-100 = 10; timeDelta = (3000-1000)/1000 = 2s.
     // drift = 10/2 = 5; driftRate = 1 + 0.1*5/1000 = 1.0005
     expect(ts.getDriftRate()).toBeCloseTo(1.0005, 6);
+  });
+});
+
+describe('TimeSync drift clamp (B1)', () => {
+  it('clamps a large positive offset jump to DRIFT_RATE_MAX', () => {
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    // Sample 1 @ t=1000ms: offset 0.  t1=0,t2=0,t3=0,t4=0 → offset 0.
+    clock.set(1000);
+    ts.addSample(0, 0, 0, 0);
+    // Sample 2 @ t=2000ms (1s later): offset jumps to 100_000ms.
+    // offsetDelta = 100000; timeDelta = 1s; drift = 100000;
+    // raw driftRate = 1 + 0.1*100000/1000 = 11.0 → clamped to DRIFT_RATE_MAX.
+    clock.set(2000);
+    ts.addSample(0, 100000, 100000, 0);
+
+    expect(ts.getDriftRate()).toBe(DRIFT_RATE_MAX);
+    expect(ts.getDriftRate()).toBeLessThanOrEqual(DRIFT_RATE_MAX);
+  });
+
+  it('clamps a large negative offset jump to DRIFT_RATE_MIN and never below it', () => {
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    // Sample 1 @ t=1000ms: offset 100_000ms.
+    clock.set(1000);
+    ts.addSample(0, 100000, 100000, 0);
+    // Sample 2 @ t=2000ms (1s later): offset drops to 0.
+    // offsetDelta = -100000; drift = -100000;
+    // raw driftRate = 1 - 10 = -9.0 → clamped to DRIFT_RATE_MIN.
+    clock.set(2000);
+    ts.addSample(0, 0, 0, 0);
+
+    expect(ts.getDriftRate()).toBe(DRIFT_RATE_MIN);
+    expect(ts.getDriftRate()).toBeGreaterThanOrEqual(DRIFT_RATE_MIN);
+    expect(ts.getDriftRate()).toBeGreaterThan(0); // never zero/negative
+  });
+
+  it('leaves an in-range drift untouched (clamp is a no-op for small drift)', () => {
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    clock.set(1000);
+    ts.addSample(0, 100, 100, 1); // offset 100
+    clock.set(3000);
+    ts.addSample(0, 110, 110, 1); // offset 110
+
+    // raw driftRate 1.0005 is within [0.99, 1.01] → unchanged.
+    expect(ts.getDriftRate()).toBeCloseTo(1.0005, 6);
+    expect(ts.getDriftRate()).toBeGreaterThanOrEqual(DRIFT_RATE_MIN);
+    expect(ts.getDriftRate()).toBeLessThanOrEqual(DRIFT_RATE_MAX);
+  });
+
+  it('regression: getAdjustedPosition never moves the playhead backwards for forward elapsed time even after a drift-suppressing offset sequence', () => {
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    // Drive the raw EMA below 1.0 with a steep negative offset jump.
+    clock.set(1000);
+    ts.addSample(0, 100000, 100000, 0); // offset 100000
+    clock.set(2000);
+    ts.addSample(0, 0, 0, 0); // offset 0 → raw drift << 0, clamped to MIN
+
+    // Drift is clamped to DRIFT_RATE_MIN (>= 0.99 > 0).
+    expect(ts.getDriftRate()).toBe(DRIFT_RATE_MIN);
+
+    // With the current offset (0) and forward elapsed wall-clock, the adjusted
+    // position must monotonically increase, never go backwards.
+    const offset = ts.getOffset();
+    const serverTime = 10000;
+    const position = 5000;
+    let prev = ts.getAdjustedPosition(position, serverTime, serverTime - offset);
+    for (let nowMs = serverTime - offset + 1; nowMs <= serverTime - offset + 5000; nowMs += 250) {
+      const next = ts.getAdjustedPosition(position, serverTime, nowMs);
+      expect(next).toBeGreaterThanOrEqual(prev);
+      prev = next;
+    }
+  });
+});
+
+describe('TimeSync clock contract (B8 — units, no behavior change)', () => {
+  it('documents that drift timeDelta is in SECONDS given a known epoch-MS clock', () => {
+    // The injected clock returns epoch MILLISECONDS. Two samples 2000ms apart
+    // with an offsetDelta of 10ms must yield a per-SECOND drift, proving the
+    // stored timestamp is now()/1000 (seconds): drift = 10 / ((3000-1000)/1000)
+    // = 10 / 2 = 5, and driftRate = 1 + 0.1*5/1000 = 1.0005. If timeDelta were
+    // wrongly kept in ms (2000), driftRate would be ~1.0000005 instead.
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    clock.set(1000); // ms
+    ts.addSample(0, 100, 100, 1); // offset 100
+    clock.set(3000); // ms (2 seconds later)
+    ts.addSample(0, 110, 110, 1); // offset 110
+
+    // Seconds-scaled timeDelta → 1.0005, NOT the ~1.0000005 a ms timeDelta gives.
+    expect(ts.getDriftRate()).toBeCloseTo(1.0005, 6);
+    expect(ts.getDriftRate()).not.toBeCloseTo(1.0000005, 6);
   });
 });
 
