@@ -122,7 +122,17 @@ export class SyncPlayClient {
 
   // --- Group management ----------------------------------------------------
 
-  /** Create a group with this member as host. `passwordHash` is SHA-256 hex. */
+  /**
+   * Create a group with this member as host. `passwordHash` is SHA-256 hex.
+   *
+   * SECURITY (see SPEC §8/§9): the `member_id` placed on this frame is
+   * **self-asserted** (from the constructor `memberId`) and MUST NOT be trusted
+   * for authorization. A correct server derives the effective member/host id
+   * from the authenticated connection and ignores the client-supplied value for
+   * access control. `passwordHash` is an unsalted, **replayable** SHA-256 group
+   * gate — not an identity. The server MUST authenticate the connection before
+   * accepting this frame.
+   */
   createGroup(groupName: string, passwordHash?: string): void {
     const payload: Record<string, unknown> = {
       group_name: groupName,
@@ -135,7 +145,14 @@ export class SyncPlayClient {
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_CREATE, payload);
   }
 
-  /** Join an existing group by id. `passwordHash` is SHA-256 hex. */
+  /**
+   * Join an existing group by id. `passwordHash` is SHA-256 hex.
+   *
+   * SECURITY (see SPEC §8/§9): the `member_id` on this frame is **self-asserted**
+   * and MUST NOT be trusted for authorization — the server derives the effective
+   * id from the authenticated connection. `passwordHash` is an unsalted,
+   * **replayable** SHA-256 group gate, not an identity.
+   */
   joinGroup(groupId: string, passwordHash?: string): void {
     const payload: Record<string, unknown> = {
       group_id: groupId,
@@ -161,6 +178,13 @@ export class SyncPlayClient {
   }
 
   // --- Playback (host only; server rejects non-hosts) ----------------------
+  //
+  // SECURITY (see SPEC §9): every playback sender below stamps the frame with
+  // this client's self-asserted `member_id`. The server MUST authorize these
+  // host-only actions by the *authenticated connection's* identity (not by the
+  // claimed `member_id`) and MUST overwrite the sender id with the authenticated
+  // one before rebroadcasting. The echo-suppression in handlePlayback/handleSeek
+  // relies on that server-set sender id.
 
   sendPlay(position: number): void {
     if (this.group === null) {
@@ -332,6 +356,11 @@ export class SyncPlayClient {
   private handlePlayback(type: 'play' | 'pause', msg: RawMessage): void {
     const senderId = typeof msg.member_id === 'string' ? msg.member_id : undefined;
     // Ignore our own echoed command (the server excludes the sender, but be safe).
+    // SECURITY (see SPEC §9.1): suppression keys on `member_id`, so this is safe
+    // ONLY because the server is expected to set the true (authenticated) sender
+    // id on rebroadcast. If the server did not overwrite it, a peer spoofing our
+    // id could make us silently drop a legitimate command. The client cannot
+    // defend against this alone — it depends on the §9 server-set sender id.
     if (senderId === this.memberId) {
       return;
     }
@@ -343,6 +372,10 @@ export class SyncPlayClient {
 
   private handleSeek(msg: RawMessage): void {
     const senderId = typeof msg.member_id === 'string' ? msg.member_id : undefined;
+    // SECURITY (see SPEC §9.1): same dependency as handlePlayback — keying
+    // echo-suppression on `member_id` is safe ONLY because the server sets the
+    // true authenticated sender id on rebroadcast; a spoofed id would otherwise
+    // let a peer suppress our legitimate seeks.
     if (senderId === this.memberId) {
       return;
     }
