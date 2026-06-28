@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Clamp `driftRate` into `[0.99, 1.01]` (B1):** `TimeSync.updateDriftRate` now
+  clamps the EMA result into `[DRIFT_RATE_MIN = 0.99, DRIFT_RATE_MAX = 1.01]`
+  (both newly exported constants). A noisy or forged offset sequence could
+  previously drive `driftRate` far outside this range; a value `< 1.0` in
+  particular would let `getAdjustedPosition` move the playhead *backwards* for a
+  forward-elapsed interval. The clamp prevents that. **Client-side hardening
+  only:** no wire field, message-type string, or wire-math changed — the clamp
+  is applied locally to the multiplicative drift factor and cannot desync from a
+  correct server. `reset()` still restores `driftRate = 1.0`. Added tests for
+  the upper/lower clamp, the in-range no-op, the exported constants, and a
+  regression test asserting `getAdjustedPosition` never regresses the playhead
+  for forward elapsed time after a drift-suppressing offset sequence.
 - **Reject non-positive-time / negative RTT samples (B3):** `TimeSync.addSample`
   now rejects any sample whose computed `rtt < 0` (in addition to the existing
   `rtt > MAX_ACCEPTABLE_RTT` rejection). A negative rtt — e.g. a pong whose
@@ -22,6 +34,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 
+- **Epoch-ms clock contract (B8 — comment/contract only, no math change):** made
+  the `now()` units contract explicit across the library. `NowFn`'s JSDoc
+  (`src/framing.ts`) now states `now()` MUST return **epoch milliseconds**; the
+  `TimeSync` class gains a "Clock contract" note and the constructor JSDoc,
+  `OffsetSample` doc, and the previously misleading `now() / 1000` comment
+  (which read "Seconds, mirroring PHP microtime(true)") are corrected to clarify
+  that the stored sample `timestamp` is `now() / 1000` purely to put the drift
+  `timeDelta` on the server's per-second `microtime(true)` scale, and that the
+  `/ 1000` is a units bridge that presumes a ms clock and must not be removed.
+  `SPEC.md` §5 gains the same clock-contract note. The `/ 1000` is unchanged and
+  no numeric behavior changed; added a test documenting (via a known epoch-ms
+  clock) that the drift `timeDelta` is in seconds.
 - **Security model (S1):** added `SPEC.md` §8 "Security model" stating that this
   library performs no auth/authz, that the WebSocket connection MUST be
   authenticated **before** any `syncplay_*` frame, and that `password_hash` is an
