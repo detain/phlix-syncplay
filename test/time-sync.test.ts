@@ -404,3 +404,76 @@ describe('TimeSync time helpers', () => {
     });
   });
 });
+
+describe('TimeSync window-aggregate memoization (P3)', () => {
+  it('cached values equal freshly-computed values over the same window', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+    for (let i = 0; i < OFFSET_SAMPLE_COUNT; i++) {
+      clock.advance(10);
+      ts.addSample(0, 100, 100, 40);
+    }
+
+    // First access populates the cache; a second access must return identical
+    // values (served from the cache, no recompute).
+    const offset1 = ts.getOffset();
+    const latency1 = ts.getLatency();
+    const stable1 = ts.isStable();
+    expect(ts.getOffset()).toBe(offset1);
+    expect(ts.getLatency()).toBe(latency1);
+    expect(ts.isStable()).toBe(stable1);
+
+    // The cached numbers must equal an independent computation over the same
+    // sample window (a fresh instance fed identical samples).
+    const fresh = new TimeSync(makeClock().now);
+    for (let i = 0; i < OFFSET_SAMPLE_COUNT; i++) {
+      fresh.addSample(0, 100, 100, 40);
+    }
+    expect(offset1).toBe(fresh.getOffset());
+    expect(latency1).toBe(fresh.getLatency());
+    expect(stable1).toBe(fresh.isStable());
+  });
+
+  it('a value computed before addSample differs after it (cache invalidates)', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+
+    // rtt=1 sample (weight exactly 1) → offset 100, latency 0.
+    ts.addSample(1000, 1100, 1100, 1001);
+    const offsetBefore = ts.getOffset();
+    const latencyBefore = ts.getLatency();
+    const stableBefore = ts.isStable();
+    expect(offsetBefore).toBe(100);
+    expect(stableBefore).toBe(false);
+
+    // Add a sample with a very different offset/rtt; the cached aggregates must
+    // recompute rather than return the pre-addSample values.
+    clock.advance(10);
+    ts.addSample(2000, 2500, 2500, 2400);
+
+    expect(ts.getOffset()).not.toBe(offsetBefore);
+    expect(ts.getLatency()).not.toBe(latencyBefore);
+
+    // Fill the window to OFFSET_SAMPLE_COUNT so isStable can flip true, proving
+    // the cached `false` was invalidated.
+    for (let i = 0; i < OFFSET_SAMPLE_COUNT; i++) {
+      clock.advance(10);
+      ts.addSample(0, 100, 100, 4);
+    }
+    expect(ts.isStable()).toBe(true);
+    expect(ts.isStable()).not.toBe(stableBefore);
+  });
+
+  it('reset invalidates the cache (aggregates return to empty-window values)', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+    ts.addSample(1000, 1100, 1100, 1001); // rtt 1, weight 1 → offset 100
+    expect(ts.getOffset()).toBe(100);
+    ts.reset();
+    // After reset the cache must recompute to the empty-window value, not
+    // return the stale 101.
+    expect(ts.getOffset()).toBe(0);
+    expect(ts.getLatency()).toBe(0);
+    expect(ts.isStable()).toBe(false);
+  });
+});

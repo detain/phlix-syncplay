@@ -85,6 +85,27 @@ export class TimeSync {
   private readonly now: NowFn;
 
   /**
+   * Monotonic "samples version" — incremented every time the sample window
+   * changes (`addSample` accept, `reset`). The cached window aggregates below
+   * are keyed by this value so they invalidate exactly when the inputs change.
+   */
+  private samplesVersion = 0;
+
+  /**
+   * Lazily-computed cache of the window aggregates (`getOffset`/`getLatency`/
+   * `isStable`). `cacheVersion` records the `samplesVersion` the cache was
+   * computed at; a mismatch means the cache is stale and must be recomputed.
+   * `getStatus` calls all three per accepted pong, so this avoids re-slicing
+   * and re-iterating the recent window three times for an unchanged dataset.
+   * Caching is a pure performance optimization — the returned numbers are
+   * byte-for-byte identical to recomputing on every call.
+   */
+  private cacheVersion = -1;
+  private cachedOffset = 0;
+  private cachedLatency = 0;
+  private cachedIsStable = false;
+
+  /**
    * @param now Clock source returning **epoch milliseconds** (same scale as
    *            `Date.now()`). Required — no implicit `Date.now()`. The drift
    *            math presumes ms; see the class-level "Clock contract" note.
@@ -138,15 +159,43 @@ export class TimeSync {
       this.samples.shift();
     }
 
+    // The sample window changed — bump the version so the cached aggregates
+    // (offset/latency/isStable) recompute lazily on next access.
+    this.samplesVersion++;
+
     this.updateDriftRate();
     return true;
   }
 
   /**
+   * Recompute the window aggregates into the cache if it is stale, then mark it
+   * fresh. Called by `getOffset`/`getLatency`/`isStable` before reading the
+   * cached fields. Idempotent for a given `samplesVersion`.
+   */
+  private ensureWindowCache(): void {
+    if (this.cacheVersion === this.samplesVersion) {
+      return;
+    }
+    this.cachedOffset = this.computeOffset();
+    this.cachedLatency = this.computeLatency();
+    this.cachedIsStable = this.computeIsStable();
+    this.cacheVersion = this.samplesVersion;
+  }
+
+  /**
    * Weighted-mean offset (ms) over the most recent samples. Lower-RTT samples
    * carry more weight. Add this to local time to get server time.
+   *
+   * Memoized: returns the cached value unless the sample window has changed
+   * since it was last computed (see {@link ensureWindowCache}).
    */
   getOffset(): number {
+    this.ensureWindowCache();
+    return this.cachedOffset;
+  }
+
+  /** Pure weighted-mean offset computation over the recent window. */
+  private computeOffset(): number {
     if (this.samples.length === 0) {
       return 0;
     }
@@ -164,8 +213,18 @@ export class TimeSync {
     return Math.trunc(weightedSum / Math.max(1, weightSum));
   }
 
-  /** Estimated one-way latency (ms): mean of rtt/2 over recent samples. */
+  /**
+   * Estimated one-way latency (ms): mean of rtt/2 over recent samples.
+   *
+   * Memoized: returns the cached value unless the sample window has changed.
+   */
   getLatency(): number {
+    this.ensureWindowCache();
+    return this.cachedLatency;
+  }
+
+  /** Pure mean-latency computation over the recent window. */
+  private computeLatency(): number {
     if (this.samples.length === 0) {
       return 0;
     }
@@ -182,8 +241,16 @@ export class TimeSync {
   /**
    * True once at least OFFSET_SAMPLE_COUNT samples exist AND the variance of
    * the recent offsets is below the stability threshold.
+   *
+   * Memoized: returns the cached value unless the sample window has changed.
    */
   isStable(): boolean {
+    this.ensureWindowCache();
+    return this.cachedIsStable;
+  }
+
+  /** Pure stability (offset-variance) computation over the recent window. */
+  private computeIsStable(): boolean {
     if (this.samples.length < OFFSET_SAMPLE_COUNT) {
       return false;
     }
@@ -274,6 +341,9 @@ export class TimeSync {
   reset(): void {
     this.samples = [];
     this.driftRate = 1.0;
+    // The sample window changed (emptied) — bump the version so the cached
+    // aggregates recompute on next access rather than returning stale values.
+    this.samplesVersion++;
   }
 
   /** Snapshot of current sync state (parallels TimeSync::getStatus). */
