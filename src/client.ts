@@ -21,14 +21,18 @@ import { decodeMessage, encodeMessage, type NowFn } from './framing';
 import {
   SYNCPLAY_MESSAGE_TYPES,
   type ErrorPayload,
+  type GroupListResponsePayload,
   type GroupStatePayload,
   type HostElectPayload,
+  type HostTransferPayload,
   type InfoPayload,
   type RawMessage,
   type SyncPlayGroup,
   type SyncPlayMember,
   type SyncPlayMessageType,
   type TimePongPayload,
+  type TimeSyncPayload,
+  type TypingPayload,
 } from './messages';
 import { TimeSync } from './time-sync';
 
@@ -70,6 +74,16 @@ export interface SyncPlayClientOptions {
   onHostChanged?: (newHostId: string | null) => void;
   onError?: (code: string, message: string) => void;
   onInfo?: (message: string) => void;
+  /** A member started or stopped typing (TYPE_CHAT_TYPING / syncplay_typing). */
+  onMemberTyping?: (memberId: string, isTyping: boolean) => void;
+  /** The group host transferred to another member (TYPE_HOST_TRANSFER / syncplay_host_transfer). */
+  onHostTransfer?: (currentHostId: string, newHostId: string) => void;
+  /** Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC / syncplay_playback_sync). */
+  onPlaybackSync?: (memberId: string, position: number, isPlaying: boolean, serverTime: number) => void;
+  /** Server-initiated clock drift correction (TYPE_TIME_SYNC / syncplay_time_sync). */
+  onTimeSync?: (serverTime: number, clientTime: number) => void;
+  /** Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list). */
+  onGroupList?: (groups: Array<{ group_id: string; group_name: string; has_password?: boolean }>) => void;
   /**
    * Invoked by {@link SyncPlayClient.onDisconnect} after the client's transient
    * state has been cleared, so the consumer can update its UI (e.g. show a
@@ -315,9 +329,23 @@ export class SyncPlayClient {
       case SYNCPLAY_MESSAGE_TYPES.ERROR:
         this.handleError(msg);
         break;
+      case SYNCPLAY_MESSAGE_TYPES.TYPING:
+        this.handleTyping(msg);
+        break;
+      case SYNCPLAY_MESSAGE_TYPES.HOST_TRANSFER:
+        this.handleHostTransfer(msg);
+        break;
+      case SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC:
+        this.handlePlaybackSync(msg);
+        break;
+      case SYNCPLAY_MESSAGE_TYPES.TIME_SYNC:
+        this.handleTimeSync(msg);
+        break;
+      case SYNCPLAY_MESSAGE_TYPES.GROUP_LIST:
+        this.handleGroupList(msg);
+        break;
       default:
-        // group_list / chat / typing / playback_queue / host_transfer /
-        // time_sync are not orchestrated here; consumers may inspect via a
+        // playback_queue is not orchestrated here; consumers may inspect via a
         // custom transport hook. Ignored to stay forward-compatible.
         break;
     }
@@ -442,6 +470,61 @@ export class SyncPlayClient {
     const code = payload.error_code ?? payload.code ?? 'UNKNOWN';
     const message = typeof payload.message === 'string' ? payload.message : 'Unknown error';
     this.options.onError?.(code, message);
+  }
+
+  private handleTyping(msg: RawMessage): void {
+    const payload = msg as Partial<TypingPayload>;
+    if (typeof payload.member_id !== 'string') {
+      return;
+    }
+    this.options.onMemberTyping?.(payload.member_id, payload.is_typing ?? false);
+  }
+
+  private handleHostTransfer(msg: RawMessage): void {
+    const payload = msg as Partial<HostTransferPayload>;
+    if (typeof payload.current_host_id !== 'string' || typeof payload.new_host_id !== 'string') {
+      return;
+    }
+    if (this.group !== null) {
+      this.group = { ...this.group, host_id: payload.new_host_id };
+    }
+    this.options.onHostTransfer?.(payload.current_host_id, payload.new_host_id);
+  }
+
+  private handlePlaybackSync(msg: RawMessage): void {
+    const senderId = typeof msg.member_id === 'string' ? msg.member_id : undefined;
+    if (senderId === this.memberId) {
+      return;
+    }
+    const position = typeof msg.position === 'number' ? msg.position : 0;
+    const isPlaying = typeof msg.is_playing === 'boolean' ? msg.is_playing : false;
+    const serverTime =
+      typeof msg.server_time === 'number' ? msg.server_time : this.getSynchronizedTime();
+    this.options.onPlaybackSync?.(senderId ?? '', position, isPlaying, serverTime);
+  }
+
+  private handleTimeSync(msg: RawMessage): void {
+    const payload = msg as Partial<TimeSyncPayload>;
+    const serverTime = typeof payload.server_time === 'number' ? payload.server_time : 0;
+    const clientTime = typeof payload.client_time === 'number' ? payload.client_time : 0;
+    this.options.onTimeSync?.(serverTime, clientTime);
+  }
+
+  private handleGroupList(msg: RawMessage): void {
+    const payload = msg as Partial<GroupListResponsePayload>;
+    // The server returns an object with a 'groups' array
+    const groups = payload.groups;
+    if (!Array.isArray(groups)) {
+      return;
+    }
+    const list: Array<{ group_id: string; group_name: string; has_password?: boolean }> = groups.map(
+      (g) => ({
+        group_id: typeof g.group_id === 'string' ? g.group_id : '',
+        group_name: typeof g.group_name === 'string' ? g.group_name : '',
+        has_password: typeof g.has_password === 'boolean' ? g.has_password : undefined,
+      }),
+    );
+    this.options.onGroupList?.(list);
   }
 
   // --- Internals -----------------------------------------------------------

@@ -208,6 +208,29 @@ export interface TimePongPayload {
     server_time: number;
     protocol_version: number;
 }
+/**
+ * TIME_SYNC as the server emits it for periodic clock drift correction.
+ * The server sends its current time and the client's last known time to
+ * allow the client to calculate and apply drift correction.
+ */
+export interface TimeSyncPayload {
+    /** Server's current time (ms). */
+    server_time: number;
+    /** Client's last known time from a prior request (ms). */
+    client_time: number;
+}
+/**
+ * GROUP_LIST as the server emits it — a list of available groups.
+ * Mirrors the response from `SyncPlayManager::listGroups()`.
+ */
+export interface GroupListResponsePayload {
+    /** Array of group summary objects. */
+    groups: Array<{
+        group_id: string;
+        group_name: string;
+        has_password?: boolean;
+    }>;
+}
 /** ERROR message (Messages::error). */
 export interface ErrorPayload {
     /** Server uses `error_code` in Messages::error; sendError uses `code`. */

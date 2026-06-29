@@ -79,24 +79,35 @@ function o(e) {
 }
 //#endregion
 //#region src/time-sync.ts
-var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
+var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	samples = [];
 	driftRate = 1;
 	now;
+	samplesVersion = 0;
+	cacheVersion = -1;
+	cachedOffset = 0;
+	cachedLatency = 0;
+	cachedIsStable = !1;
 	constructor(e) {
 		this.now = e;
 	}
 	addSample(e, t, n, r) {
 		let i = r - e - (n - t);
-		if (i > 1e3) return !1;
+		if (i < 0 || i > 1e3) return !1;
 		let a = i / 2, o = t - e + Math.trunc(a);
 		return this.samples.push({
 			offset: o,
 			rtt: i,
 			timestamp: this.now() / 1e3
-		}), this.samples.length > 10 && this.samples.shift(), this.updateDriftRate(), !0;
+		}), this.samples.length > 10 && this.samples.shift(), this.samplesVersion++, this.updateDriftRate(), !0;
+	}
+	ensureWindowCache() {
+		this.cacheVersion !== this.samplesVersion && (this.cachedOffset = this.computeOffset(), this.cachedLatency = this.computeLatency(), this.cachedIsStable = this.computeIsStable(), this.cacheVersion = this.samplesVersion);
 	}
 	getOffset() {
+		return this.ensureWindowCache(), this.cachedOffset;
+	}
+	computeOffset() {
 		if (this.samples.length === 0) return 0;
 		let e = this.samples.slice(-5), t = 0, n = 0;
 		for (let r of e) {
@@ -106,12 +117,18 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 		return Math.trunc(t / Math.max(1, n));
 	}
 	getLatency() {
+		return this.ensureWindowCache(), this.cachedLatency;
+	}
+	computeLatency() {
 		if (this.samples.length === 0) return 0;
 		let e = this.samples.slice(-5), t = 0;
 		for (let n of e) t += n.rtt / 2;
 		return Math.trunc(t / Math.max(1, e.length));
 	}
 	isStable() {
+		return this.ensureWindowCache(), this.cachedIsStable;
+	}
+	computeIsStable() {
 		if (this.samples.length < 5) return !1;
 		let e = this.samples.slice(-5).map((e) => e.offset), t = e.reduce((e, t) => e + t, 0) / e.length, n = 0;
 		for (let r of e) {
@@ -127,7 +144,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 		let t = e[0], n = e[e.length - 1], r = n.timestamp - t.timestamp;
 		if (r <= 0) return;
 		let i = (n.offset - t.offset) / r;
-		this.driftRate = 1 + u * i / 1e3;
+		this.driftRate = 1 + u * i / 1e3, this.driftRate = Math.min(f, Math.max(d, this.driftRate));
 	}
 	getDriftRate() {
 		return this.driftRate;
@@ -142,7 +159,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 		return e + (this.getSynchronizedTime(n) - t) * this.driftRate;
 	}
 	reset() {
-		this.samples = [], this.driftRate = 1;
+		this.samples = [], this.driftRate = 1, this.samplesVersion++;
 	}
 	getStatus() {
 		return {
@@ -153,7 +170,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 			sampleCount: this.samples.length
 		};
 	}
-}, p = class {
+}, h = class {
 	send;
 	now;
 	memberId;
@@ -163,7 +180,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 	group = null;
 	lastPingSendTime = null;
 	constructor(e) {
-		this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = e.memberName ?? "User", this.timeSync = new f(e.now);
+		this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = e.memberName ?? "User", this.timeSync = new m(e.now);
 	}
 	getTimeSync() {
 		return this.timeSync;
@@ -240,6 +257,9 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 		let t = this.now();
 		this.lastPingSendTime = t, this.dispatch(e.TIME_PING, { client_time: t });
 	}
+	onDisconnect() {
+		this.timeSync.reset(), this.group = null, this.lastPingSendTime = null, this.options.onDisconnect?.();
+	}
 	handleIncoming(t) {
 		let n = a(t);
 		if (n !== null) switch (n.type) {
@@ -266,6 +286,21 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 				break;
 			case e.ERROR:
 				this.handleError(n);
+				break;
+			case e.TYPING:
+				this.handleTyping(n);
+				break;
+			case e.HOST_TRANSFER:
+				this.handleHostTransfer(n);
+				break;
+			case e.PLAYBACK_SYNC:
+				this.handlePlaybackSync(n);
+				break;
+			case e.TIME_SYNC:
+				this.handleTimeSync(n);
+				break;
+			case e.GROUP_LIST:
+				this.handleGroupList(n);
 				break;
 			default: break;
 		}
@@ -339,11 +374,42 @@ var s = 5, c = 1e3, l = 50, u = .1, d = 1, f = class {
 		let t = e, n = t.error_code ?? t.code ?? "UNKNOWN", r = typeof t.message == "string" ? t.message : "Unknown error";
 		this.options.onError?.(n, r);
 	}
+	handleTyping(e) {
+		let t = e;
+		typeof t.member_id == "string" && this.options.onMemberTyping?.(t.member_id, t.is_typing ?? !1);
+	}
+	handleHostTransfer(e) {
+		let t = e;
+		typeof t.current_host_id != "string" || typeof t.new_host_id != "string" || (this.group !== null && (this.group = {
+			...this.group,
+			host_id: t.new_host_id
+		}), this.options.onHostTransfer?.(t.current_host_id, t.new_host_id));
+	}
+	handlePlaybackSync(e) {
+		let t = typeof e.member_id == "string" ? e.member_id : void 0;
+		if (t === this.memberId) return;
+		let n = typeof e.position == "number" ? e.position : 0, r = typeof e.is_playing == "boolean" ? e.is_playing : !1, i = typeof e.server_time == "number" ? e.server_time : this.getSynchronizedTime();
+		this.options.onPlaybackSync?.(t ?? "", n, r, i);
+	}
+	handleTimeSync(e) {
+		let t = e, n = typeof t.server_time == "number" ? t.server_time : 0, r = typeof t.client_time == "number" ? t.client_time : 0;
+		this.options.onTimeSync?.(n, r);
+	}
+	handleGroupList(e) {
+		let t = e.groups;
+		if (!Array.isArray(t)) return;
+		let n = t.map((e) => ({
+			group_id: typeof e.group_id == "string" ? e.group_id : "",
+			group_name: typeof e.group_name == "string" ? e.group_name : "",
+			has_password: typeof e.has_password == "boolean" ? e.has_password : void 0
+		}));
+		this.options.onGroupList?.(n);
+	}
 	dispatch(e, t) {
 		this.send(i(e, t, this.now));
 	}
 };
 //#endregion
-export { n as ALL_MESSAGE_TYPES, u as DRIFT_CORRECTION_FACTOR, c as MAX_ACCEPTABLE_RTT, s as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, l as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, p as SyncPlayClient, d as TIME_SYNC_PROTOCOL_VERSION, f as TimeSync, a as decodeMessage, i as encodeMessage, r as isValidMessageType, o as serializeMessage };
+export { n as ALL_MESSAGE_TYPES, u as DRIFT_CORRECTION_FACTOR, f as DRIFT_RATE_MAX, d as DRIFT_RATE_MIN, c as MAX_ACCEPTABLE_RTT, s as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, l as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, h as SyncPlayClient, p as TIME_SYNC_PROTOCOL_VERSION, m as TimeSync, a as decodeMessage, i as encodeMessage, r as isValidMessageType, o as serializeMessage };
 
 //# sourceMappingURL=phlix-syncplay.js.map
