@@ -57,6 +57,27 @@ export interface SyncPlayClientOptions {
     onHostChanged?: (newHostId: string | null) => void;
     onError?: (code: string, message: string) => void;
     onInfo?: (message: string) => void;
+    /** A member started or stopped typing (TYPE_CHAT_TYPING / syncplay_typing). */
+    onMemberTyping?: (memberId: string, isTyping: boolean) => void;
+    /** The group host transferred to another member (TYPE_HOST_TRANSFER / syncplay_host_transfer). */
+    onHostTransfer?: (currentHostId: string, newHostId: string) => void;
+    /** Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC / syncplay_playback_sync). */
+    onPlaybackSync?: (memberId: string, position: number, isPlaying: boolean, serverTime: number) => void;
+    /** Server-initiated clock drift correction (TYPE_TIME_SYNC / syncplay_time_sync). */
+    onTimeSync?: (serverTime: number, clientTime: number) => void;
+    /** Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list). */
+    onGroupList?: (groups: Array<{
+        group_id: string;
+        group_name: string;
+        has_password?: boolean;
+    }>) => void;
+    /**
+     * Invoked by {@link SyncPlayClient.onDisconnect} after the client's transient
+     * state has been cleared, so the consumer can update its UI (e.g. show a
+     * "reconnecting…" indicator). This library owns no socket; the consumer calls
+     * {@link SyncPlayClient.onDisconnect} from its transport's close/error path.
+     */
+    onDisconnect?: () => void;
 }
 export declare class SyncPlayClient {
     private readonly send;
@@ -79,9 +100,26 @@ export declare class SyncPlayClient {
     isHost(): boolean;
     /** Server-synchronized current time (ms). */
     getSynchronizedTime(): number;
-    /** Create a group with this member as host. `passwordHash` is SHA-256 hex. */
+    /**
+     * Create a group with this member as host. `passwordHash` is SHA-256 hex.
+     *
+     * SECURITY (see SPEC §8/§9): the `member_id` placed on this frame is
+     * **self-asserted** (from the constructor `memberId`) and MUST NOT be trusted
+     * for authorization. A correct server derives the effective member/host id
+     * from the authenticated connection and ignores the client-supplied value for
+     * access control. `passwordHash` is an unsalted, **replayable** SHA-256 group
+     * gate — not an identity. The server MUST authenticate the connection before
+     * accepting this frame.
+     */
     createGroup(groupName: string, passwordHash?: string): void;
-    /** Join an existing group by id. `passwordHash` is SHA-256 hex. */
+    /**
+     * Join an existing group by id. `passwordHash` is SHA-256 hex.
+     *
+     * SECURITY (see SPEC §8/§9): the `member_id` on this frame is **self-asserted**
+     * and MUST NOT be trusted for authorization — the server derives the effective
+     * id from the authenticated connection. `passwordHash` is an unsalted,
+     * **replayable** SHA-256 group gate, not an identity.
+     */
     joinGroup(groupId: string, passwordHash?: string): void;
     /** Leave the current group (no-op if not in one). */
     leaveGroup(): void;
@@ -92,6 +130,22 @@ export declare class SyncPlayClient {
     reportPosition(position: number, isPlaying: boolean): void;
     /** Send a time_ping. Call periodically (e.g. every 10–30s). */
     pingTime(): void;
+    /**
+     * Reset all transient connection state. The consumer MUST call this when the
+     * underlying WebSocket closes or errors, BEFORE attempting to reconnect.
+     *
+     * It (1) clears the {@link TimeSync} samples + drift (a fresh connection has a
+     * new network path, so stale offsets/drift would corrupt the first post-
+     * reconnect sync), (2) forgets the current group (the server-side membership
+     * is gone once the socket drops), and (3) drops any outstanding ping so a late
+     * pong from the dead connection cannot seed a bogus sample.
+     *
+     * RECOVERY SEQUENCE (see SPEC §10 / README "Reconnect recovery"):
+     *   socket close/error → `onDisconnect()` → reconnect → re-`joinGroup(...)`
+     *   → resume periodic `pingTime()`. Reconnect *backoff* (the retry timer) is a
+     *   transport concern owned by the consumer; this library schedules no timers.
+     */
+    onDisconnect(): void;
     /**
      * Route one inbound frame (string or parsed object). Feeds time-sync on pong,
      * applies group_state, surfaces playback commands, host changes, errors, info.
@@ -105,5 +159,10 @@ export declare class SyncPlayClient {
     private handleHostElect;
     private handleInfo;
     private handleError;
+    private handleTyping;
+    private handleHostTransfer;
+    private handlePlaybackSync;
+    private handleTimeSync;
+    private handleGroupList;
     private dispatch;
 }

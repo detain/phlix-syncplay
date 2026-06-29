@@ -17,15 +17,25 @@
  *   oneWay = rtt / 2
  *   offset = t2 - t1 + oneWay        // add to local time to get server time
  *
- * Samples with `rtt > MAX_ACCEPTABLE_RTT` are rejected. `getOffset()` returns a
+ * Samples with `rtt < 0` (corrupt: negative one-way latency) or
+ * `rtt > MAX_ACCEPTABLE_RTT` are rejected. `getOffset()` returns a
  * weighted mean (weight = 1/rtt, favouring low-RTT samples) over the most
  * recent `OFFSET_SAMPLE_COUNT` samples. Sync is "stable" once at least
  * `OFFSET_SAMPLE_COUNT` samples exist AND the variance of recent offsets is
  * < 50ms. Drift is an EMA: `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`.
  *
  * The clock is INJECTED (`now`) so this class is pure and deterministic — it
- * never calls `Date.now()` itself. `timestamp` units match the server: seconds
- * (PHP `microtime(true)`), which only affects the drift `timeDelta` scaling.
+ * never calls `Date.now()` itself.
+ *
+ * ## Clock contract (units)
+ *
+ * `now()` MUST return **epoch milliseconds** (same scale as `Date.now()`).
+ * Every quad timestamp (`t1`..`t4`) passed to `addSample`, every `position` /
+ * `serverTime` / `now` argument, and the computed `offset`/`latency` are all in
+ * **milliseconds**. The only seconds-scaled value is `OffsetSample.timestamp`,
+ * which is stored as `now() / 1000` purely so the drift `timeDelta` lands on
+ * the server's per-second `microtime(true)` scale — see `addSample`. That
+ * `/ 1000` is correct ONLY because `now()` is ms; do not feed a seconds clock.
  */
 /** Number of recent samples averaged for offset/latency/stability. */
 export declare const OFFSET_SAMPLE_COUNT = 5;
@@ -35,10 +45,25 @@ export declare const MAX_ACCEPTABLE_RTT = 1000;
 export declare const STABILITY_VARIANCE_THRESHOLD = 50;
 /** Drift EMA smoothing factor (lower = smoother, slower to adapt). */
 export declare const DRIFT_CORRECTION_FACTOR = 0.1;
+/**
+ * Lower bound for the drift-rate multiplier. A `driftRate` below this would
+ * mean the playback clock runs *slower* than wall-clock by more than 1%, and
+ * any value `< 1.0` risks `getAdjustedPosition` moving the playhead BACKWARDS
+ * for a forward-elapsed interval. Clamping the EMA into `[MIN, MAX]` is
+ * client-side hardening against noisy/forged offset sequences and does not
+ * change what is sent on the wire.
+ */
+export declare const DRIFT_RATE_MIN = 0.99;
+/** Upper bound for the drift-rate multiplier (≤1% fast). See DRIFT_RATE_MIN. */
+export declare const DRIFT_RATE_MAX = 1.01;
 /** Protocol version for time-sync messages (mirrors TimeSync::PROTOCOL_VERSION). */
 export declare const TIME_SYNC_PROTOCOL_VERSION = 1;
 import type { NowFn } from './framing';
-/** A single offset measurement. `timestamp` is in SECONDS (matches PHP). */
+/**
+ * A single offset measurement. `offset` and `rtt` are in **milliseconds**;
+ * `timestamp` is in **seconds** (`now() / 1000`), matching the server's
+ * `microtime(true)` per-second scale used only for the drift `timeDelta`.
+ */
 export interface OffsetSample {
     offset: number;
     rtt: number;
@@ -49,7 +74,28 @@ export declare class TimeSync {
     private driftRate;
     private readonly now;
     /**
-     * @param now Clock source (epoch ms). Required — no implicit `Date.now()`.
+     * Monotonic "samples version" — incremented every time the sample window
+     * changes (`addSample` accept, `reset`). The cached window aggregates below
+     * are keyed by this value so they invalidate exactly when the inputs change.
+     */
+    private samplesVersion;
+    /**
+     * Lazily-computed cache of the window aggregates (`getOffset`/`getLatency`/
+     * `isStable`). `cacheVersion` records the `samplesVersion` the cache was
+     * computed at; a mismatch means the cache is stale and must be recomputed.
+     * `getStatus` calls all three per accepted pong, so this avoids re-slicing
+     * and re-iterating the recent window three times for an unchanged dataset.
+     * Caching is a pure performance optimization — the returned numbers are
+     * byte-for-byte identical to recomputing on every call.
+     */
+    private cacheVersion;
+    private cachedOffset;
+    private cachedLatency;
+    private cachedIsStable;
+    /**
+     * @param now Clock source returning **epoch milliseconds** (same scale as
+     *            `Date.now()`). Required — no implicit `Date.now()`. The drift
+     *            math presumes ms; see the class-level "Clock contract" note.
      */
     constructor(now: NowFn);
     /**
@@ -60,21 +106,43 @@ export declare class TimeSync {
      * @param serverResp    t3 — server response time (ms); pass t2 when the
      *                      server pong carries no separate response timestamp.
      * @param clientReceive t4 — client receive time (ms)
-     * @returns true if the sample was accepted, false if rejected (rtt too high).
+     * @returns true if the sample was accepted, false if rejected (rtt < 0 or
+     *          rtt > MAX_ACCEPTABLE_RTT).
      */
     addSample(clientSend: number, serverRecv: number, serverResp: number, clientReceive: number): boolean;
     /**
+     * Recompute the window aggregates into the cache if it is stale, then mark it
+     * fresh. Called by `getOffset`/`getLatency`/`isStable` before reading the
+     * cached fields. Idempotent for a given `samplesVersion`.
+     */
+    private ensureWindowCache;
+    /**
      * Weighted-mean offset (ms) over the most recent samples. Lower-RTT samples
      * carry more weight. Add this to local time to get server time.
+     *
+     * Memoized: returns the cached value unless the sample window has changed
+     * since it was last computed (see {@link ensureWindowCache}).
      */
     getOffset(): number;
-    /** Estimated one-way latency (ms): mean of rtt/2 over recent samples. */
+    /** Pure weighted-mean offset computation over the recent window. */
+    private computeOffset;
+    /**
+     * Estimated one-way latency (ms): mean of rtt/2 over recent samples.
+     *
+     * Memoized: returns the cached value unless the sample window has changed.
+     */
     getLatency(): number;
+    /** Pure mean-latency computation over the recent window. */
+    private computeLatency;
     /**
      * True once at least OFFSET_SAMPLE_COUNT samples exist AND the variance of
      * the recent offsets is below the stability threshold.
+     *
+     * Memoized: returns the cached value unless the sample window has changed.
      */
     isStable(): boolean;
+    /** Pure stability (offset-variance) computation over the recent window. */
+    private computeIsStable;
     /**
      * Recompute the local clock drift rate as an EMA of recent offset change per
      * second. 1.0 = no drift; >1 = local clock gaining, <1 = losing.
