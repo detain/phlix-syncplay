@@ -1,4 +1,9 @@
 /**
+ * client.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ */
+/**
  * SyncPlayClient — framework-agnostic orchestrator for the SyncPlay protocol.
  *
  * It owns:
