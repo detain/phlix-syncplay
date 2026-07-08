@@ -1,4 +1,10 @@
 /**
+ * time sync.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ */
+
+/**
  * TimeSync — NTP-style network time synchronization.
  *
  * This is a faithful TypeScript port of the server's

@@ -1,3 +1,9 @@
+/**
+ * client.test.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ */
+
 import { describe, it, expect, vi } from 'vitest';
 import { SyncPlayClient, type PlaybackCommand } from '../src/client';
 import { SYNCPLAY_MESSAGE_TYPES, type RawMessage, type SyncPlayGroup } from '../src/messages';

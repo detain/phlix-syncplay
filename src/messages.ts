@@ -1,4 +1,10 @@
 /**
+ * messages.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ */
+
+/**
  * SyncPlay message types and per-message payload interfaces.
  *
  * This is the SHARED, CANONICAL mirror of the PHP server's

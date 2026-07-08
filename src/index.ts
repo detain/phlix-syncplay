@@ -1,4 +1,10 @@
 /**
+ * messages.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ */
+
+/**
  * @phlix/syncplay — the single shared, canonical implementation of the Phlix
  * SyncPlay wire protocol + NTP time-sync for JS clients (mobile, windows,
  * tizen). Framework-agnostic; transport and clock are injected.
