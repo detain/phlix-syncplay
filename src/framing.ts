@@ -1,4 +1,10 @@
 /**
+ * framing.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ */
+
+/**
  * Message framing — the CANONICAL on-the-wire envelope.
  *
  * A framed SyncPlay message is a flat JSON object:

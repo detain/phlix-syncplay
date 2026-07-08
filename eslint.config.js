@@ -1,3 +1,9 @@
+/**
+ * eslint.config.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ */
+
 // Minimal flat ESLint config for the TypeScript sources.
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';

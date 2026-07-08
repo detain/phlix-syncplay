@@ -1,3 +1,9 @@
+/**
+ * vite.config.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ */
+
 import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
 
