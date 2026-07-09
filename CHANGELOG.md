@@ -3,7 +3,7 @@
 All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.2] - 2026-07-09
 
 ### Added
 
@@ -102,6 +102,8 @@ adheres to [Semantic Versioning](https://semver.org/).
   `onDisconnect` callback. The reconnect *backoff timer* is explicitly a
   consumer/transport concern (this library schedules no timers) — flagged as
   documentation-only for P2 in this repo.
+
+## [Unreleased]
 
 ## [0.1.1] - 2026-06-26
 
