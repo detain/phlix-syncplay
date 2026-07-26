@@ -1,16 +1,17 @@
 # @phlix/syncplay — CI
 #
 # Deterministic gate: lint, typecheck, build (ES+CJS + d.ts), and run the full
-# vitest suite with coverage. Manual dispatch by default (no runner wired to
-# this repo yet); uncomment the triggers to make it a required PR check.
+# vitest suite with coverage. Runs on every push to master and on pull requests,
+# plus manual dispatch. Verified green by a manual dispatch on 2026-07-26 before
+# the push/pull_request triggers were enabled.
 name: syncplay-ci
 
 on:
   workflow_dispatch:
-  # pull_request:
-  #   branches: [master]
-  # push:
-  #   branches: [master]
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
 
 jobs:
   test:
