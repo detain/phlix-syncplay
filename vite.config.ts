@@ -31,7 +31,11 @@ export default defineConfig({
     environment: 'node',
     coverage: {
       provider: 'v8',
-      reporter: ['text-summary', 'text', 'html'],
+      // 'lcov' is REQUIRED: it is the only reporter here that writes
+      // ./coverage/lcov.info, which CI uploads to Codacy. Without it the
+      // upload step runs, finds no file, and reports success having sent
+      // nothing.
+      reporter: ['text-summary', 'text', 'html', 'lcov'],
       include: ['src/**/*.ts'],
       exclude: ['**/*.test.ts', 'src/index.ts'],
     },
