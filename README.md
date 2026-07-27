@@ -70,6 +70,11 @@ const client = new SyncPlayClient({
   onMemberJoined: ({ id, name }) => {},
   onHostChanged: (hostId) => {},
   onError: (code, message) => {},
+  onMemberTyping: (memberId, isTyping) => {},
+  onHostTransfer: (currentHostId, newHostId) => {},
+  onPlaybackSync: (memberId, position, isPlaying, serverTime) => {},
+  onTimeSync: (serverTime, clientTime) => {},
+  onGroupList: (groups) => { /* [{ group_id, group_name, has_password }] */ },
   onDisconnect: () => { /* UI hook, e.g. show a "reconnecting…" banner */ },
 });
 
