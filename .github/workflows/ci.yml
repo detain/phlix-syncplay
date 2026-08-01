@@ -29,7 +29,7 @@ jobs:
       - run: npm run test:run -- --coverage
 
       - name: Upload coverage to Codacy
-        uses: codacy/codacy-coverage-reporter-action@v1
+        uses: codacy/codacy-coverage-reporter-action@v1.0.0
         # Never allowed to fail the build: a missing/expired token or a Codacy
         # outage must not turn CI red.
         # NOTE: continue-on-error makes a FAILED step report "success" — to check

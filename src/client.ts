@@ -65,7 +65,7 @@ export interface TimeSyncStatus {
  */
 export interface SyncPlayClientOptions {
   /** Transport sink. Receives a framed RAW message object. */
-  send: (message: RawMessage) => void;
+  send: (_message: RawMessage) => void;
   /** Clock source (epoch ms). */
   now: NowFn;
   /** This client's stable member id. */
@@ -73,23 +73,23 @@ export interface SyncPlayClientOptions {
   /** This client's display name (sent on create/join). */
   memberName?: string;
 
-  onState?: (group: SyncPlayGroup, yourId: string | undefined) => void;
-  onSync?: (status: TimeSyncStatus) => void;
-  onPlaybackCommand?: (command: PlaybackCommand) => void;
-  onMemberJoined?: (member: { id: string; name: string }) => void;
-  onHostChanged?: (newHostId: string | null) => void;
-  onError?: (code: string, message: string) => void;
-  onInfo?: (message: string) => void;
+  onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
+  onSync?: (_status: TimeSyncStatus) => void;
+  onPlaybackCommand?: (_command: PlaybackCommand) => void;
+  onMemberJoined?: (_member: { id: string; name: string }) => void;
+  onHostChanged?: (_newHostId: string | null) => void;
+  onError?: (_code: string, _message: string) => void;
+  onInfo?: (_message: string) => void;
   /** A member started or stopped typing (TYPE_CHAT_TYPING / syncplay_typing). */
-  onMemberTyping?: (memberId: string, isTyping: boolean) => void;
+  onMemberTyping?: (_memberId: string, isTyping: boolean) => void;
   /** The group host transferred to another member (TYPE_HOST_TRANSFER / syncplay_host_transfer). */
-  onHostTransfer?: (currentHostId: string, newHostId: string) => void;
+  onHostTransfer?: (_currentHostId: string, _newHostId: string) => void;
   /** Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC / syncplay_playback_sync). */
-  onPlaybackSync?: (memberId: string, position: number, isPlaying: boolean, serverTime: number) => void;
+  onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number) => void;
   /** Server-initiated clock drift correction (TYPE_TIME_SYNC / syncplay_time_sync). */
-  onTimeSync?: (serverTime: number, clientTime: number) => void;
+  onTimeSync?: (_serverTime: number, _clientTime: number) => void;
   /** Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list). */
-  onGroupList?: (groups: Array<{ group_id: string; group_name: string; has_password?: boolean }>) => void;
+  onGroupList?: (_groups: { group_id: string; group_name: string; has_password?: boolean }[]) => void;
   /**
    * Invoked by {@link SyncPlayClient.onDisconnect} after the client's transient
    * state has been cleared, so the consumer can update its UI (e.g. show a
@@ -100,7 +100,7 @@ export interface SyncPlayClientOptions {
 }
 
 export class SyncPlayClient {
-  private readonly send: (message: RawMessage) => void;
+  private readonly send: (_message: RawMessage) => void;
   private readonly now: NowFn;
   private readonly memberId: string;
   private readonly memberName: string;
@@ -409,8 +409,8 @@ export class SyncPlayClient {
       host_id: group.host_id ?? null,
       current_media_id: group.current_media_id ?? null,
       current_media_duration: group.current_media_duration ?? null,
-      playback_position: group.playback_position ?? 0,
-      playback_state: group.playback_state ?? 'stopped',
+      playback_position: group.playback_position,
+      playback_state: group.playback_state,
       created_at: group.created_at,
       last_activity_at: group.last_activity_at,
     };
@@ -523,7 +523,7 @@ export class SyncPlayClient {
     if (!Array.isArray(groups)) {
       return;
     }
-    const list: Array<{ group_id: string; group_name: string; has_password?: boolean }> = groups.map(
+    const list: { group_id: string; group_name: string; has_password?: boolean }[] = groups.map(
       (g) => ({
         group_id: typeof g.group_id === 'string' ? g.group_id : '',
         group_name: typeof g.group_name === 'string' ? g.group_name : '',
