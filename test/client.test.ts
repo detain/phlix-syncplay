@@ -955,3 +955,364 @@ describe('SyncPlayClient — leaveGroup early return when not in a group', () =>
     expect(h.sent).toHaveLength(0);
   });
 });
+
+describe('SyncPlayClient — joinGroup with password hash', () => {
+  it('joinGroup includes password_hash when provided (line 190)', () => {
+    const h = makeHarness();
+    h.client.joinGroup('sp_abc', 'deadbeef');
+    expect(h.sent[0]).toMatchObject({
+      type: 'syncplay_group_join',
+      protocol_version: 1,
+      timestamp: 1000,
+      group_id: 'sp_abc',
+      member_id: 'me',
+      member_name: 'Tester',
+      password_hash: 'deadbeef',
+    });
+  });
+});
+
+describe('SyncPlayClient — sendPause when in a group', () => {
+  it('sendPause dispatches PLAYBACK_PAUSE when in a group (line 232)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.clock.set(2000);
+    h.client.sendPause(5000);
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]).toMatchObject({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PAUSE,
+      group_id: 'sp_abc',
+      member_id: 'me',
+      position: 5000,
+      server_time: 2000, // synchronized time (no offset set)
+    });
+  });
+});
+
+describe('SyncPlayClient — sendSeek when in a group', () => {
+  it('sendSeek dispatches PLAYBACK_SEEK when in a group (line 244)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.clock.set(3000);
+    h.client.sendSeek(1000, 5000);
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]).toMatchObject({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+      group_id: 'sp_abc',
+      member_id: 'me',
+      from_position: 1000,
+      to_position: 5000,
+      server_time: 3000, // synchronized time (no offset set)
+    });
+  });
+});
+
+describe('SyncPlayClient — handleSeek self-echo suppression', () => {
+  it('ignores seek echoed back from ourselves (line 445)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('me', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+      protocol_version: 1,
+      member_id: 'me',
+      from_position: 1000,
+      to_position: 5000,
+      server_time: 123,
+    });
+    // Self-echo should be suppressed - no command should be emitted
+    expect(h.commands).toHaveLength(0);
+  });
+});
+
+describe('SyncPlayClient — handlePlaybackSync type coercion defaults', () => {
+  it('uses default position when not a number (line 505)', () => {
+    const syncs: Array<{ memberId: string; position: number; isPlaying: boolean; serverTime: number }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onPlaybackSync: (memberId, position, isPlaying, serverTime) =>
+        syncs.push({ memberId, position, isPlaying, serverTime }),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 'not-a-number', // wrong type
+      is_playing: true,
+      server_time: 12345,
+    });
+
+    expect(syncs[0].position).toBe(0); // default
+  });
+
+  it('uses default is_playing when not a boolean (line 506)', () => {
+    const syncs: Array<{ memberId: string; position: number; isPlaying: boolean; serverTime: number }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onPlaybackSync: (memberId, position, isPlaying, serverTime) =>
+        syncs.push({ memberId, position, isPlaying, serverTime }),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 5000,
+      is_playing: 'yes', // wrong type
+      server_time: 12345,
+    });
+
+    expect(syncs[0].isPlaying).toBe(false); // default
+  });
+
+  it('uses default server_time when not a number (line 507-508)', () => {
+    const syncs: Array<{ memberId: string; position: number; isPlaying: boolean; serverTime: number }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 5000, // now returns 5000, synchronized time = 5000 + offset
+      memberId: 'me',
+      onPlaybackSync: (memberId, position, isPlaying, serverTime) =>
+        syncs.push({ memberId, position, isPlaying, serverTime }),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 5000,
+      is_playing: true,
+      server_time: 'not-a-number', // wrong type
+    });
+
+    // Should use getSynchronizedTime() as default
+    expect(typeof syncs[0].serverTime).toBe('number');
+    expect(syncs[0].serverTime).toBe(5000); // synchronized time with no offset
+  });
+});
+
+describe('SyncPlayClient — handleTimeSync type coercion defaults', () => {
+  it('uses default server_time when not a number (line 514)', () => {
+    const timeSyncs: Array<{ serverTime: number; clientTime: number }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onTimeSync: (serverTime, clientTime) => timeSyncs.push({ serverTime, clientTime }),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_SYNC,
+      protocol_version: 1,
+      server_time: 'fifty-thousand', // wrong type
+      client_time: 40000,
+    });
+
+    expect(timeSyncs[0].serverTime).toBe(0); // default
+  });
+
+  it('uses default client_time when not a number (line 515)', () => {
+    const timeSyncs: Array<{ serverTime: number; clientTime: number }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onTimeSync: (serverTime, clientTime) => timeSyncs.push({ serverTime, clientTime }),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_SYNC,
+      protocol_version: 1,
+      server_time: 50000,
+      client_time: [40000], // wrong type (array)
+    });
+
+    expect(timeSyncs[0].clientTime).toBe(0); // default
+  });
+});
+
+describe('SyncPlayClient — handleGroupList type coercion defaults', () => {
+  it('uses empty string for non-string group_id (line 528)', () => {
+    const lists: Array<Array<{ group_id: string; group_name: string; has_password?: boolean }>> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onGroupList: (groups) => lists.push(groups),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_LIST,
+      protocol_version: 1,
+      groups: [
+        { group_id: 123, group_name: 'Group One', has_password: true }, // group_id is number
+      ],
+    });
+
+    expect(lists[0][0].group_id).toBe('');
+  });
+
+  it('uses empty string for non-string group_name (line 529)', () => {
+    const lists: Array<Array<{ group_id: string; group_name: string; has_password?: boolean }>> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onGroupList: (groups) => lists.push(groups),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_LIST,
+      protocol_version: 1,
+      groups: [
+        { group_id: 'g1', group_name: { text: 'Group One' }, has_password: true }, // group_name is object
+      ],
+    });
+
+    expect(lists[0][0].group_name).toBe('');
+  });
+});
+
+describe('SyncPlayClient — handleHostElect when group is null', () => {
+  it('handleHostElect updates host even when not in a group (line 456)', () => {
+    const hostChanges: Array<string | null> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onHostChanged: (h) => hostChanges.push(h),
+    });
+
+    // Not in a group - group is null
+    expect(client.getGroup()).toBeNull();
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'host2',
+      elected_by: 'host1',
+    });
+
+    // Should still fire onHostChanged even without a group
+    expect(hostChanges).toEqual(['host2']);
+    expect(client.getGroup()).toBeNull(); // group remains null
+  });
+
+  it('handleHostElect uses null when elected_id is missing (line 455)', () => {
+    const hostChanges: Array<string | null> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onHostChanged: (h) => hostChanges.push(h),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_by: 'host1',
+      // elected_id is missing - triggers ?? null
+    });
+
+    expect(hostChanges).toEqual([null]);
+  });
+});
+
+describe('SyncPlayClient — handleTyping missing is_typing', () => {
+  it('defaults is_typing to false when not provided (line 486)', () => {
+    const typing: Array<{ memberId: string; isTyping: boolean }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onMemberTyping: (memberId, isTyping) => typing.push({ memberId, isTyping }),
+    });
+
+    // is_typing is not provided at all
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TYPING,
+      protocol_version: 1,
+      member_id: 'host1',
+    });
+
+    expect(typing).toEqual([{ memberId: 'host1', isTyping: false }]);
+  });
+});
+
+describe('SyncPlayClient — handleHostTransfer branches', () => {
+  it('ignores when current_host_id is not a string', () => {
+    const transfers: Array<{ from: string; to: string }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onHostTransfer: (from, to) => transfers.push({ from, to }),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_TRANSFER,
+      protocol_version: 1,
+      current_host_id: 123, // wrong type
+      new_host_id: 'host2',
+    });
+
+    expect(transfers).toHaveLength(0);
+  });
+
+  it('ignores when new_host_id is not a string', () => {
+    const transfers: Array<{ from: string; to: string }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onHostTransfer: (from, to) => transfers.push({ from, to }),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_TRANSFER,
+      protocol_version: 1,
+      current_host_id: 'host1',
+      new_host_id: { id: 'host2' }, // wrong type
+    });
+
+    expect(transfers).toHaveLength(0);
+  });
+
+  it('handleHostTransfer updates group and fires callback when in group', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_TRANSFER,
+      protocol_version: 1,
+      current_host_id: 'host1',
+      new_host_id: 'host2',
+    });
+
+    expect(h.client.getGroup()?.host_id).toBe('host2');
+  });
+});
+
+describe('SyncPlayClient — handleSeek type coercion defaults', () => {
+  it('uses default position and server_time when types are wrong (lines 447-449)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+      protocol_version: 1,
+      member_id: 'host1', // different member - not suppressed
+      from_position: 1000,
+      to_position: 'not-a-number', // wrong type
+      server_time: { value: 123 }, // wrong type
+    });
+
+    expect(h.commands).toHaveLength(1);
+    expect(h.commands[0].type).toBe('seek');
+    expect(h.commands[0].position).toBe(0); // default
+    expect(typeof h.commands[0].serverTime).toBe('number'); // synchronized time default
+  });
+});

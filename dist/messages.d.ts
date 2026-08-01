@@ -126,9 +126,7 @@ export interface GroupLeavePayload {
     group_id: string;
     member_id: string;
 }
-export interface GroupListPayload {
-    [key: string]: never;
-}
+export type GroupListPayload = Record<string, never>;
 export interface PlaybackPlayPayload {
     group_id: string;
     member_id: string;
@@ -230,11 +228,11 @@ export interface TimeSyncPayload {
  */
 export interface GroupListResponsePayload {
     /** Array of group summary objects. */
-    groups: Array<{
+    groups: {
         group_id: string;
         group_name: string;
         has_password?: boolean;
-    }>;
+    }[];
 }
 /** ERROR message (Messages::error). */
 export interface ErrorPayload {

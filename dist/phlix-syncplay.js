@@ -332,8 +332,8 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			host_id: n.host_id ?? null,
 			current_media_id: n.current_media_id ?? null,
 			current_media_duration: n.current_media_duration ?? null,
-			playback_position: n.playback_position ?? 0,
-			playback_state: n.playback_state ?? "stopped",
+			playback_position: n.playback_position,
+			playback_state: n.playback_state,
 			created_at: n.created_at,
 			last_activity_at: n.last_activity_at
 		}, this.options.onState?.(this.group, t.your_id);
