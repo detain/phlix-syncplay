@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SyncPlayClient, type PlaybackCommand } from '../src/client';
 import { encodeMessage, serializeMessage } from '../src/framing';
-import { SYNCPLAY_MESSAGE_TYPES, type RawMessage, type SyncPlayGroup } from '../src/messages';
+import { SYNCPLAY_MESSAGE_TYPES, type RawMessage, type SyncPlayGroup, type UnknownFrame } from '../src/messages';
 
 /** A fake transport + clock harness. */
 function makeHarness(memberId = 'me') {
@@ -26,7 +26,7 @@ function makeHarness(memberId = 'me') {
   const joined: Array<{ id: string; name: string }> = [];
   const hostChanges: Array<string | null> = [];
   const disconnects: number[] = [];
-  const unknown: RawMessage[] = [];
+  const unknown: UnknownFrame[] = [];
 
   const client = new SyncPlayClient({
     send: (m) => sent.push(m),
@@ -984,7 +984,7 @@ describe('SyncPlayClient — handleSeek inbound from another member', () => {
 });
 
 describe('SyncPlayClient — switch default case (unknown message type)', () => {
-  it('ignores unknown message types without error', () => {
+  it('unknown message types are ignored when no onUnknownFrame hook is registered (no crash, no state change)', () => {
     const states: Array<{ group: SyncPlayGroup; yourId: string | undefined }> = [];
     const client = new SyncPlayClient({
       send: () => {},
@@ -993,7 +993,8 @@ describe('SyncPlayClient — switch default case (unknown message type)', () => 
       onState: (group, yourId) => states.push({ group, yourId }),
     });
 
-    // An unknown type should be silently ignored (no crash, no state change)
+    // Without an onUnknownFrame hook, an unknown type is dropped (no crash, no
+    // state change); with a hook registered, the same frame would be surfaced.
     client.handleIncoming({
       type: 'syncplay_unknown_type',
       protocol_version: 1,
@@ -1395,11 +1396,14 @@ describe('SyncPlayClient — onUnknownFrame (S298 phantom-hook decision)', () =>
     // The S345 guard: if a future refactor silently drops unknown frames again,
     // this test fails — the hub relay's pending_command push must reach consumers.
     expect(h.unknown).toHaveLength(1);
-    expect(h.unknown[0].type).toBe('pending_command');
-    expect(h.unknown[0].command).toBe('play_media');
-    expect(h.unknown[0].server_id).toBe('srv-A');
-    expect(h.unknown[0].media_id).toBe('m-9');
-    expect(h.unknown[0].title).toBe('Inception');
+    // The frame arrives UNTOUCHED — same shape as sent, no fields added or removed.
+    expect(h.unknown[0]).toEqual({
+      type: 'pending_command',
+      command: 'play_media',
+      server_id: 'srv-A',
+      media_id: 'm-9',
+      title: 'Inception',
+    });
   });
 
   it('surfaces an unknown frame arriving as a JSON string', () => {
@@ -1419,6 +1423,21 @@ describe('SyncPlayClient — onUnknownFrame (S298 phantom-hook decision)', () =>
       message: 'Guest joined the group',
       member_id: 'guest1',
       member_name: 'Guest',
+    });
+    // Canonical types the library does not orchestrate (SPEC §4 wire shapes)
+    // are dropped BEFORE the default arm — they must not reach the hook either.
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.CHAT,
+      protocol_version: 1,
+      group_id: 'g1',
+      member_id: 'm1',
+      message: 'hi',
+    });
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_QUEUE,
+      protocol_version: 1,
+      group_id: 'g1',
+      queue: [{ media_id: 'm-1' }],
     });
 
     // Canonical types go through their own handlers only — no double-routing.

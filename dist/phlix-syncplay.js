@@ -302,7 +302,11 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			case e.GROUP_LIST:
 				this.handleGroupList(n);
 				break;
-			default: break;
+			case e.CHAT:
+			case e.PLAYBACK_QUEUE: break;
+			default:
+				this.options.onUnknownFrame?.(n);
+				break;
 		}
 	}
 	handleTimePong(e) {

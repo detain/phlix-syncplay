@@ -39,6 +39,7 @@ import {
   type TimePongPayload,
   type TimeSyncPayload,
   type TypingPayload,
+  type UnknownFrame,
 } from './messages';
 import { TimeSync } from './time-sync';
 
@@ -97,13 +98,15 @@ export interface SyncPlayClientOptions {
   onGroupList?: (_groups: { group_id: string; group_name: string; has_password?: boolean }[]) => void;
   /**
    * Extension point for non-SyncPlay vocabulary. This library owns ONLY the 19
-   * canonical `syncplay_*` types; any frame whose `type` is not one of them
-   * (e.g. the hub relay's `pending_command`) is surfaced here untouched — no
-   * validation, no mutation. This is the extension point the old default-arm
-   * comment promised; consumers route non-SyncPlay vocabulary through it and
-   * the library stays protocol-pure.
+   * canonical `syncplay_*` types; ONLY frames whose type is NOT one of them
+   * (e.g. the hub relay's `pending_command`) reach this hook — untouched, no
+   * validation, no mutation. The two canonical types the library does not
+   * orchestrate — syncplay_chat, syncplay_playback_queue — stay ignored, as
+   * before. This is the extension point the old default-arm comment promised;
+   * consumers route non-SyncPlay vocabulary through it and the library stays
+   * protocol-pure.
    */
-  onUnknownFrame?: (_frame: RawMessage) => void;
+  onUnknownFrame?: (_frame: UnknownFrame) => void;
   /**
    * Invoked by {@link SyncPlayClient.onDisconnect} after the client's transient
    * state has been cleared, so the consumer can update its UI (e.g. show a
@@ -317,8 +320,10 @@ export class SyncPlayClient {
    * Route one inbound frame (string or parsed object). Feeds time-sync on pong,
    * applies group_state, surfaces playback commands, host changes, errors, info.
    * Frames whose type is outside the 19 canonical `syncplay_*` types are
-   * surfaced via {@link SyncPlayClientOptions.onUnknownFrame}; invalid/
-   * undecodable frames (decodeMessage returns null) are still ignored.
+   * surfaced via {@link SyncPlayClientOptions.onUnknownFrame}; the two canonical
+   * types the library does not orchestrate (syncplay_chat,
+   * syncplay_playback_queue) stay silently ignored; invalid/undecodable frames
+   * (decodeMessage returns null) are still ignored.
    */
   handleIncoming(raw: unknown): void {
     const msg = decodeMessage(raw);
@@ -365,6 +370,12 @@ export class SyncPlayClient {
         break;
       case SYNCPLAY_MESSAGE_TYPES.GROUP_LIST:
         this.handleGroupList(msg);
+        break;
+      case SYNCPLAY_MESSAGE_TYPES.CHAT:
+      case SYNCPLAY_MESSAGE_TYPES.PLAYBACK_QUEUE:
+        // Canonical types the library does not orchestrate stay silently ignored
+        // (forward-compatible); only vocabulary OUTSIDE the 19 canonical types
+        // reaches onUnknownFrame.
         break;
       default:
         // S298: the "custom transport hook" the old comment promised is now real —
