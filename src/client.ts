@@ -499,9 +499,14 @@ export class SyncPlayClient {
 
   private handlePlaybackSync(msg: RawMessage): void {
     const senderId = typeof msg.member_id === 'string' ? msg.member_id : undefined;
-    if (senderId === this.memberId) {
-      return;
-    }
+    // Frame-type decision (S294): playback_sync is a server-echoed STATE
+    // REPORT, not a command. The server broadcasts it to EVERY group member —
+    // stamped with the HOST id (SyncPlayManager::handlePlaybackSync excludes
+    // nobody, unlike play/pause/seek which exclude the sender) — so the host's
+    // own authoritative frame comes back to it, and in a one-member room that
+    // frame is the ONLY re-anchor source. Consuming our own playback_sync is
+    // therefore required. COMMAND frames keep the self-echo drop (see
+    // handlePlayback/handleSeek — acting on our own commands would loop).
     const position = typeof msg.position === 'number' ? msg.position : 0;
     const isPlaying = typeof msg.is_playing === 'boolean' ? msg.is_playing : false;
     const serverTime =
