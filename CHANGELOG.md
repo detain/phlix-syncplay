@@ -5,6 +5,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **The phantom "custom transport hook" is now real: `onUnknownFrame` (S298).**
+  `SyncPlayClient` previously dropped every frame whose `type` was outside the
+  19 canonical `syncplay_*` types in the `default:` arm, while a comment promised
+  an extension point that did not exist. Frames from non-SyncPlay vocabulary —
+  e.g. the hub relay's `pending_command` push — now reach the consumer via
+  `SyncPlayClientOptions.onUnknownFrame` untouched and unvalidated (new exported
+  `UnknownFrame` type; `type` is a plain string so consumers compare it against
+  their own vocabulary without a cast). The two canonical types the library does
+  not orchestrate (`syncplay_chat`, `syncplay_playback_queue`) stay silently
+  ignored, and undecodable input is still ignored — the library remains
+  protocol-pure; consumers route the hub vocabulary themselves.
+
 ### Fixed
 
 - **The host now consumes its own echoed `playback_sync`, so a one-member room

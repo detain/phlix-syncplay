@@ -22,7 +22,7 @@
  * historical divergences).
  */
 import { type NowFn } from './framing';
-import { type RawMessage, type SyncPlayGroup } from './messages';
+import { type RawMessage, type SyncPlayGroup, type UnknownFrame } from './messages';
 import { TimeSync } from './time-sync';
 /** A play/pause/seek command surfaced to the consumer for local application. */
 export interface PlaybackCommand {
@@ -66,7 +66,12 @@ export interface SyncPlayClientOptions {
     onMemberTyping?: (_memberId: string, isTyping: boolean) => void;
     /** The group host transferred to another member (TYPE_HOST_TRANSFER / syncplay_host_transfer). */
     onHostTransfer?: (_currentHostId: string, _newHostId: string) => void;
-    /** Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC / syncplay_playback_sync). */
+    /**
+     * Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC /
+     * syncplay_playback_sync). Includes this client's own echo when it is the host
+     * (the server re-broadcasts the host's frame to every member — the host
+     * re-anchor source, see handlePlaybackSync).
+     */
     onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number) => void;
     /** Server-initiated clock drift correction (TYPE_TIME_SYNC / syncplay_time_sync). */
     onTimeSync?: (_serverTime: number, _clientTime: number) => void;
@@ -76,6 +81,17 @@ export interface SyncPlayClientOptions {
         group_name: string;
         has_password?: boolean;
     }[]) => void;
+    /**
+     * Extension point for non-SyncPlay vocabulary. This library owns ONLY the 19
+     * canonical `syncplay_*` types; ONLY frames whose type is NOT one of them
+     * (e.g. the hub relay's `pending_command`) reach this hook — untouched, no
+     * validation, no mutation. The two canonical types the library does not
+     * orchestrate — syncplay_chat, syncplay_playback_queue — stay ignored, as
+     * before. This is the extension point the old default-arm comment promised;
+     * consumers route non-SyncPlay vocabulary through it and the library stays
+     * protocol-pure.
+     */
+    onUnknownFrame?: (_frame: UnknownFrame) => void;
     /**
      * Invoked by {@link SyncPlayClient.onDisconnect} after the client's transient
      * state has been cleared, so the consumer can update its UI (e.g. show a
@@ -154,7 +170,11 @@ export declare class SyncPlayClient {
     /**
      * Route one inbound frame (string or parsed object). Feeds time-sync on pong,
      * applies group_state, surfaces playback commands, host changes, errors, info.
-     * Unknown/invalid frames are ignored.
+     * Frames whose type is outside the 19 canonical `syncplay_*` types are
+     * surfaced via {@link SyncPlayClientOptions.onUnknownFrame}; the two canonical
+     * types the library does not orchestrate (syncplay_chat,
+     * syncplay_playback_queue) stay silently ignored; invalid/undecodable frames
+     * (decodeMessage returns null) are still ignored.
      */
     handleIncoming(raw: unknown): void;
     private handleTimePong;

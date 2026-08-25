@@ -337,3 +337,18 @@ export interface InfoPayload {
 
 /** A decoded raw message: the envelope plus arbitrary payload fields. */
 export type RawMessage = BaseMessage & Record<string, unknown>;
+
+/**
+ * A decoded frame whose `type` is NOT one of the 19 canonical SyncPlay types.
+ *
+ * Surfaced via {@link SyncPlayClientOptions.onUnknownFrame} (S298): consumers
+ * routing non-SyncPlay vocabulary (e.g. the hub relay's `pending_command`
+ * frames) receive them here, untouched and unvalidated. The `type` is a plain
+ * string precisely so a consumer can compare it against its own vocabulary
+ * without a cast.
+ */
+export type UnknownFrame = {
+  type: string;
+  protocol_version?: number;
+  timestamp?: number;
+} & Record<string, unknown>;
