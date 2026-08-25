@@ -174,6 +174,9 @@ position: number
 is_playing: boolean
 server_time: number
 ```
+> Broadcast to every group member including the originator — the server does not
+> exclude the sender for this type (unlike play/pause/seek) and stamps the frame
+> with the HOST id; see §9.1.
 
 ### Chat
 
@@ -430,6 +433,13 @@ comparing the inbound frame's `member_id` against this client's `memberId` (see
 the echo-suppression checks in `handlePlayback` and `handleSeek` in
 `src/client.ts`). This is **safe only because the server is expected to set the
 true sender id on rebroadcast (§9 item 3)**.
+
+**Per-frame-type exception (S294):** `syncplay_playback_sync` is a STATE REPORT,
+not a command — the server broadcasts it to EVERY member including the sender,
+stamped with the HOST id (it excludes nobody for this type, unlike play/pause/
+seek). The host MUST therefore consume its own echoed `playback_sync`: in a
+one-member room that frame is the only re-anchor source. Self-echo suppression
+applies to COMMAND frames only (`syncplay_playback_play` / `_pause` / `_seek`).
 
 If the server failed to overwrite the sender id, a malicious peer could spoof
 *your* `member_id` on a legitimate command and cause your client to silently

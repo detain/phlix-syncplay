@@ -84,7 +84,12 @@ export interface SyncPlayClientOptions {
   onMemberTyping?: (_memberId: string, isTyping: boolean) => void;
   /** The group host transferred to another member (TYPE_HOST_TRANSFER / syncplay_host_transfer). */
   onHostTransfer?: (_currentHostId: string, _newHostId: string) => void;
-  /** Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC / syncplay_playback_sync). */
+  /**
+   * Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC /
+   * syncplay_playback_sync). Includes this client's own echo when it is the host
+   * (the server re-broadcasts the host's frame to every member — the host
+   * re-anchor source, see handlePlaybackSync).
+   */
   onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number) => void;
   /** Server-initiated clock drift correction (TYPE_TIME_SYNC / syncplay_time_sync). */
   onTimeSync?: (_serverTime: number, _clientTime: number) => void;
