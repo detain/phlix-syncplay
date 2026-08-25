@@ -510,11 +510,13 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
         syncs.push({ memberId, position, isPlaying, serverTime }),
     });
 
-    // REAL wire path: the exact flat frame the PHP server broadcasts in a
-    // one-member room (SyncPlayManager::handlePlaybackSync stamps member_id
-    // with the HOST id and excludes nobody from the broadcast). It is encoded
-    // + serialized through the library's own framing — the same functions the
-    // transport layer uses — then decoded back through handleIncoming.
+    // REAL wire path: the field set the PHP server broadcasts in a one-member
+    // room (SyncPlayManager::handlePlaybackSync stamps member_id with the HOST
+    // id and excludes nobody from the broadcast; encodeMessage adds the
+    // protocol_version/timestamp envelope, which decodeMessage tolerates). It
+    // is encoded + serialized through the library's own framing — the same
+    // functions the transport layer uses — then decoded back through
+    // handleIncoming.
     client.handleIncoming(
       serializeMessage(
         encodeMessage(
