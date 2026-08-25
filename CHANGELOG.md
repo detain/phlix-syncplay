@@ -3,6 +3,21 @@
 All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **The host now consumes its own echoed `playback_sync`, so a one-member room
+  re-anchors (S294).** `handlePlaybackSync()` previously dropped every frame whose
+  `member_id` was its own id — but the server broadcasts `playback_sync` to ALL
+  members stamped with the HOST id (it excludes nobody, unlike play/pause/seek),
+  so the host's own authoritative frame came back and was discarded and nobody
+  re-anchored. Frame-type decision: a self `playback_sync` is a server-echoed
+  STATE REPORT, now CONSUMED (the host re-anchor source); COMMAND frames from
+  self are STILL dropped (guard remains in `handlePlayback`/`handleSeek`). Proven
+  over the real wire path (encodeMessage + serializeMessage + handleIncoming)
+  plus the server E2E suite; positions stay ms (SPEC §4), receive path untouched.
+
 ## [0.1.3] - 2026-08-07
 
 ### ⚠ Read first — the `v0.1.2` tag sits on a **disjoint** history

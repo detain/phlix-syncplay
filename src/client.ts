@@ -84,7 +84,12 @@ export interface SyncPlayClientOptions {
   onMemberTyping?: (_memberId: string, isTyping: boolean) => void;
   /** The group host transferred to another member (TYPE_HOST_TRANSFER / syncplay_host_transfer). */
   onHostTransfer?: (_currentHostId: string, _newHostId: string) => void;
-  /** Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC / syncplay_playback_sync). */
+  /**
+   * Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC /
+   * syncplay_playback_sync). Includes this client's own echo when it is the host
+   * (the server re-broadcasts the host's frame to every member — the host
+   * re-anchor source, see handlePlaybackSync).
+   */
   onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number) => void;
   /** Server-initiated clock drift correction (TYPE_TIME_SYNC / syncplay_time_sync). */
   onTimeSync?: (_serverTime: number, _clientTime: number) => void;
@@ -499,9 +504,14 @@ export class SyncPlayClient {
 
   private handlePlaybackSync(msg: RawMessage): void {
     const senderId = typeof msg.member_id === 'string' ? msg.member_id : undefined;
-    if (senderId === this.memberId) {
-      return;
-    }
+    // Frame-type decision (S294): playback_sync is a server-echoed STATE
+    // REPORT, not a command. The server broadcasts it to EVERY group member —
+    // stamped with the HOST id (SyncPlayManager::handlePlaybackSync excludes
+    // nobody, unlike play/pause/seek which exclude the sender) — so the host's
+    // own authoritative frame comes back to it, and in a one-member room that
+    // frame is the ONLY re-anchor source. Consuming our own playback_sync is
+    // therefore required. COMMAND frames keep the self-echo drop (see
+    // handlePlayback/handleSeek — acting on our own commands would loop).
     const position = typeof msg.position === 'number' ? msg.position : 0;
     const isPlaying = typeof msg.is_playing === 'boolean' ? msg.is_playing : false;
     const serverTime =

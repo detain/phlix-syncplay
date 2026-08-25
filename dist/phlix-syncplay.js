@@ -386,9 +386,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		}), this.options.onHostTransfer?.(t.current_host_id, t.new_host_id));
 	}
 	handlePlaybackSync(e) {
-		let t = typeof e.member_id == "string" ? e.member_id : void 0;
-		if (t === this.memberId) return;
-		let n = typeof e.position == "number" ? e.position : 0, r = typeof e.is_playing == "boolean" ? e.is_playing : !1, i = typeof e.server_time == "number" ? e.server_time : this.getSynchronizedTime();
+		let t = typeof e.member_id == "string" ? e.member_id : void 0, n = typeof e.position == "number" ? e.position : 0, r = typeof e.is_playing == "boolean" ? e.is_playing : !1, i = typeof e.server_time == "number" ? e.server_time : this.getSynchronizedTime();
 		this.options.onPlaybackSync?.(t ?? "", n, r, i);
 	}
 	handleTimeSync(e) {

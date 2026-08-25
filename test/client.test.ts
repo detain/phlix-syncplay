@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { SyncPlayClient, type PlaybackCommand } from '../src/client';
+import { encodeMessage, serializeMessage } from '../src/framing';
 import { SYNCPLAY_MESSAGE_TYPES, type RawMessage, type SyncPlayGroup } from '../src/messages';
 
 /** A fake transport + clock harness. */
@@ -499,7 +500,7 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
     expect(syncs).toEqual([{ memberId: 'host1', position: 5000, isPlaying: true, serverTime: 12345 }]);
   });
 
-  it('handlePlaybackSync ignores sync from ourselves', () => {
+  it('handlePlaybackSync consumes a playback_sync echoed back to ourselves (host re-anchor)', () => {
     const syncs: Array<{ memberId: string; position: number; isPlaying: boolean; serverTime: number }> = [];
     const client = new SyncPlayClient({
       send: () => {},
@@ -509,16 +510,77 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
         syncs.push({ memberId, position, isPlaying, serverTime }),
     });
 
-    client.handleIncoming({
-      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
-      protocol_version: 1,
-      member_id: 'me',
-      position: 5000,
-      is_playing: true,
-      server_time: 12345,
-    });
+    // REAL wire path: the field set the PHP server broadcasts in a one-member
+    // room (SyncPlayManager::handlePlaybackSync stamps member_id with the HOST
+    // id and excludes nobody from the broadcast; encodeMessage adds the
+    // protocol_version/timestamp envelope, which decodeMessage tolerates). It
+    // is encoded + serialized through the library's own framing — the same
+    // functions the transport layer uses — then decoded back through
+    // handleIncoming.
+    client.handleIncoming(
+      serializeMessage(
+        encodeMessage(
+          SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+          {
+            member_id: 'me',
+            group_id: 'sp_abc',
+            current_media_id: 'media_1',
+            position: 5000,
+            is_playing: true,
+            server_time: 12345,
+          },
+          () => 1000,
+        ),
+      ),
+    );
 
-    expect(syncs).toHaveLength(0);
+    expect(syncs).toEqual([{ memberId: 'me', position: 5000, isPlaying: true, serverTime: 12345 }]);
+  });
+
+  // S294 control — the pair that distinguishes a fix from deleting the guard
+  // wholesale: playback_sync from self is CONSUMED (above) but command frames
+  // from self are STILL DROPPED (below). If any of these ever fires, the
+  // self-echo guard was deleted for the wrong frame types and the AC is unmet.
+  it('still drops a play command echoed back from ourselves (real wire frame)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(
+      serializeMessage(
+        encodeMessage(
+          SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY,
+          { member_id: 'me', position: 5000, server_time: 12345 },
+          () => 1000,
+        ),
+      ),
+    );
+    expect(h.commands).toHaveLength(0);
+  });
+
+  it('still drops a pause command echoed back from ourselves (real wire frame)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(
+      serializeMessage(
+        encodeMessage(
+          SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PAUSE,
+          { member_id: 'me', position: 5000, server_time: 12345 },
+          () => 1000,
+        ),
+      ),
+    );
+    expect(h.commands).toHaveLength(0);
+  });
+
+  it('still drops a seek command echoed back from ourselves (real wire frame)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(
+      serializeMessage(
+        encodeMessage(
+          SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+          { member_id: 'me', from_position: 1000, to_position: 9000, server_time: 12345 },
+          () => 1000,
+        ),
+      ),
+    );
+    expect(h.commands).toHaveLength(0);
   });
 
   it('handleTimeSync fires onTimeSync callback', () => {
