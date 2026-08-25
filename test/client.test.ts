@@ -26,6 +26,7 @@ function makeHarness(memberId = 'me') {
   const joined: Array<{ id: string; name: string }> = [];
   const hostChanges: Array<string | null> = [];
   const disconnects: number[] = [];
+  const unknown: RawMessage[] = [];
 
   const client = new SyncPlayClient({
     send: (m) => sent.push(m),
@@ -39,9 +40,10 @@ function makeHarness(memberId = 'me') {
     onMemberJoined: (m) => joined.push(m),
     onHostChanged: (h) => hostChanges.push(h),
     onDisconnect: () => disconnects.push(1),
+    onUnknownFrame: (frame) => unknown.push(frame),
   });
 
-  return { client, sent, clock, states, syncs, commands, errors, joined, hostChanges, disconnects };
+  return { client, sent, clock, states, syncs, commands, errors, joined, hostChanges, disconnects, unknown };
 }
 
 function groupStateMessage(hostId: string, yourId: string): RawMessage {
@@ -1376,5 +1378,72 @@ describe('SyncPlayClient — handleSeek type coercion defaults', () => {
     expect(h.commands[0].type).toBe('seek');
     expect(h.commands[0].position).toBe(0); // default
     expect(typeof h.commands[0].serverTime).toBe('number'); // synchronized time default
+  });
+});
+
+describe('SyncPlayClient — onUnknownFrame (S298 phantom-hook decision)', () => {
+  it('surfaces a frame with a type outside the 19 canonical types instead of silently dropping it', () => {
+    const h = makeHarness();
+    h.client.handleIncoming({
+      type: 'pending_command',
+      command: 'play_media',
+      server_id: 'srv-A',
+      media_id: 'm-9',
+      title: 'Inception',
+    });
+
+    // The S345 guard: if a future refactor silently drops unknown frames again,
+    // this test fails — the hub relay's pending_command push must reach consumers.
+    expect(h.unknown).toHaveLength(1);
+    expect(h.unknown[0].type).toBe('pending_command');
+    expect(h.unknown[0].command).toBe('play_media');
+    expect(h.unknown[0].server_id).toBe('srv-A');
+    expect(h.unknown[0].media_id).toBe('m-9');
+    expect(h.unknown[0].title).toBe('Inception');
+  });
+
+  it('surfaces an unknown frame arriving as a JSON string', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(JSON.stringify({ type: 'hub_room_state', room: 'r1' }));
+
+    expect(h.unknown).toHaveLength(1);
+    expect(h.unknown[0]).toEqual({ type: 'hub_room_state', room: 'r1' });
+  });
+
+  it('does NOT route any of the 19 canonical types to the hook', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.INFO,
+      protocol_version: 1,
+      message: 'Guest joined the group',
+      member_id: 'guest1',
+      member_name: 'Guest',
+    });
+
+    // Canonical types go through their own handlers only — no double-routing.
+    expect(h.unknown).toHaveLength(0);
+    expect(h.states).toHaveLength(1);
+    expect(h.joined).toEqual([{ id: 'guest1', name: 'Guest' }]);
+  });
+
+  it('unknown frames are still ignored (not thrown) when no hook is provided', () => {
+    const sent: RawMessage[] = [];
+    const client = new SyncPlayClient({
+      send: (m) => sent.push(m),
+      now: () => 1000,
+      memberId: 'me',
+    });
+
+    expect(() => client.handleIncoming({ type: 'pending_command', media_id: 'm-1' })).not.toThrow();
+    expect(sent).toHaveLength(0);
+  });
+
+  it('malformed input still yields nothing', () => {
+    const h = makeHarness();
+    expect(() => h.client.handleIncoming('{garbage')).not.toThrow();
+    expect(() => h.client.handleIncoming(null)).not.toThrow();
+
+    expect(h.unknown).toHaveLength(0);
   });
 });

@@ -96,6 +96,15 @@ export interface SyncPlayClientOptions {
   /** Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list). */
   onGroupList?: (_groups: { group_id: string; group_name: string; has_password?: boolean }[]) => void;
   /**
+   * Extension point for non-SyncPlay vocabulary. This library owns ONLY the 19
+   * canonical `syncplay_*` types; any frame whose `type` is not one of them
+   * (e.g. the hub relay's `pending_command`) is surfaced here untouched — no
+   * validation, no mutation. This is the extension point the old default-arm
+   * comment promised; consumers route non-SyncPlay vocabulary through it and
+   * the library stays protocol-pure.
+   */
+  onUnknownFrame?: (_frame: RawMessage) => void;
+  /**
    * Invoked by {@link SyncPlayClient.onDisconnect} after the client's transient
    * state has been cleared, so the consumer can update its UI (e.g. show a
    * "reconnecting…" indicator). This library owns no socket; the consumer calls
@@ -307,7 +316,9 @@ export class SyncPlayClient {
   /**
    * Route one inbound frame (string or parsed object). Feeds time-sync on pong,
    * applies group_state, surfaces playback commands, host changes, errors, info.
-   * Unknown/invalid frames are ignored.
+   * Frames whose type is outside the 19 canonical `syncplay_*` types are
+   * surfaced via {@link SyncPlayClientOptions.onUnknownFrame}; invalid/
+   * undecodable frames (decodeMessage returns null) are still ignored.
    */
   handleIncoming(raw: unknown): void {
     const msg = decodeMessage(raw);
@@ -356,8 +367,12 @@ export class SyncPlayClient {
         this.handleGroupList(msg);
         break;
       default:
-        // playback_queue is not orchestrated here; consumers may inspect via a
-        // custom transport hook. Ignored to stay forward-compatible.
+        // S298: the "custom transport hook" the old comment promised is now real —
+        // frames whose type is outside the 19 canonical syncplay_* types (e.g. the
+        // hub relay's `pending_command`) are surfaced via onUnknownFrame instead of
+        // being silently dropped. The library validates nothing about them; it stays
+        // protocol-pure.
+        this.options.onUnknownFrame?.(msg);
         break;
     }
   }
