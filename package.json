@@ -1,6 +1,6 @@
 {
   "name": "@phlix/syncplay",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Framework-agnostic SyncPlay wire protocol + NTP time-sync for Phlix JS clients (mobile, windows, tizen). The single shared, canonical implementation of the SyncPlay protocol — the server is the source of truth. No framework deps; WebSocket and clock are injected.",
   "type": "module",
   "main": "./dist/phlix-syncplay.umd.cjs",

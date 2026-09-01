@@ -178,6 +178,17 @@ export declare class SyncPlayClient {
      */
     handleIncoming(raw: unknown): void;
     private handleTimePong;
+    /**
+     * Fold the wire's `members` into the library's array model.
+     *
+     * The LIVE server spelling is a DICT keyed by member id
+     * (`GroupState::getState()` builds `$membersDict[$id]`; V1, unchanged since
+     * the initial SyncPlay commit — see S416). The array spelling is also
+     * accepted because it is this library's own output model, which re-fed
+     * frames and hand-built payloads carry. Any other value (string, number,
+     * null) is treated as empty, exactly as before.
+     */
+    private static normalizeMembers;
     private handleGroupState;
     private handlePlayback;
     private handleSeek;

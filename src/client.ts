@@ -35,6 +35,7 @@ import {
   type RawMessage,
   type SyncPlayGroup,
   type SyncPlayMember,
+  type SyncPlayMembersWire,
   type SyncPlayMessageType,
   type TimePongPayload,
   type TimeSyncPayload,
@@ -414,6 +415,35 @@ export class SyncPlayClient {
     }
   }
 
+  /**
+   * Fold the wire's `members` into the library's array model.
+   *
+   * The LIVE server spelling is a DICT keyed by member id
+   * (`GroupState::getState()` builds `$membersDict[$id]`; V1, unchanged since
+   * the initial SyncPlay commit — see S416). The array spelling is also
+   * accepted because it is this library's own output model, which re-fed
+   * frames and hand-built payloads carry. Any other value (string, number,
+   * null) is treated as empty, exactly as before.
+   */
+  private static normalizeMembers(members: SyncPlayMembersWire | undefined, hostId: string | null): SyncPlayMember[] {
+    let list: Array<Partial<SyncPlayMember> & { id?: string }>;
+    if (Array.isArray(members)) {
+      list = members;
+    } else if (members && typeof members === 'object') {
+      // Dict keyed by member id → array; the entry KEY is authoritative for id.
+      list = Object.entries(members).map(([id, value]) => ({ ...value, id }));
+    } else {
+      list = [];
+    }
+    return list.map((m) => ({
+      id: typeof m.id === 'string' ? m.id : '',
+      name: typeof m.name === 'string' ? m.name : '',
+      // is_host is derived from host_id (server also sets is_host, but host_id is authoritative).
+      is_host: m.id === hostId,
+      joined_at: typeof m.joined_at === 'number' ? m.joined_at : 0,
+    }));
+  }
+
   private handleGroupState(msg: RawMessage): void {
     const payload = msg as Partial<GroupStatePayload>;
     const group = payload.group;
@@ -421,27 +451,21 @@ export class SyncPlayClient {
       return;
     }
 
-    // Normalize members and derive is_host from host_id (server includes
-    // is_host on members, but host_id is authoritative).
-    const members: SyncPlayMember[] = Array.isArray(group.members)
-      ? group.members.map((m) => ({
-          id: m.id,
-          name: m.name,
-          is_host: m.id === group.host_id,
-          joined_at: typeof m.joined_at === 'number' ? m.joined_at : 0,
-        }))
-      : [];
+    // Normalize members (dict on the live wire; array tolerated — S416) and
+    // derive is_host from host_id (server includes is_host on members, but
+    // host_id is authoritative).
+    const members = SyncPlayClient.normalizeMembers(group.members, group.host_id ?? null);
 
     this.group = {
-      group_id: group.group_id,
-      group_name: group.group_name,
+      group_id: group.group_id ?? '',
+      group_name: group.group_name ?? '',
       members,
       member_count: group.member_count,
       host_id: group.host_id ?? null,
       current_media_id: group.current_media_id ?? null,
       current_media_duration: group.current_media_duration ?? null,
-      playback_position: group.playback_position,
-      playback_state: group.playback_state,
+      playback_position: group.playback_position ?? 0,
+      playback_state: group.playback_state ?? 'stopped',
       created_at: group.created_at,
       last_activity_at: group.last_activity_at,
     };

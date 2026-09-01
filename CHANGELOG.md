@@ -5,6 +5,48 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-01
+
+The wire-truth release (lane s279b, S416). Ships the previously-unreleased
+S294 + S298 work together with the members-dict normalization fix below.
+**Consumers currently pin v0.1.2 and are NOT bumped by this tag** — the
+re-pin is deliberately its own wave (S418) because the v0.1.2→v0.1.4 delta
+carries behavior, not just types.
+
+### Fixed
+
+- **`handleGroupState` no longer drops the server's members DICT to `[]`
+  (S416).** The live wire carries `group.members` as a DICTIONARY keyed by
+  member id — the shape `GroupState::getState()` has emitted since the
+  initial SyncPlay commit (V1; measured, not assumed) — but the decoder's
+  only branch read `Array.isArray(group.members) ? … : []`, so EVERY
+  consumer going through the library silently saw ZERO members on every
+  `syncplay_group_state` frame. `SyncPlayClient` now folds the dict
+  (`Object.entries`, the entry KEY authoritative for `id`) into the library's
+  array model behind decode; the array spelling stays accepted (it is the
+  library's own output shape — re-fed frames keep working); genuinely
+  non-collection values still fall back to `[]`. New test file
+  `test/s416DictMembers.test.ts` pins both spellings — the dict vector is the
+  REAL captured envelope (provenance: server `01340633`, dumped by
+  phlix-contracts' `scripts/dump-server-syncplay-vectors.php`) and was
+  mutation-verified RED against the pre-fix client before shipping GREEN.
+  New exported wire type + input-side payload type (`GroupStatePayload.group`
+  now types the frame AS RECEIVED; the normalized members-array output model
+  is unchanged, so no consumer code moves on re-pin beyond the fix itself).
+  SPEC §4's self-inconsistent example (claimed "verbatim getState()" while
+  showing an array) is corrected to the dict — the "identity is `group_id`,
+  NOT `id`" point it was made to illustrate stays.
+- **The host now consumes its own echoed `playback_sync`, so a one-member room
+  re-anchors (S294).** `handlePlaybackSync()` previously dropped every frame whose
+  `member_id` was its own id — but the server broadcasts `playback_sync` to ALL
+  members stamped with the HOST id (it excludes nobody, unlike play/pause/seek),
+  so the host's own authoritative frame came back and was discarded and nobody
+  re-anchored. Frame-type decision: a self `playback_sync` is a server-echoed
+  STATE REPORT, now CONSUMED (the host re-anchor source); COMMAND frames from
+  self are STILL dropped (guard remains in `handlePlayback`/`handleSeek`). Proven
+  over the real wire path (encodeMessage + serializeMessage + handleIncoming)
+  plus the server E2E suite; positions stay ms (SPEC §4), receive path untouched.
+
 ### Added
 
 - **The phantom "custom transport hook" is now real: `onUnknownFrame` (S298).**
@@ -18,19 +60,6 @@ adheres to [Semantic Versioning](https://semver.org/).
   not orchestrate (`syncplay_chat`, `syncplay_playback_queue`) stay silently
   ignored, and undecodable input is still ignored — the library remains
   protocol-pure; consumers route the hub vocabulary themselves.
-
-### Fixed
-
-- **The host now consumes its own echoed `playback_sync`, so a one-member room
-  re-anchors (S294).** `handlePlaybackSync()` previously dropped every frame whose
-  `member_id` was its own id — but the server broadcasts `playback_sync` to ALL
-  members stamped with the HOST id (it excludes nobody, unlike play/pause/seek),
-  so the host's own authoritative frame came back and was discarded and nobody
-  re-anchored. Frame-type decision: a self `playback_sync` is a server-echoed
-  STATE REPORT, now CONSUMED (the host re-anchor source); COMMAND frames from
-  self are STILL dropped (guard remains in `handlePlayback`/`handleSeek`). Proven
-  over the real wire path (encodeMessage + serializeMessage + handleIncoming)
-  plus the server E2E suite; positions stay ms (SPEC §4), receive path untouched.
 
 ## [0.1.3] - 2026-08-07
 

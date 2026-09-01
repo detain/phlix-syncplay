@@ -63,7 +63,7 @@ export declare function isValidMessageType(type: string): type is SyncPlayMessag
  */
 export type PlaybackState = 'playing' | 'paused' | 'buffering' | 'stopped';
 /**
- * A SyncPlay group member, as carried in `group.members[]` on the wire.
+ * A SyncPlay group member, as carried on the wire inside `group.members`.
  * Field names are snake_case to match the server (`getState()` member shape).
  */
 export interface SyncPlayMember {
@@ -73,18 +73,35 @@ export interface SyncPlayMember {
     joined_at: number;
 }
 /**
- * The SyncPlay group model, as carried under the `group` key of a
- * GROUP_STATE message (the server emits `GroupState::getState()` here).
+ * The `members` field AS THE WIRE CARRIES IT inside a `group_state` payload.
  *
- * Field names mirror `GroupState::getState()` EXACTLY: the group identity uses
- * `group_id` / `group_name` (NOT `id` / `name` — those belong to the members).
- * getState() always emits: group_id, group_name, member_count, members[],
- * host_id, current_media_id, current_media_duration, playback_position,
- * playback_state, queue, created_at, last_activity_at.
+ * The LIVE spelling (and the only spelling phlix-server has EVER emitted —
+ * `GroupState::getState()` builds `$membersDict[$memberId]` since the initial
+ * SyncPlay commit) is a DICTIONARY keyed by member id. The array spelling is
+ * accepted too: it is this library's own normalized model shape ({@link
+ * SyncPlayGroup.members}), which hand-built frames (tests, consumers
+ * re-feeding a stored group) may carry.
+ */
+export type SyncPlayMembersWire = SyncPlayMember[] | Record<string, Partial<SyncPlayMember> & {
+    id?: string;
+}>;
+/**
+ * The SyncPlay group MODEL the library exposes to consumers (via `onState` /
+ * `getGroup`). Field names mirror `GroupState::getState()` EXACTLY: the group
+ * identity uses `group_id` / `group_name` (NOT `id` / `name` — those spellings
+ * belong to the members and to the `listGroups()` rows). getState() always
+ * emits: group_id, group_name, member_count, members, host_id,
+ * current_media_id, current_media_duration, playback_position, playback_state,
+ * queue, created_at, last_activity_at.
+ *
+ * S416: on the WIRE, `members` arrives as a DICTIONARY keyed by member id
+ * ({@link SyncPlayGroupWire}); this model is the library's NORMALIZED view —
+ * `handleGroupState` folds the dict (or a tolerated array) into this array.
  */
 export interface SyncPlayGroup {
     group_id: string;
     group_name: string;
+    /** NORMALIZED member list (the wire dict folded to an array, S416). */
     members: SyncPlayMember[];
     member_count?: number;
     host_id: string | null;
@@ -187,8 +204,22 @@ export interface TimePingPayload {
  * own member id is in `your_id`. NOTE: the server does NOT flatten group fields
  * onto the envelope — Windows' flat reader is a divergence.
  */
+/**
+ * The `group` value AS THE SERVER PUTS IT under a `group_state` frame — the
+ * same fields as {@link SyncPlayGroup} but with `members` in the WIRE spelling
+ * ({@link SyncPlayMembersWire}: a dict keyed by member id live; array also
+ * tolerated). {@link SyncPlayClient.handleGroupState} normalizes this to the
+ * array-model {@link SyncPlayGroup}.
+ *
+ * Every field is optional because the decoder must not assume a partial frame
+ * is a full group (it guards + fills defaults); the server's complete emission
+ * is documented in SPEC.md §4.
+ */
+export interface SyncPlayGroupWire extends Partial<Omit<SyncPlayGroup, 'members'>> {
+    members?: SyncPlayMembersWire;
+}
 export interface GroupStatePayload {
-    group: SyncPlayGroup;
+    group: SyncPlayGroupWire;
     your_id?: string;
 }
 /**
