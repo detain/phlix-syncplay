@@ -120,7 +120,12 @@ group: {                            (verbatim GroupState::getState())
   group_id: string                  (NOT `id` — that's a members-only field)
   group_name: string                (NOT `name`)
   member_count: number
-  members: [ { id, name, is_host, joined_at }, ... ]
+  members: {                        (a DICT keyed by member id — NOT an array;
+    <member_id>: {                    the entry key equals the value's `id`)
+      id: string, name: string,
+      is_host: boolean, joined_at: number (unix seconds)
+    }, ...
+  }
   host_id: string | null
   current_media_id: string | null
   current_media_duration: number    (ms; useful for clamping positions)
@@ -134,7 +139,13 @@ your_id?: string           (the recipient's own member id)
 ```
 > The server emits the full group under `group` and the recipient id under
 > `your_id`. It does NOT flatten group fields onto the envelope. The group
-> identity uses `group_id` / `group_name`; only the **members** use `id` / `name`.
+> identity uses `group_id` / `group_name`; only the **members** use `id` / `name`
+> — and members ride as a **dictionary keyed by member id** (the shape
+> `GroupState::getState()` has emitted since the first SyncPlay commit). The
+> library's `handleGroupState` normalizes that dict into its array model
+> (`SyncPlayGroup.members: SyncPlayMember[]`), tolerating the array spelling
+> for re-fed frames (S416). An array-only reader silently saw ZERO members on
+> every live frame — the exact bug class this note exists to kill.
 > `has_password` is NOT emitted here — it appears only in the `listGroups()`
 > summary, never on a `group_state` message.
 

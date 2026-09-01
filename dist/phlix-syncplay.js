@@ -170,7 +170,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			sampleCount: this.samples.length
 		};
 	}
-}, h = class {
+}, h = class t {
 	send;
 	now;
 	memberId;
@@ -319,28 +319,35 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			isStable: this.timeSync.isStable()
 		});
 	}
-	handleGroupState(e) {
-		let t = e, n = t.group;
-		if (typeof n != "object" || !n) return;
-		let r = Array.isArray(n.members) ? n.members.map((e) => ({
-			id: e.id,
-			name: e.name,
-			is_host: e.id === n.host_id,
+	static normalizeMembers(e, t) {
+		let n;
+		return n = Array.isArray(e) ? e : e && typeof e == "object" ? Object.entries(e).map(([e, t]) => ({
+			...t,
+			id: e
+		})) : [], n.map((e) => ({
+			id: typeof e.id == "string" ? e.id : "",
+			name: typeof e.name == "string" ? e.name : "",
+			is_host: e.id === t,
 			joined_at: typeof e.joined_at == "number" ? e.joined_at : 0
-		})) : [];
+		}));
+	}
+	handleGroupState(e) {
+		let n = e, r = n.group;
+		if (typeof r != "object" || !r) return;
+		let i = t.normalizeMembers(r.members, r.host_id ?? null);
 		this.group = {
-			group_id: n.group_id,
-			group_name: n.group_name,
-			members: r,
-			member_count: n.member_count,
-			host_id: n.host_id ?? null,
-			current_media_id: n.current_media_id ?? null,
-			current_media_duration: n.current_media_duration ?? null,
-			playback_position: n.playback_position,
-			playback_state: n.playback_state,
-			created_at: n.created_at,
-			last_activity_at: n.last_activity_at
-		}, this.options.onState?.(this.group, t.your_id);
+			group_id: r.group_id ?? "",
+			group_name: r.group_name ?? "",
+			members: i,
+			member_count: r.member_count,
+			host_id: r.host_id ?? null,
+			current_media_id: r.current_media_id ?? null,
+			current_media_duration: r.current_media_duration ?? null,
+			playback_position: r.playback_position ?? 0,
+			playback_state: r.playback_state ?? "stopped",
+			created_at: r.created_at,
+			last_activity_at: r.last_activity_at
+		}, this.options.onState?.(this.group, n.your_id);
 	}
 	handlePlayback(e, t) {
 		if ((typeof t.member_id == "string" ? t.member_id : void 0) === this.memberId) return;
