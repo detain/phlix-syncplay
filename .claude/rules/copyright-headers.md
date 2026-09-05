@@ -18,7 +18,8 @@ opens with a JSDoc header, above any other comment or code:
 
 - The first line is the file basename as lowercase words without the `.ts`
   extension (`src/time-sync.ts` → `time sync.`, `test/client.test.ts` →
-  `client.test.`).
+  `client.test.`). A camelCase basename splits into words too
+  (`test/s416DictMembers.test.ts` → `s416 dict members test.`).
 - This header is separate from — and sits above — the module-level JSDoc block
   that documents the file.
 - Files in `dist/` also carry the header, but `dist/` is build output: run

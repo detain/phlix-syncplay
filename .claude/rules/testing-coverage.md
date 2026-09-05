@@ -14,6 +14,9 @@ Tests live in `test/*.test.ts` and run under Vitest (`globals: true`,
   injected.
 - One `describe()` per behaviour area (e.g. `SyncPlayClient — time sync`),
   named after the method or handler under test.
+- A regression pinned to a captured server envelope gets its own ticket-named
+  file (e.g. `test/s416DictMembers.test.ts`), with the vector's provenance in
+  the file header and the fixture verified RED against the pre-fix code.
 - Coverage is `provider: 'v8'`, `include: ['src/**/*.ts']`, excluding
   `**/*.test.ts` and `src/index.ts`.
 - The `lcov` reporter is REQUIRED — it is the only one that writes

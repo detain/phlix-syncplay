@@ -64,7 +64,7 @@ const client = new SyncPlayClient({
   now: () => Date.now(),
   memberId: 'member_123',
   memberName: 'Alice',
-  onState: (group, yourId) => { /* render group; you are yourId */ },
+  onState: (group, yourId) => { /* render group (`group.members` normalized to an array); you are yourId */ },
   onSync: ({ offset, latency, isStable }) => { /* time-sync status */ },
   onPlaybackCommand: ({ type, position, serverTime }) => { /* apply locally */ },
   onMemberJoined: ({ id, name }) => {},
@@ -75,6 +75,7 @@ const client = new SyncPlayClient({
   onPlaybackSync: (memberId, position, isPlaying, serverTime) => {},
   onTimeSync: (serverTime, clientTime) => {},
   onGroupList: (groups) => { /* [{ group_id, group_name, has_password }] */ },
+  onUnknownFrame: (frame) => { /* non-SyncPlay types only, e.g. the hub relay's `pending_command` */ },
   onDisconnect: () => { /* UI hook, e.g. show a "reconnecting…" banner */ },
 });
 
@@ -150,6 +151,10 @@ import {
   TimeSync,               // NTP offset/latency/stability/drift
 } from '@phlix/syncplay';
 ```
+
+Types for the two `group_state` shapes are exported too: `SyncPlayGroupWire` /
+`SyncPlayMembersWire` (the frame as received — `members` is a dict keyed by
+member id) and `SyncPlayGroup` (the normalized model with `members: SyncPlayMember[]`).
 
 ## Time sync
 

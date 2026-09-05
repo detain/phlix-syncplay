@@ -23,4 +23,12 @@ Adding one type means touching all of these in the same change:
 
 Never invent a type the server does not send — client-side inventions
 (`member_joined`, a `syncplay.` dot prefix) are the drift this package exists
-to remove.
+to remove. Frames whose `type` is outside the 19 are NOT given a handler —
+they reach the consumer through `SyncPlayClientOptions.onUnknownFrame`
+(`UnknownFrame`), untouched.
+
+Wire shape vs. model shape: `group.members` arrives as a DICT keyed by member
+id (`SyncPlayMembersWire` / `SyncPlayGroupWire`, the input-side type of
+`GroupStatePayload.group`). `handleGroupState` in `src/client.ts` folds it into
+the array model `SyncPlayGroup.members` (the array spelling stays tolerated).
+Type the wire and the model separately — never widen the model to the wire.
