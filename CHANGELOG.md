@@ -4,6 +4,7 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- Release @phlix/syncplay v0.1.5 — version bump + rebuilt committed artifacts
 
 ## [0.1.4] - 2026-09-01
 
