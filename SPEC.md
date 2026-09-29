@@ -52,6 +52,15 @@ Every message — inbound or outbound — is a single flat JSON object:
   on inbound; always present on outbound from `@phlix/syncplay`.
 - All payload fields are spread at the **top level** (NOT nested under `data`).
 
+> **Units footnote — one hub-relay exception.** On the hub SyncPlay relay
+> surface (`:8804`), every server stamp is in **milliseconds** *except*
+> `pending_command` envelopes' `issued_at`, which is **UNIX SECONDS** —
+> deliberately, matching the DB `TIMESTAMP` it mirrors (the hub's own unit
+> note: `phlix-hub/src/SyncPlay/PendingCommandDispatcher.php:117-119`, value
+> written at `:132` via `time()`). A client comparing `issued_at` against an
+> `exp`, `server_time`, or frame `timestamp` (all ms) must multiply by 1000
+> first; this exception is pinned so no consumer "fixes" it into drift.
+
 `@phlix/syncplay` `encodeMessage(type, payload, now)` produces this object;
 `decodeMessage(raw)` parses it and, for backward compatibility only, unwraps the
 deprecated `{ type, data, timestamp }` Tizen envelope into the flat form.
@@ -98,6 +107,7 @@ group_name: string
 member_id?: string         (defaults to the connection id server-side)
 member_name?: string       (defaults to "Host")
 password_hash?: string     (SHA-256 hex of the password)
+password?: string          (DEPRECATED legacy plaintext arm — see note below)
 ```
 
 `syncplay_group_join` (client → server)
@@ -106,7 +116,23 @@ group_id: string
 member_id?: string
 member_name?: string
 password_hash?: string
+password?: string          (DEPRECATED legacy plaintext arm — see note below)
 ```
+
+> **DEPRECATED second accepted input — legacy plaintext `password`.** The
+> server's group gate parses a second, pre-spec field: when `password_hash`
+> is absent, a plaintext `password` is accepted and hashed **server-side**
+> (`phlix-server/src/Session/SyncPlay/SyncPlayManager.php:2035-2071`,
+> `groupPasswordGate()` — called for create at `:1695` and join at `:1748`).
+> `password_hash` wins when both are present; a present-but-malformed
+> `password_hash` is refused, never coerced. The plain-HTTP REST boundary
+> (`SyncPlayController::createGroup` `:127`/`:133` and `joinGroup` `:204`/`:214`)
+> still accepts **only** plaintext `password` in its body, which is why the
+> arm survives. **New clients MUST NOT send `password` on the WebSocket** —
+> send `password_hash` (unsalted SHA-256 hex) exclusively; the plaintext arm
+> exists solely so pre-spec callers keep working and is estate debt for a
+> future REST carrier migration. See §8.2 for why either field is a weak
+> group gate, never identity.
 
 `syncplay_group_leave` (client → server)
 ```
@@ -405,6 +431,22 @@ from possession of a `password_hash`.
 strings — `group_name`, `member_name`, chat/info `message` — pass through this
 library untouched. Consumers MUST escape/sanitize them before rendering in any
 UI; this DOM-free library deliberately does not mutate display strings.
+
+### 8.4 WebSocket credential carrier (server `:8097` vs hub relay `:8804`)
+
+The pre-authentication bearer token travels **in the WebSocket handshake**,
+and the accepted carrier differs per endpoint. Both endpoints reject the
+handshake **before the 101 upgrade** when the credential is missing or
+invalid — no frame is ever read on an unauthenticated connection (§8.1).
+
+| Endpoint | CURRENT law | Notes |
+|----------|-------------|-------|
+| Server direct WS `:8097` | `?token=<jwt>` **query string**; the handshake hook reads `$request->get('token')` and closes on missing/invalid/expired before responding 101 — `phlix-server/src/Server/WebSocket/WebSocketServer.php:398-405`, `:502-506`. | TARGET (tracked estate debt, not yet shipped): move to the `Sec-WebSocket-Protocol: bearer, <token>` two-entry subprotocol carrier used by the hub surfaces, so query strings stop carrying credentials (logs/proxies leak them). Clients MUST keep using `?token=` against `:8097` until the server ships the subprotocol arm. |
+| Hub SyncPlay relay `:8804` | `Sec-WebSocket-Protocol: bearer, <token>` **two-entry subprotocol** (or `Authorization: Bearer` header) **only** — a `?token=` query is refused (S237). `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:47-49`, `:339-341`; JS clients: `new WebSocket(url, ['bearer', token])`. | The 101 echo answers with the `bearer` marker only — never the token (`:441-470`). |
+
+`@phlix/syncplay` itself opens no socket, so both carriers are consumer
+transport concerns — but a consumer MUST pick the carrier by endpoint per this
+table; the two surfaces are not interchangeable.
 
 ---
 

@@ -5,6 +5,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 - Release @phlix/syncplay v0.1.5 — version bump + rebuilt committed artifacts
+- **SPEC.md annotation lane (docs-only, no behavior change).** Three
+  wire-truth amendments pinned against the live server/hub implementations:
+  §4 documents the DEPRECATED second accepted input on group create/join —
+  the legacy plaintext `password` arm the server hashes server-side
+  (`SyncPlayManager::groupPasswordGate`), with the clients-MUST-NOT-send rule
+  and the REST-boundary reason it survives; new §8.4 codifies the WebSocket
+  credential-carrier law per endpoint (`:8097` CURRENT `?token=` query with
+  pre-101 rejection, TARGET `Sec-WebSocket-Protocol: bearer, <token>` as
+  tracked estate debt; hub `:8804` bearer-subprotocol ONLY, query refused —
+  S237); §2 gains the units footnote pinning the one hub-relay exception —
+  `:8804` stamps milliseconds except `pending_command.issued_at`, which is
+  UNIX SECONDS by deliberate design.
 
 ## [0.1.4] - 2026-09-01
 
