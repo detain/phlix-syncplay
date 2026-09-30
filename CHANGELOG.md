@@ -4,6 +4,23 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **SPEC.md §8.4 `:8097` carrier flip (docs-only, no behavior change).** The
+  `:8097` row moves from CURRENT `?token=` / TARGET bearer to the transitional
+  DUAL carrier phlix-server `424c14d0` shipped: two-entry
+  `Sec-WebSocket-Protocol: bearer, <jwt>` preferred, legacy `?token=` demoted
+  to RETIRING (accepted only while older builds upgrade; removal is an owner
+  timing call). Carrier MISMATCH now rejects pre-101 and the 101 echoes the
+  `bearer` marker only (gated on the offer). All `:8097` cites re-pinned to
+  `424c14d0` — law SSOT `SyncPlayAuthMiddleware::resolveHandshakeToken()`
+  (`src/Server/WebSocket/SyncPlayAuthMiddleware.php:471-489`), handshake gate
+  + mismatch reject (`src/Server/WebSocket/WebSocketServer.php:522-526`,
+  `:528-543`), echo (`:554`, `:575-582`, const `:87` of the middleware) — with
+  phlix-server `docs/dev/WEBSOCKET_AUTH_CARRIERS.md` named as the law doc. The
+  hub `:8804` bearer-only row is unchanged (cites re-verified against
+  phlix-hub `8a5dc12`). Added a dated fleet-status note: ui `c0b6af04`,
+  tizen `9a5b24b`, mobile `bdbe1e1`, roku `07eef68`, console `04a1590` flipped
+  at tip; windows `c75fdf0` still rides `?token=` via the vendored pre-flip
+  `@phlix/ui#v0.99.7` bundle.
 - Release @phlix/syncplay v0.1.5 — version bump + rebuilt committed artifacts
 - **SPEC.md annotation lane (docs-only, no behavior change).** Three
   wire-truth amendments pinned against the live server/hub implementations:

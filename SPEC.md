@@ -441,12 +441,24 @@ invalid — no frame is ever read on an unauthenticated connection (§8.1).
 
 | Endpoint | CURRENT law | Notes |
 |----------|-------------|-------|
-| Server direct WS `:8097` | `?token=<jwt>` **query string**; the handshake hook reads `$request->get('token')` and closes on missing/invalid/expired before responding 101 — `phlix-server/src/Server/WebSocket/WebSocketServer.php:398-405`, `:502-506`. | TARGET (tracked estate debt, not yet shipped): move to the `Sec-WebSocket-Protocol: bearer, <token>` two-entry subprotocol carrier used by the hub surfaces, so query strings stop carrying credentials (logs/proxies leak them). Clients MUST keep using `?token=` against `:8097` until the server ships the subprotocol arm. |
+| Server direct WS `:8097` | **SHIPPED transitional dual carrier** (phlix-server `424c14d0`): the `Sec-WebSocket-Protocol: bearer, <jwt>` **two-entry subprotocol is PREFERRED** (priority 1, the estate TARGET); the legacy `?token=<jwt>` query is still accepted only while older client builds upgrade (priority 2, **RETIRED on fleet-update timing — an owner call, never assume a removal date**). Law SSOT `SyncPlayAuthMiddleware::resolveHandshakeToken()` — `phlix-server/src/Server/WebSocket/SyncPlayAuthMiddleware.php:471-489`; handshake gate `phlix-server/src/Server/WebSocket/WebSocketServer.php:522-526`. Full law doc: phlix-server `docs/dev/WEBSOCKET_AUTH_CARRIERS.md` @ `424c14d0`. | Missing/invalid/expired credential still rejects **pre-101** (§8.1). Both carriers present with **different** credentials also rejects pre-101 (pool removal + close, `WebSocketServer.php:528-543`) — a half-migrated client fails loudly instead of authenticating on a credential other than the one it presents. A client that **offered** `bearer` and passed is answered `Sec-WebSocket-Protocol: bearer` on the 101 — marker only, never the token, and gated on the offer (`WebSocketServer.php:554`, `:575-582`; echo const `SyncPlayAuthMiddleware.php:87`). New clients MUST dial the bearer form; `?token=` is legacy-only. |
 | Hub SyncPlay relay `:8804` | `Sec-WebSocket-Protocol: bearer, <token>` **two-entry subprotocol** (or `Authorization: Bearer` header) **only** — a `?token=` query is refused (S237). `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:47-49`, `:339-341`; JS clients: `new WebSocket(url, ['bearer', token])`. | The 101 echo answers with the `bearer` marker only — never the token (`:441-470`). |
 
+Fleet status (verified 2026-09-30 against each repo's `origin/master` tip):
+the bearer flip has landed in phlix-ui `c0b6af04` (`src/api/syncplay.ts`),
+phlix-tizen-client `9a5b24b` (`src/stores/useSyncPlayStore.ts`),
+phlix-mobile-client `bdbe1e1` (`src/syncplay/wsEndpoint.ts`),
+phlix-roku-client `07eef68` (`source/lib/SyncPlayProtocol.brs`) and
+phlix-console-client `04a1590` (`src/Api/SyncPlay/SyncPlayService.php`, native
+`websocketClientProtocol` seam). phlix-windows-client `c75fdf0` still dials
+`?token=` through its vendored pre-flip `@phlix/ui#v0.99.7` bundle — why the
+query carrier stays accepted until the re-pin cascade ships.
+
 `@phlix/syncplay` itself opens no socket, so both carriers are consumer
-transport concerns — but a consumer MUST pick the carrier by endpoint per this
-table; the two surfaces are not interchangeable.
+transport concerns. The two-entry bearer subprotocol is now the universal
+estate carrier — it is accepted on **both** surfaces above; the `?token=`
+lane exists only on `:8097` for legacy builds and must never be added to new
+code paths (the hub refuses it).
 
 ---
 
