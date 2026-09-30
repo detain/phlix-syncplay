@@ -444,15 +444,24 @@ invalid — no frame is ever read on an unauthenticated connection (§8.1).
 | Server direct WS `:8097` | **SHIPPED transitional dual carrier** (phlix-server `424c14d0`): the `Sec-WebSocket-Protocol: bearer, <jwt>` **two-entry subprotocol is PREFERRED** (priority 1, the estate TARGET); the legacy `?token=<jwt>` query is still accepted only while older client builds upgrade (priority 2, **RETIRED on fleet-update timing — an owner call, never assume a removal date**). Law SSOT `SyncPlayAuthMiddleware::resolveHandshakeToken()` — `phlix-server/src/Server/WebSocket/SyncPlayAuthMiddleware.php:471-489`; handshake gate `phlix-server/src/Server/WebSocket/WebSocketServer.php:522-526`. Full law doc: phlix-server `docs/dev/WEBSOCKET_AUTH_CARRIERS.md` @ `424c14d0`. | Missing/invalid/expired credential still rejects **pre-101** (§8.1). Both carriers present with **different** credentials also rejects pre-101 (pool removal + close, `WebSocketServer.php:528-543`) — a half-migrated client fails loudly instead of authenticating on a credential other than the one it presents. A client that **offered** `bearer` and passed is answered `Sec-WebSocket-Protocol: bearer` on the 101 — marker only, never the token, and gated on the offer (`WebSocketServer.php:554`, `:575-582`; echo const `SyncPlayAuthMiddleware.php:87`). New clients MUST dial the bearer form; `?token=` is legacy-only. |
 | Hub SyncPlay relay `:8804` | `Sec-WebSocket-Protocol: bearer, <token>` **two-entry subprotocol** (or `Authorization: Bearer` header) **only** — a `?token=` query is refused (S237). `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:47-49`, `:339-341`; JS clients: `new WebSocket(url, ['bearer', token])`. | The 101 echo answers with the `bearer` marker only — never the token (`:441-470`). |
 
-Fleet status (verified 2026-09-30 against each repo's `origin/master` tip):
-the bearer flip has landed in phlix-ui `c0b6af04` (`src/api/syncplay.ts`),
-phlix-tizen-client `9a5b24b` (`src/stores/useSyncPlayStore.ts`),
-phlix-mobile-client `bdbe1e1` (`src/syncplay/wsEndpoint.ts`),
-phlix-roku-client `07eef68` (`source/lib/SyncPlayProtocol.brs`) and
-phlix-console-client `04a1590` (`src/Api/SyncPlay/SyncPlayService.php`, native
-`websocketClientProtocol` seam). phlix-windows-client `c75fdf0` still dials
-`?token=` through its vendored pre-flip `@phlix/ui#v0.99.7` bundle — why the
-query carrier stays accepted until the re-pin cascade ships.
+Fleet status (re-verified 2026-09-30 against each repo's `origin/master` tip;
+an earlier pass of this table was tip-stale at authoring): the bearer flip has
+landed in phlix-ui `324b4122` (`src/api/syncplay.ts` flipped at `be9a5fc5` /
+`c0b6af04`; this tip commit regenerates `dist/` and the re-tag that publishes
+it is still pending, owner-gated), phlix-tizen-client `348c6e7` (flip +
+empty-token subprotocol bail at `6707ed3` in
+`src/stores/useSyncPlayStore.ts`; this tip commit only refreshes the committed
+`package/` build output), phlix-mobile-client `bdbe1e1`
+(`src/syncplay/wsEndpoint.ts`), phlix-roku-client `07eef68`
+(`source/lib/SyncPlayProtocol.brs`) and phlix-console-client `2f0ecf5` (native
+`websocketClientProtocol` seam in `src/Api/SyncPlay/SyncPlayService.php` since
+`04a1590`; this tip commit adds the `WebSocketDialer` `wss://` TLS-dial fix).
+The LAST estate `?token=` producers are the vendored ui bundle chunks:
+phlix-windows-client `c75fdf0` and phlix-tizen-client both pin pre-flip
+`@phlix/ui#v0.99.7` (the tag predates both flip commits), so the ui-sourced
+SyncPlay widgets those apps boot still ride the query carrier — the concrete
+reason `?token=` stays accepted on `:8097`. It closes when the ui re-tag +
+consumer pin cascade lands (owner-gated).
 
 `@phlix/syncplay` itself opens no socket, so both carriers are consumer
 transport concerns. The two-entry bearer subprotocol is now the universal

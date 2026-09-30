@@ -4,6 +4,26 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **SPEC.md §8.4 fleet-status refresh (docs-only, no behavior change).** The
+  fleet table was tip-stale at authoring (review footnote on the carrier-flip
+  pass); every row re-verified against current `origin/master` tips:
+  phlix-ui `c0b6af04`→`324b4122` (tip regenerates `dist/` post the
+  `be9a5fc5`/`c0b6af04` flips; publishing re-tag still pending, owner-gated),
+  phlix-tizen-client `9a5b24b`→`348c6e7` (flip + empty-token subprotocol bail
+  at `6707ed3`; tip commit only refreshes committed `package/` output),
+  phlix-console-client `04a1590`→`2f0ecf5` (tip adds the `WebSocketDialer`
+  `wss://` TLS-dial fix; bearer seam since `04a1590`). phlix-mobile-client
+  `bdbe1e1`, phlix-roku-client `07eef68`, phlix-windows-client `c75fdf0`
+  unchanged (still the tips). Transitional note sharpened on disk evidence:
+  the LAST estate `?token=` producers are the vendored pre-flip
+  `@phlix/ui#v0.99.7` SyncPlay widget chunks — windows AND tizen both pin
+  `#v0.99.7`, whose dist carries `?token=` with zero bearer offers (verified
+  in each repo's installed bundle) — closing when the ui re-tag + consumer pin
+  cascade lands (owner-gated). No coordinate re-anchors: all server/hub cites
+  re-verified ±3 tokens against phlix-server `c11bd4ac`
+  (`SyncPlayAuthMiddleware.php:471-489`, `:87`; `WebSocketServer.php:522-526`,
+  `:528-543`, `:554`, `:575-582`) and phlix-hub `8a5dc12`
+  (`SyncPlayRelayWorker.php:47-49`, `:339-341`, `:441-470`) — none moved.
 - **SPEC.md §8.4 `:8097` carrier flip (docs-only, no behavior change).** The
   `:8097` row moves from CURRENT `?token=` / TARGET bearer to the transitional
   DUAL carrier phlix-server `424c14d0` shipped: two-entry
