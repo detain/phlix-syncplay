@@ -69,7 +69,10 @@ deprecated `{ type, data, timestamp }` Tizen envelope into the flat form.
 
 ## 3. Message types (all 19)
 
-Mirrors `Messages::TYPE_*` exactly.
+Mirrors `Messages::TYPE_*` exactly. Served by the server's `:8097` socket
+and — since phlix-hub `cc1e128` (owner decision #14) — by the hub `:8804`
+relay's room lane as well; §8.4 states the hub's dialect latch and the
+documented per-surface deviations.
 
 | Constant        | Wire string                | Direction        |
 |-----------------|----------------------------|------------------|
@@ -449,7 +452,44 @@ invalid — no frame is ever read on an unauthenticated connection (§8.1).
 | Endpoint | CURRENT law | Notes |
 |----------|-------------|-------|
 | Server direct WS `:8097` | **SHIPPED transitional dual carrier** (phlix-server `424c14d0`): the `Sec-WebSocket-Protocol: bearer, <jwt>` **two-entry subprotocol is PREFERRED** (priority 1, the estate TARGET); the legacy `?token=<jwt>` query is still accepted only while older client builds upgrade (priority 2, **RETIRED on fleet-update timing — an owner call, never assume a removal date**). Law SSOT `SyncPlayAuthMiddleware::resolveHandshakeToken()` — `phlix-server/src/Server/WebSocket/SyncPlayAuthMiddleware.php:471-489`; handshake gate `phlix-server/src/Server/WebSocket/WebSocketServer.php:522-526`. Full law doc: phlix-server `docs/dev/WEBSOCKET_AUTH_CARRIERS.md` @ `424c14d0`. | Missing/invalid/expired credential still rejects **pre-101** (§8.1). Both carriers present with **different** credentials also rejects pre-101 (pool removal + close, `WebSocketServer.php:528-543`) — a half-migrated client fails loudly instead of authenticating on a credential other than the one it presents. A client that **offered** `bearer` and passed is answered `Sec-WebSocket-Protocol: bearer` on the 101 — marker only, never the token, and gated on the offer (`WebSocketServer.php:554`, `:575-582`; echo const `SyncPlayAuthMiddleware.php:87`). New clients MUST dial the bearer form; `?token=` is legacy-only. |
-| Hub SyncPlay relay `:8804` | `Sec-WebSocket-Protocol: bearer, <token>` **two-entry subprotocol** (or `Authorization: Bearer` header) **only** — a `?token=` query is refused (S237). `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:47-49`, `:339-341`; JS clients: `new WebSocket(url, ['bearer', token])`. | The 101 echo answers with the `bearer` marker only — never the token (`:441-470`). |
+| Hub SyncPlay relay `:8804` | `Sec-WebSocket-Protocol: bearer, <token>` **two-entry subprotocol** (or `Authorization: Bearer` header) **only** — a `?token=` query is refused (S237). `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:47-49`, `:443-446`; JS clients: `new WebSocket(url, ['bearer', token])`. | The 101 echo answers with the `bearer` marker only — never the token (`:527-560`). |
+
+**Room-vocabulary dialect on `:8804` (owner decision #14, phlix-hub
+`cc1e128`).** The relay's room lane now serves this canonical §3 catalog. A
+connection latches its dialect on the first `syncplay_*` frame it sends and
+every subsequent reply arrives in the same dialect; `syncplay_`-prefixed
+names outside the 19 are refused loudly (`syncplay_error`
+`UNKNOWN_MESSAGE` — the canonical floor is CLOSED, mirroring `:8097`), while
+the legacy unnamed bare room vocabulary keeps its open verbatim-relay floor.
+The legacy bare room vocabulary (`group_join`/`room_state`/`client_joined`/
+`client_left`/`time_sync`) stays handled for compatibility but has **zero**
+live consumers in the estate. `pending_command` (the push/Alexa lane) is an
+orthogonal frame family delivered to every authenticated socket of the target
+user regardless of dialect — a client may run two `:8804` sockets per
+(server, owner), one command lane and one room lane (the hub's
+`deliverToUser` fans out to all matching connections).
+
+The hub is a relay without the server's group store, so its canonical replies
+carry documented deviations from the full `:8097` laws: identity is a
+hub-issued per-socket client id surfaced as `your_id`/`member_id`; rooms are
+shadow-scoped per (server_id, owner user_id), which makes cross-user parties
+over the relay impossible by construction; the first member is host and a
+host departure elects the longest-present member (broadcast `syncplay_info`
+per §6 on join/leave, `syncplay_host_elect` followed by the refreshed
+`syncplay_group_state` on election); `syncplay_playback_sync`'s `server_time`
+is **milliseconds** here — per the §2 footnote's hub-wide ms law, whereas the
+`:8097` producer keeps a legacy seconds quirk; server-initiated
+`syncplay_time_sync` has no hub producer and its inbound use is refused
+(`hub.protocol_unsupported`) because the hub holds no clock authority beyond
+`syncplay_time_ping`/`_pong`; `password_hash` is accepted and ignored (the
+token's own (server, owner) scope is the gate); and the S446 idle-host nudge
+is not relayed.
+
+The first consumer of the relay's canonical lane is phlix-mobile-client
+`13715d0`, whose interim `RELAY_NOT_SUPPORTED` refusal was lifted in the same
+owner decision; it dials `['bearer', <relay token>]` and speaks this catalog
+unchanged — the §4–§6 frame shapes the hub replies with are parsed by the
+same code as the server's.
 
 Fleet status (re-verified 2026-09-30 against each repo's `origin/master` tip;
 an earlier pass of this table was tip-stale at authoring): the bearer flip has

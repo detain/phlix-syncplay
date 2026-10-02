@@ -4,6 +4,26 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **SPEC.md §3 + §8.4 — the hub relay `:8804` now serves the canonical
+  catalog (owner decision #14; docs-only, no library change).** phlix-hub
+  `cc1e128` taught `SyncPlayRelayWorker` the `syncplay_*` vocabulary with a
+  per-connection dialect latch (first `syncplay_*` frame picks the dialect;
+  replies answer in kind; the `syncplay_`-prefixed floor is CLOSED with
+  `UNKNOWN_MESSAGE` like `:8097`, while the legacy bare room vocabulary keeps
+  its open verbatim floor and has zero live consumers). §8.4 gains the
+  dialect law, the `pending_command` orthogonality (a client may run two
+  `:8804` sockets per server+owner; `deliverToUser` fans to all), the
+  documented hub deviations (hub-issued socket ids as `your_id`/`member_id`,
+  shadow rooms scoped per (server, owner) — cross-user relay parties
+  impossible by construction, first-member-is-host + join-order election,
+  `syncplay_playback_sync` `server_time` in ms on the hub vs the `:8097`
+  seconds quirk, `syncplay_time_sync` refused `hub.protocol_unsupported`,
+  `password_hash` accepted-and-ignored, S446 nudge not relayed) and the
+  mobile-first consumer note (phlix-mobile-client `13715d0` lifted its
+  interim `RELAY_NOT_SUPPORTED` refusal in the same decision). §3 gains a
+  one-line surface-applicability pointer to §8.4. Hub carrier coordinates on
+  the `:8804` row re-anchored for `cc1e128` line shift (`:339-341`→
+  `:443-446`, `:441-470`→`:527-560`), token-verified against the hub tip.
 - **SPEC.md §8.4 fleet-status refresh (docs-only, no behavior change).** The
   fleet table was tip-stale at authoring (review footnote on the carrier-flip
   pass); every row re-verified against current `origin/master` tips:
