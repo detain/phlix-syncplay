@@ -4,6 +4,19 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **SPEC.md §8.4 — hub carrier cite re-anchored (docs-only micro-nit from the
+  dialect-bundle review).** The `:8804` row's first carrier coordinate moved:
+  `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:47-49` → `:52-55`. The
+  carrier law the cite names — "The relay token travels in the upgrade
+  request's `Authorization: Bearer` header or its
+  `Sec-WebSocket-Protocol: bearer, <token>` subprotocol … NEVER accepted from
+  the query string" — now sits at 52-55 (token-verified against the hub tip
+  `cc1e128`; the preceding `:47-49` window holds the generic connection
+  paragraph). Sibling cites on the same row re-verified current: `:443-446`
+  (the `extractClientToken` gate) and `:527-560` (the marker-only 101 echo).
+  The inbound-dialect-guard hub lane deliberately line-neutralised its
+  class-docblock prose so all three coordinates resolve identically at that
+  lane's pushed tip.
 - **SPEC.md §3 + §8.4 — the hub relay `:8804` now serves the canonical
   catalog (owner decision #14; docs-only, no library change).** phlix-hub
   `cc1e128` taught `SyncPlayRelayWorker` the `syncplay_*` vocabulary with a
