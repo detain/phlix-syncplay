@@ -176,6 +176,13 @@ your_id?: string           (the recipient's own member id)
 > summary, never on a `group_state` message.
 
 `syncplay_group_list` (client → server) — bare request, no fields.
+The server's `syncplay_group_list` reply is scoped per requester: rooms the
+requester is a member of, plus every room when the requester is an active
+admin (MED-2 owner ruling 2026-10-02 — visibility is members-or-admin; joining
+by known id + password is unaffected, the reply shape is unchanged). The same
+ruling gates the REST reads `GET /api/v1/syncplay/groups` and
+`GET /api/v1/syncplay/groups/{id}` (a non-member's read of a foreign room is
+an existence-agnostic 404).
 
 ### Playback control (host-only on the server; non-hosts get a `NOT_HOST` error)
 
