@@ -48,8 +48,20 @@ for the full contract.
 
 ## Install
 
-```bash
-npm install @phlix/syncplay
+`@phlix/syncplay` is distributed as a **git-tagged dependency** (not published to
+npm). Pin an exact tag:
+
+```jsonc
+// package.json
+{
+  "dependencies": {
+    "@phlix/syncplay": "github:detain/phlix-syncplay#v0.1.5"
+  }
+}
+```
+
+```sh
+npm install
 ```
 
 ## Usage
