@@ -4,6 +4,24 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **README quick-start dials now obey the §8.4 carrier law (docs-only, fix
+  lane M-SYNCPLAY-07, review `syncplay__docmaint` M7 / `syncplay__writer`
+  dup).** Both former examples dialed bare URLs — no credential carrier at
+  all — and the direct example omitted the `:8097` port, which points at
+  :443 where no WebSocket upgrade exists. Shipped: a new `## Connecting`
+  section with two labeled copy-paste-plausible snippets — **Direct —
+  server `:8097`** (`wss://{host}:8097/api/v1/syncplay/ws` dialed with
+  `['bearer', jwt]`; one law sentence on the bearer target carrier, the
+  marker-only 101 echo, and the legacy `?token=` lane's
+  credentials-in-URLs caveat, new-code-prohibited per SPEC §8.4) and
+  **Via hub relay — `:8804`** (`wss://{hub}:8804/syncplay/{serverId}` with
+  `['bearer', relayToken]`; the relay refuses `?token=` by design) — plus
+  the Usage-block dial and the reconnect-recipe dial (`new WebSocket(URL,
+  ['bearer', token])`) brought to the same law. SPEC.md carried no violating
+  dial and is untouched; no `src/` or `dist/` change. Verified against
+  producers on disk: phlix-server `SyncPlayAuthMiddleware::resolveHandshakeToken()`
+  + `WebSocketServer` handshake gate, phlix-hub `SyncPlayRelayWorker`
+  carrier + `/syncplay/{server_id}` path law.
 - **`group_state.queue` is now DELIVERED — `handleGroupState` was silently
   dropping the producer's queue (fix lane M-SYNCPLAY-06, review
   `syncplay__docmaint` M2).** SPEC §4 calls the nested `group` block

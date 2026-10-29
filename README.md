@@ -64,12 +64,48 @@ npm). Pin an exact tag:
 npm install
 ```
 
+## Connecting
+
+The library owns no socket — you dial the WebSocket, and the handshake must
+carry your credential: both listeners reject the upgrade **before the 101**
+without it (nothing is ever read on an unauthenticated connection). Browsers
+(and React Native) cannot set an `Authorization` header on a WebSocket
+upgrade, so the bearer token rides as the second `WebSocket` constructor
+value. See [`SPEC.md` §8.4](./SPEC.md#84-websocket-credential-carrier-server-8097-vs-hub-relay-8804)
+for the full carrier law.
+
+**Direct — server `:8097`:**
+
+```ts
+const ws = new WebSocket('wss://phlix.example:8097/api/v1/syncplay/ws', ['bearer', jwt]);
+```
+
+`:8097` is the SyncPlay listener — the HTTP API port has no WebSocket upgrade.
+The `Sec-WebSocket-Protocol: bearer, <jwt>` two-entry subprotocol is the
+estate target carrier; the server answers the 101 with the `bearer` marker
+only, never the token. The legacy `?token=<jwt>` query is still accepted on
+`:8097` for older client builds but **must never be added to new code paths**
+— a URL-borne credential leaks into access/proxy logs and handshake
+diagnostics.
+
+**Via hub relay — `:8804`:**
+
+```ts
+const ws = new WebSocket(`wss://hub.example:8804/syncplay/${serverId}`, ['bearer', relayToken]);
+```
+
+The hub relay speaks the same protocol but accepts the bearer subprotocol
+**only** — a `?token=` query is refused there by design. Each relay socket is
+scoped to one server (`{server_id}` in the path) and one hub account.
+
 ## Usage
 
 ```ts
 import { SyncPlayClient } from '@phlix/syncplay';
 
-const ws = new WebSocket('wss://server/api/v1/syncplay/ws');
+// Dial per "Connecting" above (SPEC §8.4): the credential rides the bearer
+// subprotocol, never in the URL.
+const ws = new WebSocket('wss://phlix.example:8097/api/v1/syncplay/ws', ['bearer', jwt]);
 
 const client = new SyncPlayClient({
   send: (message) => ws.send(JSON.stringify(message)),
@@ -136,7 +172,8 @@ function scheduleReconnect() {
 }
 
 function connect() {
-  const ws = new WebSocket(URL);
+  // Carrier on every dial, reconnects included (SPEC §8.4):
+  const ws = new WebSocket(URL, ['bearer', token]);
   ws.onmessage = (e) => client.handleIncoming(e.data);
   ws.onopen = () => {
     attempt = 0;                              // reset backoff on success
