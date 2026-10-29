@@ -4,6 +4,32 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **`SyncPlayClient.handleTimePong()` — SPEC §10.1.3 now enforced on the LIVE
+  pong shape; a late pong from a torn-down connection can no longer seed a
+  time-sync sample (fix lane M-SYNCPLAY-02, review `syncplay__crossfe` M2).**
+  The drop-on-reset rule was only ever half-live: the client's stale-pong
+  defence hinged on `lastPingSendTime === null`, but that fires only for pongs
+  OMITTING `client_time` — and the live server always echoes the field verbatim
+  (`phlix-server` `Messages::timePong()`, round-tripping whatever
+  `processPing()` captured; SPEC §10.1.2 blesses the echo as authoritative).
+  A still-buffered live-shape pong surfacing after `onDisconnect()` (which
+  nulls the recorded send time) therefore still seeded: the quad spanned two
+  connections, and on a fast reconnect the bogus RTT could clear the
+  1000 ms cap and pollute the offset — the same corruption family as the
+  estate's mobile 2×-undercorrect class, measured here not guessed. Shipped:
+  an outstanding ping is now required (`lastPingSendTime === null` → refuse,
+  encoding §10.1.3's dropped-send-time clause literally and narrowing the
+  fallback type), and an echoed `client_time` that does not equal the current
+  outstanding send time is refused outright (the server echo makes mismatch
+  conclusive at integer-ms granularity); a refused straggler leaves the
+  outstanding ping untouched, so the real pong still lands. Regression
+  vectors: live-shape pong after disconnect, and a straggler racing a fresh
+  ping on the successor connection (reject-then-accept sequence). Mutation
+  receipts: full guard revert reddens exactly the two new tests with zero old
+  tests failing (the hole had no prior coverage); stripping the echo guard
+  reddens only the straggler vector; stripping only the null check typebreaks
+  `tsc` (TS2345) — it is load-bearing for the narrowing and the explicit
+  fail-fast, its runtime role on the live shape shared with the echo guard.
 - **`TimeSync.getOffset()` — the weighted mean no longer crushes realistic
   offsets toward zero (fix lane C09, review `syncplay__gameux` C1).** The
   divisor was `max(1, weightSum)`: with every accepted weight

@@ -331,6 +331,35 @@ describe('SyncPlayClient — onDisconnect / reconnect reset (B4)', () => {
     expect(h.syncs).toHaveLength(0);
   });
 
+  it('ignores a LIVE-shaped (echoed client_time) pong that arrives after onDisconnect', () => {
+    // SPEC §10.1.3 guard, exercised on the shape the live server actually
+    // emits. The pre-existing stray-pong test above omits `client_time` — the
+    // NON-live shape — so it only exercised the dead fallback branch. The real
+    // wire (`Messages::timePong`, phlix-server) ALWAYS echoes `client_time`, so
+    // the pre-fix `pong.client_time === 'number'` branch trusted a still-
+    // buffered pong from the torn-down socket and seeded a corrupt sample.
+    const h = makeHarness();
+
+    h.clock.set(1000);
+    h.client.pingTime(); // outstanding ping, send time = 1000
+
+    h.client.onDisconnect(); // drops lastPingSendTime (the liveness signal)
+
+    // Late pong from the dead connection, real wire shape (carries the echo),
+    // arriving well inside MAX_ACCEPTABLE_RTT so the estimator would accept it
+    // if it were ever reached.
+    h.clock.set(1001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: 1100,
+    });
+
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(h.syncs).toHaveLength(0);
+  });
+
   it('is safe to call with no group and no callback configured', () => {
     const client = new SyncPlayClient({
       send: () => {},
@@ -962,6 +991,47 @@ describe('SyncPlayClient — handleTimePong edge cases', () => {
     // rtt = 1001 - 1000 = 1, offset 100, accepted
     expect(h.syncs).toHaveLength(1);
     expect(h.syncs[0].offset).toBe(100);
+  });
+
+  it('rejects a dead-connection straggler arriving while a fresh ping is outstanding, then still accepts the matching pong', () => {
+    // Fast-reconnect regime (SPEC §10.2 recovery: onDisconnect → reconnect →
+    // resume pingTime). A new ping is already outstanding on connection B when
+    // a straggler from the torn-down connection A lands, so the null-send-time
+    // check alone misses it — only the echo-match rejects it.
+    const h = makeHarness();
+
+    h.clock.set(1000);
+    h.client.pingTime(); // connection A ping, send time 1000
+    h.client.onDisconnect(); // drops ping + resets window
+
+    h.clock.set(1100);
+    h.client.pingTime(); // connection B ping, send time 1100 now outstanding
+
+    // Straggler from DEAD connection A: echoes A's t1 (1000), server_time 1200.
+    // rtt = 1150 - 1000 - (1200 - 1200) = 150 ms < MAX_ACCEPTABLE_RTT, so the
+    // estimator would ACCEPT the cross-connection quad (offset 1200 - 1000 + 75
+    // = 275) were it ever reached; the echo-match guard rejects it first.
+    h.clock.set(1150);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: 1200,
+    });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(h.syncs).toHaveLength(0);
+
+    // The reject must NOT consume the outstanding (connection B) ping: its real
+    // pong, echoing 1100, still lands and seeds exactly one sample.
+    h.clock.set(1151);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1100,
+      server_time: 1200,
+    });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+    expect(h.syncs).toHaveLength(1);
   });
 });
 

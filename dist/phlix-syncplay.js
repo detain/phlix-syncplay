@@ -308,10 +308,14 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		}
 	}
 	handleTimePong(e) {
-		let t = e, n = this.now(), r = typeof t.client_time == "number" ? t.client_time : this.lastPingSendTime, i = typeof t.server_time == "number" ? t.server_time : null;
-		if (r === null || i === null) return;
-		let a = this.timeSync.addSample(r, i, i, n);
-		this.lastPingSendTime = null, a && this.options.onSync?.({
+		let t = this.lastPingSendTime;
+		if (t === null) return;
+		let n = e, r = typeof n.client_time == "number" ? n.client_time : null;
+		if (r !== null && r !== t) return;
+		let i = this.now(), a = r ?? t, o = typeof n.server_time == "number" ? n.server_time : null;
+		if (o === null) return;
+		let s = this.timeSync.addSample(a, o, o, i);
+		this.lastPingSendTime = null, s && this.options.onSync?.({
 			offset: this.timeSync.getOffset(),
 			latency: this.timeSync.getLatency(),
 			isStable: this.timeSync.isStable()

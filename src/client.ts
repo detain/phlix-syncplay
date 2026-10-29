@@ -392,13 +392,49 @@ export class SyncPlayClient {
   // --- Inbound handlers ----------------------------------------------------
 
   private handleTimePong(msg: RawMessage): void {
+    // SPEC §10.1.3 (verbatim): "The outstanding ping — a late `time_pong` from
+    // the dead connection must not seed a sample, so the recorded send time
+    // (`lastPingSendTime`) is dropped." `onDisconnect()` performs that drop, so
+    // a pong that arrives with NO outstanding ping recorded is exactly the late
+    // frame the clause forbids — refuse it before touching TimeSync.
+    //
+    // The pre-fix code read `pong.client_time` straight off the frame as t1 and
+    // only fell back to `lastPingSendTime` when it was ABSENT. But the live
+    // server always echoes `client_time` (`Messages::timePong` /
+    // `TimeSync::processPing` in phlix-server), so that fallback was dead
+    // against reality and the primary branch trusted the frame unconditionally:
+    // after a disconnect the still-buffered pong's echoed t1 (old path) paired
+    // with a fresh t4 (new path) seeded a quad spanning two connections,
+    // corrupting the clean window §10.1 exists to protect. The dropped send
+    // time is therefore the liveness signal — the echoed value is only trusted
+    // once a live ping is outstanding to match it against.
+    const outstanding = this.lastPingSendTime;
+    if (outstanding === null) {
+      return;
+    }
+
     const pong = msg as Partial<TimePongPayload>;
+    const echoed = typeof pong.client_time === 'number' ? pong.client_time : null;
+
+    // Fast-reconnect regime: a fresh ping may already be outstanding on the NEW
+    // connection when a straggler pong from the torn-down one lands, so the
+    // null check alone misses it. The server echoes verbatim the `client_time`
+    // we sent, so a pong whose echo does not equal our current outstanding
+    // send time belongs to a different round-trip (and — on the integer-ms
+    // Date.now() clock this library's contract mandates — a different
+    // connection). Refuse it and LEAVE the outstanding ping untouched: its real
+    // pong may still arrive.
+    if (echoed !== null && echoed !== outstanding) {
+      return;
+    }
+
     const t4 = this.now();
-    // Prefer the echoed client_time as t1; fall back to our recorded send time.
-    const t1 = typeof pong.client_time === 'number' ? pong.client_time : this.lastPingSendTime;
+    // Prefer the matched echo; otherwise fall back to our recorded send time
+    // (the pre-echo shape this library's own callers may emit).
+    const t1 = echoed ?? outstanding;
     const t2 = typeof pong.server_time === 'number' ? pong.server_time : null;
 
-    if (t1 === null || t2 === null) {
+    if (t2 === null) {
       return;
     }
 
