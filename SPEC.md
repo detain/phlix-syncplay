@@ -730,6 +730,36 @@ wire (README "Command repeat policy"; `seekThrottleMs`). Nothing in this
 section changes for the frames that do arrive — the server authorizes and
 re-stamps each one exactly as above.
 
+### 9.2 Client-side coupling: ctor `memberId` MUST equal the stamped identity
+
+This section's server law has a mirror obligation for consumers of
+`@phlix/syncplay`. The library's local identity decisions — `isHost()`
+(`group.host_id === memberId`) and the §9.1 echo suppressions
+(`msg.member_id === memberId`) — compare the **constructor** `memberId`
+against ids the server derived from the *sender's* authenticated connection.
+For those comparisons to mean anything, the ctor value MUST equal the identity
+the server will stamp for **this** connection — the `your_id` the join/create
+ack carries:
+
+- Direct `:8097`: the authenticated **user id** (JWT subject). Producer bytes:
+  phlix-server `SyncPlayManager.php:1799` and `:1855`
+  (`'your_id' => $connection->getUserId()`), REST
+  `SyncPlayController.php:173`/`:267`/`:305` (`$memberId = $request->userId`,
+  S289). Knowable before dialing (the auth layer holds it).
+- Hub relay `:8804`: a hub-generated **per-connection uuid**
+  (phlix-hub `SyncPlayRelayWorker.php:423`, `generateClientId()` `:2107-2120`),
+  echoed as `your_id` at `:1486-1491`. NOT knowable before the first
+  `group_state`; the client surfaces `your_id` through `onState` and
+  reconciles nothing (ctor id immutable by design) — the consumer adopts it.
+
+A fabricated/mismatched ctor id yields exactly two observable defects:
+`isHost()` permanently false for a true host (mobile's dead-host bug class —
+UI controls inert even though §9 item 2 authorization would accept the
+commands), and self-echo suppression dead — the member's own re-stamped
+commands pass the `=== memberId` test as foreign and double-apply. The full
+law and both carriers' coordinates are documented on
+`SyncPlayClientOptions.memberId` (`src/client.ts`).
+
 ---
 
 ## 10. Reconnect & resume recovery

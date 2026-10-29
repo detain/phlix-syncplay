@@ -38,6 +38,9 @@ All security is a **server responsibility**:
 - `member_id` / host ids are **self-asserted on the wire**; the server MUST
   derive the effective identity from the authenticated connection and authorize
   host-only actions by connection identity, not by the client-claimed id.
+  Client-side, that law has a mirror obligation: the `memberId` you hand
+  `SyncPlayClient` MUST be the id the server derives for your connection —
+  see "Identity contract (`memberId` ↔ `your_id`)" under Usage.
 - Peer-supplied display strings (`group_name`, `member_name`, chat/info
   `message`) are passed through unescaped — **consumers MUST sanitize before
   rendering**.
@@ -107,12 +110,27 @@ import { SyncPlayClient } from '@phlix/syncplay';
 // subprotocol, never in the URL.
 const ws = new WebSocket('wss://phlix.example:8097/api/v1/syncplay/ws', ['bearer', jwt]);
 
+// IDENTITY LAW (SPEC §9, "Identity contract" below): `memberId` MUST be the
+// id the server derives from the AUTHENTICATED CONNECTION — on `:8097` that
+// is your account user id (the JWT subject your auth layer already holds
+// from login / GET /auth/me; the create/join ack echoes it back as
+// `your_id`). NEVER fabricate a value here — a mismatched id is the estate's
+// dead-host bug: `isHost()` stays false for a true host and your own echoed
+// commands double-apply.
+const memberId = authSession.userId; // = JWT subject, e.g. '8f2a…-uuid'
+
 const client = new SyncPlayClient({
   send: (message) => ws.send(JSON.stringify(message)),
   now: () => Date.now(),
-  memberId: 'member_123',
+  memberId,
   memberName: 'Alice',
-  onState: (group, yourId) => { /* render group (`group.members` normalized to an array; `group.queue` delivered per producer — SPEC §4); you are yourId */ },
+  onState: (group, yourId) => {
+    // `yourId` is the identity the server stamped for THIS connection
+    // (phlix-server `SyncPlayManager.php:1799`/`:1855`). Reconcile — if it
+    // ever differs from the id you passed, you have a ghost identity: fix
+    // the source, or gate host UX on `group.host_id === yourId`.
+    /* render group (`group.members` normalized to an array; `group.queue` delivered per producer — SPEC §4); you are yourId */
+  },
   onSync: ({ offset, latency, isStable }) => { /* time-sync status */ },
   onPlaybackCommand: ({ type, position, serverTime }) => { /* apply locally */ },
   onMemberJoined: ({ id, name }) => {},
@@ -145,6 +163,40 @@ client.reportPosition(positionMs, isPlaying);
 client.sendChat('popcorn tonight?');   // your message arrives back via onChat
 client.sendTyping(true);               // peers see it on THEIR onMemberTyping
 ```
+
+### Identity contract (`memberId` ↔ `your_id`)
+
+Every id the server puts on an inbound frame — `your_id` on
+`syncplay_group_state`, `host_id`, the `member_id` rebroadcast on
+play/pause/seek — is **derived from the authenticated connection**, never
+from the `member_id` a client claims (SPEC §9; the server overwrites claims
+before rebroadcast, §9 item 3). The library's local identity decisions
+compare the **constructor** `memberId` against exactly those stamped ids —
+`isHost()` (`group.host_id === memberId`) and the command echo suppressions
+(`msg.member_id === memberId`) — so the constructor id and the server-stamped
+id MUST be the same identity. What that identity is, per carrier:
+
+| Carrier | Stamped identity | Source of truth |
+|---|---|---|
+| Direct `:8097` (WS + REST) | the authenticated **user id** (JWT subject) | server `SyncPlayManager.php:1799`/`:1855` (`your_id = $connection->getUserId()`), `SyncPlayController.php:173`/`:267`/`:305` (S289: "identity is the authenticated JWT subject ONLY"), rebroadcast stamps `:1084-1093`/`:1182-1187` |
+| Hub relay `:8804` | a hub-generated **per-connection uuid** | hub `SyncPlayRelayWorker.php:423` + `generateClientId()` `:2107-2120`, echoed as `your_id` at `:1486-1491` |
+
+On `:8097` you know the id **before** dialing — your login/auth store holds
+it; pass it to the constructor and assert `yourId === memberId` in `onState`.
+On `:8804` the uuid is unknowable before the first `group_state`: adopt it
+from `onState`'s `yourId` (rebuild the client with it, or gate host UX on
+`group.host_id === yourId`) — until adopted, `isHost()` and echo suppression
+are inert on that carrier. This is the mobile wrapper's law: `your_id` is
+"authoritative for host comparisons", the pre-join id is "only a placeholder
+claim" (phlix-mobile-client `src/syncplay/SyncPlayService.ts`, audit H4).
+
+**Mismatch is not hypothetical.** mobile shipped a fabricated
+`memberId: 'mobile_*'` and every true host's controls went permanently inert
+(the dead-host bug) while each host command echoed back as a foreign one and
+double-applied. The library surfaces `your_id` and deliberately reconciles
+nothing (the ctor id is immutable by design) — the ghost-identity class is
+the consumer's assertion to make, and the reason this example sources
+`memberId` from the auth layer instead of inventing one.
 
 ### Command repeat policy
 

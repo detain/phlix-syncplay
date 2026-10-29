@@ -4,6 +4,35 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **`memberId` ↔ `your_id` identity contract DOCUMENTED; README example cured
+  to join-response truth (fix lane M-SYNCPLAY-12, review `syncplay__gameux`
+  M5; semver PATCH — documentation + tests only, zero executable surface
+  change: the emitted bundle is byte-ident, only `.d.ts` doc comments and the
+  maps moved; no API change, and the considered warn-once dead-host detector
+  was deliberately NOT shipped — routing a non-wire code through `onError`
+  would pollute the contracts-governed code namespace and the lib owns no
+  logger seam, so the coupling is pinned by tests on the existing surface
+  instead).** The three local identity decisions (`isHost()`, the
+  play/pause/seek echo suppressions) compare the ctor `memberId` against
+  server-stamped ids, but nothing stated they are ONE identity — and the
+  README taught the fabricated-literal shape that made mobile's dead-host bug
+  (true host reads `isHost()` false forever; own echoes arrive stamped with
+  the derived id, miss suppression, double-apply). Shipped: the full law on
+  `SyncPlayClientOptions.memberId` with both-sides producer cites (`:8097`
+  stamps the JWT subject — phlix-server `SyncPlayManager.php:1799`/`:1855`,
+  REST `SyncPlayController.php:173`/`:267`/`:305`, rebroadcast
+  `:1084-1093`/`:1182-1187`; `:8804` stamps a hub-generated per-connection
+  uuid — phlix-hub `SyncPlayRelayWorker.php:423` + `generateClientId()`
+  `:2107-2120`, echoed at `:1486-1491` — with the adopt-from-`yourId` duty and
+  the mobile audit-H4 precedent named), `onState`'s `yourId` docblock, the
+  surface-verbatim rationale in `handleGroupState`, an `isHost()` coupling
+  note, SPEC §9.2 (client-side coupling — additive § to the section that
+  defines the identity contract), a README "Identity contract" section +
+  table, and the example sourcing `memberId` from the auth store instead of
+  `'member_123'`. New `test/memberIdentity.test.ts` (6): `isHost()` true ONLY
+  for the join-stamped id, the permanent-false + double-apply mismatch
+  symptoms pinned on fake producer frames, self-vs-other echo suppression, and
+  the corrected README flow exercised as code. vitest 189 → 195 (+6 exact).**
 - **Watch-party chat and queue frames are ORCHESTRATED — `onChat` /
   `onQueueChanged` + `sendChat` / `sendTyping` (fix lane M-SYNCPLAY-11, review
   `syncplay__gameux` M4; semver MINOR — additive public surface, no existing

@@ -58,7 +58,62 @@ export interface SyncPlayClientOptions {
     send: (_message: RawMessage) => void;
     /** Clock source (epoch ms). */
     now: NowFn;
-    /** This client's stable member id. */
+    /**
+     * The identity this client presents — AND the value the library matches
+     * every server-stamped id against. **It MUST be the id the server derives
+     * for this authenticated connection — never a fabricated string**
+     * (SPEC §9; the coupling review `syncplay__gameux` M5 names as
+     * undocumented, M-SYNCPLAY-12).
+     *
+     * Why two roles collapse into one value: the outbound `member_id` this
+     * id stamps on frames is convenience/echo only — a correct server ignores
+     * it for identity (phlix-server `SyncPlayManager.php` re-derives
+     * everything from `$connection->getUserId()`, e.g. :1056/:1154/:1297).
+     * But three LOCAL decisions compare this constructor value against
+     * SERVER-STAMPED ids: {@link SyncPlayClient.isHost}
+     * (`group.host_id === memberId`) and the play/pause/seek echo
+     * suppressions (`msg.member_id === memberId` in `handlePlayback` /
+     * `handleSeek`). The constructor id and the stamped id are therefore
+     * REQUIRED to be the same identity for those decisions to function.
+     *
+     * What the server stamps, per carrier (both-sides verified):
+     *  - Direct `:8097` (server WS + REST): the authenticated user id — the
+     *    JWT subject. The create/join acks echo it as `your_id` on
+     *    `syncplay_group_state` (`SyncPlayManager.php:1799`, `:1855` —
+     *    `$connection->getUserId()`); REST mutations set
+     *    `$memberId = $request->userId` (`SyncPlayController.php:173`, `:267`,
+     *    `:305` — S289 "identity is the authenticated JWT subject ONLY");
+     *    rebroadcast commands carry the same derived sender id
+     *    (`SyncPlayManager.php:1084-1093` play, `:1182-1187` seek).
+     *    The consumer knows this id BEFORE dialing — it is what the login /
+     *    auth layer holds.
+     *  - Hub relay `:8804`: a hub-generated PER-CONNECTION uuid
+     *    (phlix-hub `SyncPlayRelayWorker.php:423`, `generateClientId()`
+     *    `:2107-2120`), surfaced as `your_id` on the join ack (`:1486-1491`)
+     *    and used as `member_id`/`host_id` on every later frame (`:1615`,
+     *    `:1796`). It is NOT knowable before the first `group_state` —
+     *    adopt it from `onState`'s `yourId` (the mobile wrapper reconciles
+     *    exactly this way: `your_id` is "authoritative for host comparisons",
+     *    ctor id is "only the pre-join placeholder claim" — phlix-mobile-client
+     *    `src/syncplay/SyncPlayService.ts`, audit H4). On this carrier the
+     *    ctor value cannot match the stamped id by construction: until the
+     *    adopted id is installed (rebuild the client, or gate host UX on
+     *    `group.host_id === yourId` from `onState`), `isHost()` and the
+     *    suppressions below are inert — that is the documented cost, not a
+     *    silent one.
+     *
+     * Mismatch failure UX — the estate's "dead-host bug", named precisely
+     * (mobile shipped a fabricated `memberId: 'mobile_*'` for exactly this):
+     *  1. `isHost()` is permanently FALSE even when this connection IS the
+     *     host: host-only controls in the UI go inert, although the server
+     *     (authorizing by connection, SPEC §9 item 2) would accept every
+     *     command the library sends regardless.
+     *  2. Self-echo suppression goes dead the OTHER way: the host's own
+     *     echoed play/pause/seek frames arrive stamped with the SERVER id,
+     *     fail the `=== memberId` test, and are applied a SECOND time as if
+     *     they came from a peer (double-apply loops). A mismatched member
+     *     likewise sees its own commands echo as foreign.
+     */
     memberId: string;
     /** This client's display name (sent on create/join). */
     memberName?: string;
@@ -91,6 +146,19 @@ export interface SyncPlayClientOptions {
      * (parse-don't-validate at the options boundary).
      */
     seekThrottleMs?: number;
+    /**
+     * Every accepted `syncplay_group_state` (create/join ack and each later
+     * state broadcast). `yourId` is the payload's `your_id` — the identity
+     * THE SERVER stamped for THIS authenticated connection (SPEC §9; per
+     * carrier see {@link SyncPlayClientOptions.memberId}). The library
+     * SURFACES it and reconciles nothing (the ctor id is immutable by
+     * design): consumers MUST compare `yourId === getMemberId()` and treat a
+     * mismatch as the ghost-identity class documented on
+     * {@link SyncPlayClientOptions.memberId} — `undefined` only on hand-built
+     * frames that omitted the field; real producers always stamp it
+     * (phlix-server `SyncPlayManager.php:1799`/`:1855`, phlix-hub
+     * `SyncPlayRelayWorker.php:1490`).
+     */
     onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
     onSync?: (_status: TimeSyncStatus) => void;
     onPlaybackCommand?: (_command: PlaybackCommand) => void;
@@ -256,7 +324,16 @@ export declare class SyncPlayClient {
     getGroup(): SyncPlayGroup | null;
     /** This member's id. */
     getMemberId(): string;
-    /** True if this member is the current host of the current group. */
+    /**
+     * True if this member is the current host of the current group — i.e.
+     * `group.host_id === this.memberId`, the server-stamped host against the
+     * CONSTRUCTOR id. Sound only under the identity coupling documented on
+     * {@link SyncPlayClientOptions.memberId}: with a fabricated/mismatched
+     * ctor id this is permanently false for a true host (the dead-host bug
+     * class, SPEC §9). Server truth: `host_id` is always the derived id
+     * (`SyncPlayManager.php` groups key members by `$connection->getUserId()`;
+     * hub rooms key by `$client->clientId`, `SyncPlayRelayWorker.php:1396`).
+     */
     isHost(): boolean;
     /** Server-synchronized current time (ms). */
     getSynchronizedTime(): number;
