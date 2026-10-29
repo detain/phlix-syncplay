@@ -677,6 +677,13 @@ sender id with the authenticated one before rebroadcast. This caveat is the
 reason the suppression key is `member_id`; see also Step B6 (host recompute),
 which trusts the same server-set ids.
 
+Send **pacing** is likewise client behavior, not wire shape:
+`@phlix/syncplay` coalesces key-repeat seek bursts into at most one
+`syncplay_playback_seek` frame per throttle window before the frame reaches the
+wire (README "Command repeat policy"; `seekThrottleMs`). Nothing in this
+section changes for the frames that do arrive — the server authorizes and
+re-stamps each one exactly as above.
+
 ---
 
 ## 10. Reconnect & resume recovery

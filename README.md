@@ -140,10 +140,47 @@ client.sendSeek(fromMs, toMs);
 client.reportPosition(positionMs, isPlaying);
 ```
 
+### Command repeat policy
+
+A TV remote key held on a seek bar emits **10–30 repeat events/s**, and every
+playback command is a broadcast: the server rebroadcasts each accepted
+`syncplay_playback_play` / `_pause` / `_seek` to **every member** of the group
+(phlix-server `SyncPlayManager.php:1182`). The server absorbs none of this
+rate: its only WebSocket limiter guards the CONNECT handshake (30 conns / 60 s,
+`RateLimitProfiles::WS_CONNECT`), `JoinPasswordThrottle` guards wrong group
+passwords, and `queue_limit_exceeded` caps media-QUEUE depth — none of them
+throttle command repeat. The law for senders is therefore: **commands are
+per-intent, not per-key-event.** How that is met per sender:
+
+- **`sendSeek` — the library coalesces it for you (default on).** A leading +
+  trailing throttle windowed by the `seekThrottleMs` constructor option
+  (default 250 ms): the first call of a burst dispatches **synchronously**
+  (single-press UX is byte-identical to the raw path, so every existing call
+  pattern keeps working), repeats inside the window merge **latest-wins**
+  (an intermediate seek target is meaningless — only the last position
+  matters), and the last position always reaches the wire within one window
+  of release. A held remote costs the room at most 4 seek frames/s instead of
+  10–30 full player seeks. Escape hatch: `seekThrottleMs: 0` restores raw
+  per-call dispatch — the seek coalescer is this library's ONLY owned timer,
+  and off-mode owns none. `leaveGroup()` / `onDisconnect()` cancel a
+  not-yet-flushed trailing seek: you never seek a room you just left.
+- **`sendPlay` / `sendPause` — per-intent, consumer-side.** Dispatch stays
+  synchronous and un-shaped: each is a state EDGE and latest-wins merging
+  would be semantically wrong (it can lose a legitimate pause behind a
+  repeat). If your input layer can key-repeat play/pause, gate the repeat
+  before calling (a trailing debounce, e.g. the S519 pattern `phlix-ui` uses
+  for its own controls).
+- **`reportPosition` — cadence is consumer-owned; seconds-scale is sane.**
+  The server's S446 out-of-sync nudge judges staleness of exactly these
+  reports (`SyncPlayManager.php:1569-1585`), so flooding them mis-signals as
+  surely as long silence does. Remember background-tab timer clamping:
+  resume your interval on visibility change.
+
 ### Reconnect recovery
 
-This library owns **no socket and no timers** — your transport opens, closes, and
-reconnects the WebSocket. When the socket drops, call `client.onDisconnect()`
+This library owns **no socket and no periodic timers** — your transport opens,
+closes, and reconnects the WebSocket. When the socket drops, call
+`client.onDisconnect()`
 *before* reconnecting. It resets the time-sync samples + drift, forgets the
 current group, and drops the outstanding ping so a late pong from the dead
 connection cannot seed a bogus sample (then fires the optional `onDisconnect`
@@ -155,7 +192,9 @@ The required ordering (also in [`SPEC.md` §10](./SPEC.md#10-reconnect--resume-r
 socket close → client.onDisconnect() → reconnect → joinGroup(...) → resume pingTime()
 ```
 
-**Backoff is your transport's job** (this lib schedules no timers). Recommended
+**Backoff is your transport's job** (this lib schedules no periodic timers —
+the one owned-timer exception is the `sendSeek` coalescing flush, see "Command
+repeat policy"). Recommended
 recipe — exponential backoff with full jitter, capped, reset on a clean open:
 
 ```ts

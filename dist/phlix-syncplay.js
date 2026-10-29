@@ -170,17 +170,26 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			sampleCount: this.samples.length
 		};
 	}
-}, h = class t {
+}, h = 250, g = class t {
 	send;
 	now;
 	memberId;
 	memberName;
 	options;
 	timeSync;
+	seekThrottleMs;
+	seekWindowOpen = !1;
+	pendingSeek = null;
+	seekFlushTimer = null;
 	group = null;
 	lastPingSendTime = null;
 	constructor(e) {
-		this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = e.memberName ?? "User", this.timeSync = new m(e.now);
+		this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = e.memberName ?? "User", this.timeSync = new m(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
+	}
+	static parseSeekThrottleMs(e) {
+		if (e === void 0) return h;
+		if (typeof e != "number" || !Number.isFinite(e) || e < 0) throw TypeError(`SyncPlayClient: seekThrottleMs must be a finite number >= 0 (0 disables the seek coalescing throttle), got ${String(e)}`);
+		return e;
 	}
 	getTimeSync() {
 		return this.timeSync;
@@ -214,7 +223,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		n !== void 0 && (r.password_hash = n), this.dispatch(e.GROUP_JOIN, r);
 	}
 	leaveGroup() {
-		this.group !== null && (this.dispatch(e.GROUP_LEAVE, {
+		this.group !== null && (this.cancelSeekCoalescing(), this.dispatch(e.GROUP_LEAVE, {
 			group_id: this.group.group_id,
 			member_id: this.memberId
 		}), this.group = null);
@@ -235,7 +244,13 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			server_time: this.getSynchronizedTime()
 		});
 	}
-	sendSeek(t, n) {
+	sendSeek(e, t) {
+		this.group !== null && (this.seekWindowOpen ? this.pendingSeek = {
+			from: e,
+			to: t
+		} : (this.dispatchSeek(e, t), this.seekThrottleMs > 0 && this.openSeekWindow()));
+	}
+	dispatchSeek(t, n) {
 		this.group !== null && this.dispatch(e.PLAYBACK_SEEK, {
 			group_id: this.group.group_id,
 			member_id: this.memberId,
@@ -243,6 +258,17 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			to_position: n,
 			server_time: this.getSynchronizedTime()
 		});
+	}
+	openSeekWindow() {
+		this.seekWindowOpen = !0, this.seekFlushTimer = setTimeout(() => this.closeSeekWindow(), this.seekThrottleMs);
+	}
+	closeSeekWindow() {
+		this.seekWindowOpen = !1, this.seekFlushTimer = null;
+		let e = this.pendingSeek;
+		e !== null && (this.pendingSeek = null, this.group !== null && (this.dispatchSeek(e.from, e.to), this.openSeekWindow()));
+	}
+	cancelSeekCoalescing() {
+		this.pendingSeek = null, this.seekFlushTimer !== null && (clearTimeout(this.seekFlushTimer), this.seekFlushTimer = null), this.seekWindowOpen = !1;
 	}
 	reportPosition(t, n) {
 		this.group !== null && this.dispatch(e.PLAYBACK_SYNC, {
@@ -258,7 +284,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		this.lastPingSendTime = t, this.dispatch(e.TIME_PING, { client_time: t });
 	}
 	onDisconnect() {
-		this.timeSync.reset(), this.group = null, this.lastPingSendTime = null, this.options.onDisconnect?.();
+		this.cancelSeekCoalescing(), this.timeSync.reset(), this.group = null, this.lastPingSendTime = null, this.options.onDisconnect?.();
 	}
 	handleIncoming(t) {
 		let n = a(t);
@@ -455,6 +481,6 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	}
 };
 //#endregion
-export { n as ALL_MESSAGE_TYPES, u as DRIFT_CORRECTION_FACTOR, f as DRIFT_RATE_MAX, d as DRIFT_RATE_MIN, c as MAX_ACCEPTABLE_RTT, s as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, l as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, h as SyncPlayClient, p as TIME_SYNC_PROTOCOL_VERSION, m as TimeSync, a as decodeMessage, i as encodeMessage, r as isValidMessageType, o as serializeMessage };
+export { n as ALL_MESSAGE_TYPES, u as DRIFT_CORRECTION_FACTOR, f as DRIFT_RATE_MAX, d as DRIFT_RATE_MIN, c as MAX_ACCEPTABLE_RTT, s as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, l as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, g as SyncPlayClient, p as TIME_SYNC_PROTOCOL_VERSION, m as TimeSync, a as decodeMessage, i as encodeMessage, r as isValidMessageType, o as serializeMessage };
 
 //# sourceMappingURL=phlix-syncplay.js.map

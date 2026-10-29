@@ -4,6 +4,45 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **`sendSeek` is now a coalescing throttle — command-repeat protection with
+  a documented stance (fix lane M-SYNCPLAY-09, review `syncplay__gameux`
+  M2; consumer-visible feat — semver MINOR).** A TV remote held on a seek bar
+  key-repeats at 10–30 events/s and the pre-fix `sendSeek` (`client.ts:258-269`)
+  was a bare synchronous dispatch: every repeat became a
+  `syncplay_playback_seek` the server rebroadcasts to EVERY member
+  (phlix-server `SyncPlayManager.php:1182`). The server absorbs none of it —
+  its only WebSocket limiter guards the CONNECT handshake (30 conns/60 s,
+  `RateLimitProfiles::WS_CONNECT`), `JoinPasswordThrottle` guards wrong group
+  passwords, and `queue_limit_exceeded` (`SyncPlayManager.php:1256`) caps
+  media-QUEUE depth, not command rate (all three cross-repo verified @tip).
+  Shipped: leading + trailing throttle windowed by the ADDITIVE constructor
+  option `seekThrottleMs` (default 250 ms; parse-at-the-boundary — negative /
+  non-finite values throw a descriptive `TypeError`). The first call of a
+  burst dispatches SYNCHRONOUSLY (leading edge — single-press UX is
+  byte-identical to the old path, so every existing consumer call pattern —
+  phlix-ui `api/syncplay.ts` case 'seek', phlix-tizen store `sendSeek(0, …)`,
+  the pinned-`#v0.1.5` bundles — keeps working unchanged); repeats inside the
+  window merge LATEST-WINS (intermediate seek targets are meaningless) and
+  exactly ONE trailing frame carrying the last target flushes at the
+  boundary — a sustained hold is wire-capped at 4 frames/s. `0` is the
+  documented escape hatch: pure passthrough, zero timers (this library's one
+  owned-timer exception; class-header + `onDisconnect` "schedules no timers"
+  claims amended to "no PERIODIC timers" accordingly). `leaveGroup()` /
+  `onDisconnect()` EAGERLY cancel a not-yet-flushed trailing seek (pinned by
+  pre-advance timer-count assertions so the flush-time group guard cannot
+  mask a missing cancel). Stance documented: README "Command repeat policy"
+  (seek = library-coalesced; play/pause = per-intent, consumer-side gating —
+  latest-wins merging a state EDGE would lose legitimate pauses;
+  reportPosition cadence = consumer-owned, seconds-scale, S446 judges those
+  reports); SPEC §9.1 gained a pointer sentence (pacing is client behavior,
+  wire shape and §9 law untouched). New suite `test/seekCoalescing.test.ts`
+  14 tests; serial suite 6 files / 158 tests → 7 / 172 (+14 exact vs 158
+  baseline, measured-from-red). Mutation matrix: throttle stripped → exactly
+  6 named reds; `onDisconnect`-cancel stripped → 1; `leaveGroup`-cancel
+  stripped → 1 (after the named test was hardened to pin EAGER disarm);
+  off-mode passthrough broken → 1. Dist rebuild deterministic ×2, aggregate
+  md5 25199fb928c41407b6c09bd705e39587. Lands for pinned consumers in the
+  next tag wave (v0.1.6); package version untouched in this lane.
 - **The S446 `nudge` soft-desync correction is now DELIVERED —
   `handlePlaybackSync` dropped it (fix lane M-SYNCPLAY-08, review
   `syncplay__gameux` M1).** The server's owner-ruled out-of-sync reaction

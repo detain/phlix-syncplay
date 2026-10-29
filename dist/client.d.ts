@@ -12,10 +12,17 @@
  *  - the current group state derived from server group_state messages,
  *  - the host-only playback command senders.
  *
- * It has NO dependency on WebSocket, Date, timers, or any framework. The
- * transport `send` and the clock `now` are injected; the consumer is
- * responsible for opening the socket, calling {@link handleIncoming} on each
- * inbound frame, and scheduling periodic {@link pingTime}/{@link reportPosition}.
+ * It has NO dependency on WebSocket, Date, or any framework, and it schedules
+ * NO PERIODIC timers. The transport `send` and the clock `now` are injected;
+ * the consumer is responsible for opening the socket, calling
+ * {@link handleIncoming} on each inbound frame, and scheduling periodic
+ * {@link pingTime}/{@link reportPosition}.
+ *
+ * ONE documented exception (M-SYNCPLAY-09, README "Command repeat policy"):
+ * while {@link SyncPlayClient.sendSeek} coalescing is enabled (the default),
+ * the client owns at most ONE short ambient `setTimeout` flush timer at a
+ * time. {@link SyncPlayClientOptions.seekThrottleMs}`: 0 disables it and
+ * restores a fully timer-free surface.
  *
  * This is the canonical surface that mobile / windows / tizen wrappers should
  * delegate to instead of re-implementing the protocol (and re-introducing the
@@ -55,6 +62,35 @@ export interface SyncPlayClientOptions {
     memberId: string;
     /** This client's display name (sent on create/join). */
     memberName?: string;
+    /**
+     * Command-repeat protection for {@link SyncPlayClient.sendSeek} — a
+     * leading + trailing COALESCING throttle window in ms
+     * (M-SYNCPLAY-09, review `syncplay__gameux` M2).
+     *
+     * Why the library owns this: the server absorbs ZERO key-repeat spam — its
+     * only WebSocket limiter guards the CONNECT handshake (30/60s, phlix-server
+     * `RateLimitProfiles.php::WS_CONNECT`), its `JoinPasswordThrottle` guards
+     * wrong group passwords only, and its `queue_limit_exceeded`
+     * (`SyncPlayManager.php:1256`) caps media-QUEUE depth, not command rate —
+     * while `handleSeek` rebroadcasts EVERY `syncplay_playback_seek` frame to
+     * the whole group (`SyncPlayManager.php:1182`). A TV remote key-repeats at
+     * 10–30 events/s, so each un-coalesced hold = 10-30 full player seeks
+     * (HLS segment reload, buffer stall) per second on every screen in the room.
+     *
+     * Semantics (default 250 ms): the FIRST call of a burst dispatches
+     * SYNCHRONOUSLY (leading edge — single-press UX stays byte-identical to the
+     * unthrottled path, so every existing consumer call pattern keeps working
+     * unchanged); repeats within the window are merged LATEST-WINS (an
+     * intermediate seek target is meaningless — only the last position matters),
+     * and exactly ONE trailing frame carrying the last target flushes when the
+     * window closes. A sustained hold is capped at one frame per window.
+     *
+     * `0` is the documented escape hatch: pure passthrough — every call
+     * dispatches synchronously and this library schedules no timers at all.
+     * Negative or non-finite values throw a `TypeError` at construction
+     * (parse-don't-validate at the options boundary).
+     */
+    seekThrottleMs?: number;
     onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
     onSync?: (_status: TimeSyncStatus) => void;
     onPlaybackCommand?: (_command: PlaybackCommand) => void;
@@ -133,10 +169,26 @@ export declare class SyncPlayClient {
     private readonly memberName;
     private readonly options;
     private readonly timeSync;
+    /** Coalescing window for sendSeek, ms; 0 = off (passthrough, timer-free). */
+    private readonly seekThrottleMs;
+    /** True while a coalescing window is open (a trailing flush timer is armed). */
+    private seekWindowOpen;
+    /** The LAST (from,to) pair seen during the open window — latest-wins merge. */
+    private pendingSeek;
+    /** The single owned flush timer (present only while {@link seekWindowOpen}). */
+    private seekFlushTimer;
     private group;
     /** Local t1 of the most recent outstanding ping, ms. */
     private lastPingSendTime;
     constructor(options: SyncPlayClientOptions);
+    /**
+     * Parse the seek-throttle window at the constructor boundary: accepted
+     * domain = a finite number ≥ 0 (0 = off). Anything else is a
+     * misconfiguration that must halt, not a value to silently re-default —
+     * a consumer that asked for throttling and got a different number would
+     * be tuning against a phantom.
+     */
+    private static parseSeekThrottleMs;
     /** The TimeSync instance (for status/offset queries). */
     getTimeSync(): TimeSync;
     /** The current group, or null if not in one. */
@@ -172,7 +224,30 @@ export declare class SyncPlayClient {
     leaveGroup(): void;
     sendPlay(position: number): void;
     sendPause(position: number): void;
+    /**
+     * Send a seek command, coalesced against key-repeat by the
+     * {@link SyncPlayClientOptions.seekThrottleMs} throttle (leading + trailing,
+     * latest-wins — see the option's docblock for the full stance).
+     *
+     * With the throttle OFF (`seekThrottleMs: 0`) this is the original bare
+     * dispatch: every call ships one frame synchronously. WITH it on, the first
+     * call of a burst ships synchronously and repeats merge into a single
+     * trailing frame at the window's close — the wire never sees an
+     * intermediate target.
+     */
     sendSeek(fromPosition: number, toPosition: number): void;
+    /** The single PLAYBACK_SEEK wire point — leading and trailing edges share it. */
+    private dispatchSeek;
+    /** Arm the window's trailing flush. This is the library's ONLY owned timer. */
+    private openSeekWindow;
+    /**
+     * Window boundary: flush the latest coalesced target as ONE trailing frame
+     * and immediately re-arm (a continued hold is then rate-capped at one frame
+     * per window); with nothing pending, close cleanly and own no timer.
+     */
+    private closeSeekWindow;
+    /** Drop any coalesced intent and disarm the window (leave/disconnect). */
+    private cancelSeekCoalescing;
     /** Periodic position report (PLAYBACK_SYNC) — typically host-driven. */
     reportPosition(position: number, isPlaying: boolean): void;
     /** Send a time_ping. Call periodically (e.g. every 10–30s). */
@@ -190,7 +265,10 @@ export declare class SyncPlayClient {
      * RECOVERY SEQUENCE (see SPEC §10 / README "Reconnect recovery"):
      *   socket close/error → `onDisconnect()` → reconnect → re-`joinGroup(...)`
      *   → resume periodic `pingTime()`. Reconnect *backoff* (the retry timer) is a
-     *   transport concern owned by the consumer; this library schedules no timers.
+     *   transport concern owned by the consumer; this library schedules no
+     *   periodic timers (its one owned-timer exception is the sendSeek coalescing
+     *   flush — cancelled here, disabled by `seekThrottleMs: 0`; README
+     *   "Command repeat policy").
      */
     onDisconnect(): void;
     /**
