@@ -267,14 +267,37 @@ member_id?: string
 `syncplay_playback_sync` (periodic position broadcast)
 ```
 group_id: string
-member_id: string
+member_id: string          (echo: HOST id — `SyncPlayManager.php:1518`; nudge frame:
+                            the DRIFTING member's own id — :1570)
+current_media_id: string|null  (:1520 echo, :1572 nudge; hub relay
+                                 `SyncPlayRelayWorker.php:1676`)
 position: number
 is_playing: boolean
 server_time: number        (wire: UNIX seconds on :8097, ms on hub — §8.4; delivered as ms)
+nudge?: {                  (S446 soft-desync correction — directed frames ONLY, see below)
+  drift_ms: number,        (group position − reported position, ms; >0 = behind — :1566)
+  direction: 'behind' | 'ahead',   (:1578)
+  suggested_rate: number,  (1 ± 0.1 — `GroupState::NUDGE_RATE_STEP` :167; :1579-1581)
+  tolerance_ms: number,    (group position tolerance — default 2000, `GroupState.php:124`; :1582)
+  cooldown_ms: number      (`GroupState::NUDGE_COOLDOWN_MS` = 1000 — `GroupState.php:145`; :1583)
+}
 ```
 > Broadcast to every group member including the originator — the server does not
 > exclude the sender for this type (unlike play/pause/seek) and stamps the frame
-> with the HOST id; see §9.1.
+> with the HOST id; see §9.1. That is the GROUP ECHO
+> (`SyncPlayManager.php:1517-1524`, phlix-server @84e55800); it never carries
+> `nudge`. The same frame type additionally serves the S446 out-of-sync
+> reaction: when a member's ingested report falls outside the group tolerance
+> (guard :1529-1531, cooldown slot claim :1561), the server UNICASTS that one
+> member a second frame of this type carrying the `nudge` object above
+> (`sendOutOfSyncNudge()` :1569-1585) — an additive payload on the existing
+> type (S417 outbound rule), stamped with the recipient's own id, position
+> and `is_playing` from the authoritative group state. The owner policy is
+> "a rate-limited NUDGE — never a seek" (`GroupState.php:39`): a consumer
+> applies `suggested_rate` as playRate instead of seeking. The library
+> delivers it as the optional 5th argument of `onPlaybackSync`; on every
+> frame that carried none — echo and hub alike — the argument is `undefined`,
+> never a fabricated zero object.
 
 ### Chat
 
@@ -561,8 +584,13 @@ consumers receive ms on both carriers); server-initiated
 `syncplay_time_sync` has no hub producer and its inbound use is refused
 (`hub.protocol_unsupported`) because the hub holds no clock authority beyond
 `syncplay_time_ping`/`_pong`; `password_hash` is accepted and ignored (the
-token's own (server, owner) scope is the gate); and the S446 idle-host nudge
-is not relayed.
+token's own (server, owner) scope is the gate); and the S446 out-of-sync
+nudge (`syncplay_playback_sync`'s additive `nudge` object — a producer that
+exists only in the `:8097` server, `SyncPlayManager.php:1569-1585`
+@84e55800; the hub lane runs no out-of-sync policy and its
+`handleCanonicalPlaybackSync()` reply, `SyncPlayRelayWorker.php:1673-1680`
+@f85f48ec, never stamps the key) is not relayed — on that carrier the
+`onPlaybackSync` nudge argument is always `undefined`.
 
 The first consumer of the relay's canonical lane is phlix-mobile-client
 `13715d0`, whose interim `RELAY_NOT_SUPPORTED` refusal was lifted in the same

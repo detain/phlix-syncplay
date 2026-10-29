@@ -22,7 +22,7 @@
  * historical divergences).
  */
 import { type NowFn } from './framing';
-import { type GroupListSummaryRow, type RawMessage, type SyncPlayGroup, type TimeSyncState, type UnknownFrame } from './messages';
+import { type GroupListSummaryRow, type PlaybackSyncNudge, type RawMessage, type SyncPlayGroup, type TimeSyncState, type UnknownFrame } from './messages';
 import { TimeSync } from './time-sync';
 /** A play/pause/seek command surfaced to the consumer for local application. */
 export interface PlaybackCommand {
@@ -78,8 +78,17 @@ export interface SyncPlayClientOptions {
      * `_serverTime` is ALWAYS milliseconds: the wire mixes units per carrier
      * (`:8097` stamps UNIX seconds, the hub relay stamps ms) and the decode
      * boundary normalizes via `SyncPlayClient.serverTimeToMs` (SPEC §4/§8.4).
+     *
+     * `nudge` (M-SYNCPLAY-08) is the S446 soft-desync correction object riding
+     * the SAME frame family: defined only on the directed out-of-sync frame the
+     * `:8097` server unicasts to the drifting member (phlix-server
+     * `SyncPlayManager.php:1569-1585` — its own echo and every hub-relay frame
+     * leave it `undefined`, absent ≠ zeroed, SPEC §4/§8.4). On a directed frame
+     * `_memberId` is THIS client's id and the four state args carry the same
+     * authoritative group state as the echo; apply `nudge.suggested_rate`
+     * instead of seeking (the server's "nudge, never seek" policy).
      */
-    onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number) => void;
+    onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number, nudge?: PlaybackSyncNudge) => void;
     /**
      * Advisory server sync-state snapshot (TYPE_TIME_SYNC / syncplay_time_sync):
      * the server's UNICAST reply to a `syncplay_time_sync` request. Units are
@@ -245,6 +254,20 @@ export declare class SyncPlayClient {
      * never fabricates an empty queue for a frame that carried none.
      */
     private static normalizeQueue;
+    /**
+     * Narrow the `nudge` object a DIRECTED `playback_sync` frame carries
+     * (M-SYNCPLAY-08: this handler used to drop it, stranding the server's
+     * S446 soft-correction channel at the library boundary). Producer law and
+     * per-field coordinates are documented on {@link PlaybackSyncNudge}; the
+     * only emitter is phlix-server `SyncPlayManager.php:1569-1585` (@84e55800).
+     * The narrowing follows the house idiom of {@link normalizeQueue}:
+     * defensive per-field coercion, nothing invented. A frame WITHOUT the
+     * `nudge` key (the group echo and every hub-relay frame) yields
+     * `undefined`; the library never fabricates a correction for a frame that
+     * carried none. A non-object `nudge` on a hand-built frame degrades to
+     * `undefined` too (drop-the-garbage, keep-the-state).
+     */
+    private static normalizeNudge;
     private handleGroupState;
     private handlePlayback;
     private handleSeek;

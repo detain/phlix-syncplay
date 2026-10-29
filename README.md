@@ -120,7 +120,7 @@ const client = new SyncPlayClient({
   onError: (code, message) => {},
   onMemberTyping: (memberId, isTyping) => {},
   onHostTransfer: (currentHostId, newHostId) => {},
-  onPlaybackSync: (memberId, position, isPlaying, serverTime) => {},
+  onPlaybackSync: (memberId, position, isPlaying, serverTime, nudge) => { /* `nudge` = server-directed S446 soft correction ({drift_ms, direction, suggested_rate, tolerance_ms, cooldown_ms}); undefined unless the `:8097` server unicasted it to THIS member — apply suggested_rate, never seek (SPEC §4) */ },
   onTimeSync: (state) => { /* { memberId, groupId, serverTimeSec, offsetMs, latencyMs, driftRate, isStable } */ },
   onGroupList: (groups) => { /* [{ id, name, member_count, has_password, current_media, is_playing }] — live producer row, SPEC §4 */ },
   onUnknownFrame: (frame) => { /* non-SyncPlay types only, e.g. the hub relay's `pending_command` */ },

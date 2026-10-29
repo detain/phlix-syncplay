@@ -344,6 +344,17 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			added_by: typeof e.added_by == "string" || e.added_by === null ? e.added_by : void 0
 		}));
 	}
+	static normalizeNudge(e) {
+		if (typeof e != "object" || !e) return;
+		let t = e;
+		return {
+			drift_ms: typeof t.drift_ms == "number" ? t.drift_ms : void 0,
+			direction: t.direction === "behind" || t.direction === "ahead" ? t.direction : void 0,
+			suggested_rate: typeof t.suggested_rate == "number" ? t.suggested_rate : void 0,
+			tolerance_ms: typeof t.tolerance_ms == "number" ? t.tolerance_ms : void 0,
+			cooldown_ms: typeof t.cooldown_ms == "number" ? t.cooldown_ms : void 0
+		};
+	}
 	handleGroupState(e) {
 		let n = e, r = n.group;
 		if (typeof r != "object" || !r) return;
@@ -411,8 +422,8 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		}), this.options.onHostTransfer?.(t.current_host_id, t.new_host_id));
 	}
 	handlePlaybackSync(e) {
-		let n = typeof e.member_id == "string" ? e.member_id : void 0, r = typeof e.position == "number" ? e.position : 0, i = typeof e.is_playing == "boolean" && e.is_playing, a = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime();
-		this.options.onPlaybackSync?.(n ?? "", r, i, a);
+		let n = typeof e.member_id == "string" ? e.member_id : void 0, r = typeof e.position == "number" ? e.position : 0, i = typeof e.is_playing == "boolean" && e.is_playing, a = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime(), o = t.normalizeNudge(e.nudge);
+		this.options.onPlaybackSync?.(n ?? "", r, i, a, o);
 	}
 	handleTimeSync(e) {
 		let t = e;

@@ -4,6 +4,43 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **The S446 `nudge` soft-desync correction is now DELIVERED —
+  `handlePlaybackSync` dropped it (fix lane M-SYNCPLAY-08, review
+  `syncplay__gameux` M1).** The server's owner-ruled out-of-sync reaction
+  ("a rate-limited NUDGE — never a seek", phlix-server `GroupState.php:39`)
+  rides the SAME `syncplay_playback_sync` frame family as an additive
+  object, unicast to the drifting member by
+  `SyncPlayManager::sendOutOfSyncNudge()` (phlix-server
+  `src/Session/SyncPlay/SyncPlayManager.php:1569-1585` @84e55800 —
+  `drift_ms`, `direction`, `suggested_rate`, `tolerance_ms`,
+  `cooldown_ms`). The library extracted exactly four fields
+  (`member_id`, `position`, `is_playing`, `server_time`) and dropped the
+  object on the floor, stranding the "nudge, never seek" policy on the
+  wire's last hop: embedders could only sniff raw frames. Shipped:
+  `PlaybackSyncNudge`/`PlaybackSyncNudgeDirection` types specified to
+  producer bytes (docblocks cite the emitter lines and the `GroupState`
+  constants it interpolates — rate step 0.1 `:167`, tolerance default
+  2000 `:124`, cooldown 1000 `:145`); `onPlaybackSync` gains an ADDITIVE
+  5th optional argument (BREAKING-free — 4-arg consumers stay assignable,
+  pinned by a test); `normalizeNudge()` carries with the house per-field
+  narrowing — an absent `nudge` key (the group echo `:1517-1524` and every
+  hub-relay frame) yields `undefined`, never a fabricated object, and a
+  foreign `direction` literal is dropped not passed through.
+  `PlaybackSyncPayload` gains the wire-true optional `current_media_id`
+  (both producers stamp it; not delivered as its own argument — read the
+  cached group) and its stale hub cite (`SyncPlayRelayWorker.php:1105/
+  :1603`) re-anchored to measured `:1679`. SPEC §4 amended with the
+  two-carrier law (echo vs directed nudge, both-sides cites) and §8.4's
+  misnomer "S446 idle-host nudge" corrected to the out-of-sync nudge,
+  pinned never-stamped on the hub lane (`SyncPlayRelayWorker.php:
+  1673-1680` @f85f48ec). Fixtures are producer bytes verbatim from the
+  quoted emitters. New suite 7 tests, serial suite 6 files / 158 tests
+  (+7 exact vs 151 baseline); carry-through stripped → exactly 3 named
+  reds (mutation-proven). Dist rebuild deterministic ×2, aggregate md5
+  2327ae219348d8f5964abdce4eb8d423. Additive optional surface for
+  pinned-`#v0.1.5` consumers — semver MINOR at the next tag
+  (v0.1.5 → v0.2.0; package version untouched in this lane, tag wave
+  decides).
 - **README quick-start dials now obey the §8.4 carrier law (docs-only, fix
   lane M-SYNCPLAY-07, review `syncplay__docmaint` M7 / `syncplay__writer`
   dup).** Both former examples dialed bare URLs — no credential carrier at

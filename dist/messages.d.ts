@@ -203,19 +203,83 @@ export interface PlaybackQueuePayload {
     queue: PlaybackQueueItem[];
     member_id?: string;
 }
+/**
+ * Which side of the authoritative playhead the drifting member sits on
+ * (S446 nudge, SPEC §4). The server picks the literal pair
+ * `$behind ? 'behind' : 'ahead'` at phlix-server
+ * `src/Session/SyncPlay/SyncPlayManager.php:1578` (@84e55800), where
+ * `$behind` is `drift_ms > 0` (:1566-1567) and `drift_ms` =
+ * authoritative position − reporter's last reported position.
+ */
+export type PlaybackSyncNudgeDirection = 'behind' | 'ahead';
+/**
+ * The S446 soft-desync correction object riding a server-DIRECTED
+ * `syncplay_playback_sync` frame ("a rate-limited NUDGE — never a seek",
+ * phlix-server `GroupState.php:39` policy header). Emitted ONLY by
+ * `SyncPlayManager::sendOutOfSyncNudge()`, unicast to the member whose
+ * just-ingested position fell outside the group tolerance (guard
+ * phlix-server `src/Session/SyncPlay/SyncPlayManager.php:1529-1531`,
+ * @84e55800); the group echo (:1517-1524) NEVER carries it, and the
+ * `:8804` hub relay produces no nudge at all (phlix-hub
+ * `src/SyncPlay/SyncPlayRelayWorker.php` has zero nudge producers;
+ * SPEC §8.4 "not relayed"). Fields as the emitter stamps them
+ * (`SyncPlayManager.php:1576-1584`, @84e55800):
+ */
+export interface PlaybackSyncNudge {
+    /**
+     * Group position − reported position, ms (computed :1566). Positive =
+     * the member is BEHIND the room.
+     */
+    drift_ms?: number;
+    /** Literal pair stamped at :1578 (`$behind ? 'behind' : 'ahead'`). */
+    direction?: PlaybackSyncNudgeDirection;
+    /**
+     * Recommended playRate correction: `1 ± GroupState::NUDGE_RATE_STEP`
+     * (step 0.1, phlix-server `GroupState.php:167`), i.e. 1.1 when behind,
+     * 0.9 when ahead (:1579-1581).
+     */
+    suggested_rate?: number;
+    /**
+     * The group's position tolerance the in-sync verdict was judged
+     * against (:1582 → `GroupState::getPositionTolerance()`; default
+     * `POSITION_TOLERANCE` = 2000 ms, `GroupState.php:124`).
+     */
+    tolerance_ms?: number;
+    /**
+     * Minimum spacing before the SAME member can be nudged again —
+     * `GroupState::NUDGE_COOLDOWN_MS` = 1000 ms (`GroupState.php:145`,
+     * slot claim `SyncPlayManager.php:1561`, consumed on the wire at :1583).
+     */
+    cooldown_ms?: number;
+}
 export interface PlaybackSyncPayload {
     group_id: string;
+    /** Echo frames carry the HOST id (:1518); nudge frames carry the DRIFTING
+     * MEMBER's own id (:1570) — the recipient is the one nudged, so
+     * `member_id === your id` + `nudge` present identifies the directed frame. */
     member_id: string;
+    /** Stamped by BOTH live producers: echo phlix-server `SyncPlayManager.php:1520`,
+     * nudge :1572, hub relay phlix-hub `SyncPlayRelayWorker.php:1676`; nullable.
+     * Not delivered as its own `onPlaybackSync` argument — read it off the
+     * cached group (`SyncPlayGroup.current_media_id`). */
+    current_media_id?: string | null;
     position: number;
     is_playing: boolean;
     /**
      * WIRE UNITS MIX PER CARRIER (SPEC §8.4): UNIX **seconds** on `:8097`
-     * (`SyncPlayManager.php:1506/:1523/:1575` `time()`) vs **milliseconds**
-     * on the hub relay (`SyncPlayRelayWorker.php:1105/:1603` `nowMs()`).
-     * `SyncPlayClient.serverTimeToMs` normalizes every delivered `server_time`
-     * to ms — the §4 ms law holds for consumers.
+     * (stamp site phlix-server `SyncPlayManager.php:1506` `time()`, echo
+     * field :1523, nudge field :1575, @84e55800) vs **milliseconds**
+     * on the hub relay (field phlix-hub `SyncPlayRelayWorker.php:1679`
+     * `nowMs()`, @f85f48ec). `SyncPlayClient.serverTimeToMs` normalizes
+     * every delivered `server_time` to ms — the §4 ms law holds for consumers.
      */
     server_time: number;
+    /**
+     * `:8097` server ONLY, and only on the directed out-of-sync frame
+     * (`SyncPlayManager.php:1569-1585`); ABSENT on the group echo and on
+     * every hub-relay frame — absent, never zeroed (M-SYNCPLAY-08).
+     */
+    nudge?: PlaybackSyncNudge;
 }
 export interface ChatPayload {
     group_id: string;

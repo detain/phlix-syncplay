@@ -34,6 +34,7 @@ import {
   type HostTransferPayload,
   type InfoPayload,
   type PlaybackQueueItem,
+  type PlaybackSyncNudge,
   type RawMessage,
   type SyncPlayGroup,
   type SyncPlayMember,
@@ -101,8 +102,23 @@ export interface SyncPlayClientOptions {
    * `_serverTime` is ALWAYS milliseconds: the wire mixes units per carrier
    * (`:8097` stamps UNIX seconds, the hub relay stamps ms) and the decode
    * boundary normalizes via `SyncPlayClient.serverTimeToMs` (SPEC §4/§8.4).
+   *
+   * `nudge` (M-SYNCPLAY-08) is the S446 soft-desync correction object riding
+   * the SAME frame family: defined only on the directed out-of-sync frame the
+   * `:8097` server unicasts to the drifting member (phlix-server
+   * `SyncPlayManager.php:1569-1585` — its own echo and every hub-relay frame
+   * leave it `undefined`, absent ≠ zeroed, SPEC §4/§8.4). On a directed frame
+   * `_memberId` is THIS client's id and the four state args carry the same
+   * authoritative group state as the echo; apply `nudge.suggested_rate`
+   * instead of seeking (the server's "nudge, never seek" policy).
    */
-  onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number) => void;
+  onPlaybackSync?: (
+    _memberId: string,
+    position: number,
+    isPlaying: boolean,
+    _serverTime: number,
+    nudge?: PlaybackSyncNudge,
+  ) => void;
   /**
    * Advisory server sync-state snapshot (TYPE_TIME_SYNC / syncplay_time_sync):
    * the server's UNICAST reply to a `syncplay_time_sync` request. Units are
@@ -563,6 +579,41 @@ export class SyncPlayClient {
     }));
   }
 
+  /**
+   * Narrow the `nudge` object a DIRECTED `playback_sync` frame carries
+   * (M-SYNCPLAY-08: this handler used to drop it, stranding the server's
+   * S446 soft-correction channel at the library boundary). Producer law and
+   * per-field coordinates are documented on {@link PlaybackSyncNudge}; the
+   * only emitter is phlix-server `SyncPlayManager.php:1569-1585` (@84e55800).
+   * The narrowing follows the house idiom of {@link normalizeQueue}:
+   * defensive per-field coercion, nothing invented. A frame WITHOUT the
+   * `nudge` key (the group echo and every hub-relay frame) yields
+   * `undefined`; the library never fabricates a correction for a frame that
+   * carried none. A non-object `nudge` on a hand-built frame degrades to
+   * `undefined` too (drop-the-garbage, keep-the-state).
+   */
+  private static normalizeNudge(
+    nudge: unknown,
+  ): PlaybackSyncNudge | undefined {
+    if (typeof nudge !== 'object' || nudge === null) {
+      return undefined;
+    }
+    const raw = nudge as Partial<PlaybackSyncNudge>;
+    return {
+      drift_ms: typeof raw.drift_ms === 'number' ? raw.drift_ms : undefined,
+      direction:
+        raw.direction === 'behind' || raw.direction === 'ahead'
+          ? raw.direction
+          : undefined,
+      suggested_rate:
+        typeof raw.suggested_rate === 'number' ? raw.suggested_rate : undefined,
+      tolerance_ms:
+        typeof raw.tolerance_ms === 'number' ? raw.tolerance_ms : undefined,
+      cooldown_ms:
+        typeof raw.cooldown_ms === 'number' ? raw.cooldown_ms : undefined,
+    };
+  }
+
   private handleGroupState(msg: RawMessage): void {
     const payload = msg as Partial<GroupStatePayload>;
     const group = payload.group;
@@ -694,7 +745,15 @@ export class SyncPlayClient {
       typeof msg.server_time === 'number'
         ? SyncPlayClient.serverTimeToMs(msg.server_time)
         : this.getSynchronizedTime();
-    this.options.onPlaybackSync?.(senderId ?? '', position, isPlaying, serverTime);
+    // S446 soft-correction carry (M-SYNCPLAY-08): the `:8097` server unicasts
+    // a `nudge` object on the directed out-of-sync frame
+    // (`SyncPlayManager.php:1569-1585`) riding this SAME type. Before this it
+    // was dropped on the floor here, so embedders could not implement the
+    // owner-ruled "nudge, never seek" correction at all. Delivered as the
+    // 5th (additive, BREAKING-free) argument; `undefined` whenever the frame
+    // carried none — the group echo and every hub-relay frame.
+    const nudge = SyncPlayClient.normalizeNudge(msg.nudge);
+    this.options.onPlaybackSync?.(senderId ?? '', position, isPlaying, serverTime, nudge);
   }
 
   private handleTimeSync(msg: RawMessage): void {
