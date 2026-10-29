@@ -4,6 +4,27 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **M-SYNCPLAY-16 lane: the §4 `time_sync` field block is producer-verified
+  AND tripwired (review `syncplay__writer` MAJ-2; test + this entry only —
+  zero executable surface change: `dist/` rebuilt twice, byte-ident to the
+  committed bundle, `git status` on `dist/` empty, no `.d.ts` movement).**
+  MAJ-2's cure had already landed pre-campaign at `0247cc4` ("TIME_SYNC
+  model matches real wire", review `syncplay__crossfe`) — the stub line the
+  review quoted was that commit's minus-line — so the item was STALE at
+  dispatch (the writer review ran against a clone older than the cure; the
+  SYNC-13/14 pattern). This lane disk-verified the §4 block field-for-field
+  against the producer at phlix-server tip c22b9d2e
+  (`SyncPlayManager.php:1652-1660`: member_id, group_id, server_time via
+  `time()` — SECONDS, offset_ms, latency_ms, drift_rate float ≈1.0,
+  is_stable bool; envelope keys belong to §2) and added the first
+  field-block leg to `specUnitLaw.test.ts`: the seven keys pinned as an
+  ordered set against the producer array literal, the `client_time` absence
+  stated affirmatively, and the block's per-field unit claims cross-checked
+  against the §4 named-exception roster that lists the `time_sync` arm.
+  Red-on-parent both ways: at `0247cc4~1` the block-side pins trip (stub
+  era), at `a09506f` the roster cross-check trips (pre-M15 era) — the leg
+  is green only where block AND roster coexist. Suite 205 → 206 (+1
+  exact); typecheck and lint clean.
 - **SPEC §4 is now the SINGLE time-unit law with the named `:8097` seconds
   exception; every mention-site and §8.4/§2 delegate to it (fix lane
   M-SYNCPLAY-15, review `syncplay__writer` MAJ-1; docs + tests only — zero

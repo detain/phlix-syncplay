@@ -26,11 +26,25 @@
  *     disproved by §4 (ii) and the hub's own `SyncPlayRelayWorker.php:1367`
  *     bytes — never returns, and the body carries the delegated roster
  *     (hub `server_time` ms, family-(ii) stamps seconds, JWT `exp` seconds).
+ *  5. (M-SYNCPLAY-16 lane, review MAJ-2) The §4 `time_sync` FIELD BLOCK
+ *     itself: it enumerates exactly the producer's seven keys in wire order,
+ *     states the `client_time` absence affirmatively, and its per-field unit
+ *     claims agree with the §4 exception roster that names the `time_sync`
+ *     arm. The block landed pre-campaign (`0247cc4`, review
+ *     `syncplay__crossfe`) and M15 later gave it the roster sentence to agree
+ *     with; this leg is the block's FIRST tripwire — the defect class it
+ *     kills is the review one (a stub line where implementers live, deferring
+ *     to code that disagreed with the server).
  *
  * Red-on-parent: at a09506f §4's heading, exception clause and delivery
  * policy do not exist, §8.4 still states its own law, and the mention-sites
  * point at §8.4 instead of §4. The r2 body pin is additionally red at the
- * r1 head 3672447, whose footnote kept the universal.
+ * r1 head 3672447, whose footnote kept the universal. The field-block pin
+ * (5) is red on BOTH sides of its own story: at `0247cc4~1` (the review-era
+ * stub tip, disk-proven — the `unicast reply` and key-order assertions trip
+ * there) and at a09506f (pre-M15 roster) the roster-agreement cross-check
+ * trips on the absent roster sentence — green only where block AND roster
+ * coexist.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  */
@@ -101,6 +115,65 @@ describe('SPEC §4 — the single time-unit law with the named :8097 exception',
     for (const s of sites) {
       expect(s.tail).toContain('§4');
     }
+  });
+
+  it('the §4 time_sync field block enumerates exactly the producer keys, units roster-consistent (M-SYNCPLAY-16)', () => {
+    // Review `syncplay__writer` MAJ-2: §4 used to carry NO field block for
+    // this type — one stub line ("full sync-state broadcast (advisory)")
+    // deferring to code that itself disagreed with the server (the library
+    // promised a `client_time` that exists on no wire byte). The cure landed
+    // pre-campaign (`0247cc4` — its stub-minus-line and the `TimeSyncPayload`
+    // rewrite are one commit), so the stale clone the writer review was
+    // pinned against still read the stub at dispatch. This pin is the
+    // block's FIRST tripwire, checked against the frozen producer bytes:
+    // phlix-server `SyncPlayManager.php` handleTimeSync reply at
+    // `:1652-1660` (tip c22b9d2e, disk-verified) merges, in array order,
+    // member_id / group_id / server_time (`time()` — SECONDS) / offset_ms /
+    // latency_ms / drift_rate (`float` ≈1.0) / is_stable (`bool`) — nothing
+    // else; envelope keys belong to §2.
+    const start = SEC4.indexOf('`syncplay_time_sync` (server → client)');
+    const end = SEC4.indexOf('### Informational');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = SEC4.slice(start, end);
+
+    // Character of the frame: a unicast reply, never the retired
+    // "full sync-state broadcast" mislabel.
+    expect(block).toContain('unicast reply');
+    expect(block).not.toContain('full sync-state broadcast');
+
+    // Key set AND order pinned to the producer array literal.
+    const fields = [...block.matchAll(/^([a-z_]+): \w+/gm)].map((m) => m[1]);
+    expect(fields).toEqual([
+      'member_id',
+      'group_id',
+      'server_time',
+      'offset_ms',
+      'latency_ms',
+      'drift_rate',
+      'is_stable',
+    ]);
+
+    // The fabricated field never returns as a line, and its absence is
+    // stated affirmatively for the implementer reading §4.
+    expect(block).not.toMatch(/^client_time:/m);
+    expect(block).toContain('There is **no** `client_time` field');
+
+    // Roster agreement: the §4 named-exception arm lists `time_sync` as
+    // seconds, so the block must claim exactly that scale per field —
+    // seconds for `server_time`, ms for the `_ms` pair, float/bool typed
+    // trailer for the last two. A block flipped to ms (or a roster arm
+    // deleted) reds here.
+    const roster = SEC4.match(
+      /Named exception[\s\S]*?covers the `:8097` server-stamped arms above and nothing else\./,
+    );
+    expect(roster).not.toBeNull();
+    expect(roster![0]).toContain('`time_sync` advisory reply');
+    expect(block).toMatch(/^server_time: number\s+\(UNIX SECONDS.*NOT ms/m);
+    expect(block).toMatch(/^offset_ms: number\s+.*ms\)/m);
+    expect(block).toMatch(/^latency_ms: number\s+.*ms\)/m);
+    expect(block).toMatch(/^drift_rate: number\s+.*float/m);
+    expect(block).toMatch(/^is_stable: boolean/m);
   });
 });
 
