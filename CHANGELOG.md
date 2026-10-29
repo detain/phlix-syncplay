@@ -14,8 +14,8 @@ adheres to [Semantic Versioning](https://semver.org/).
   2×-undercorrect bug class. Shipped: §4's UNIT LAW block (ms is the rule;
   `server_time` on the `:8097` server-stamped arms — `playback_sync` group
   echo + S446 nudge unicast, `time_sync` advisory, play/pause/seek echo
-  fallback — is the ONE named per-carrier exception; the hub NEVER stamps
-  seconds; `time_pong` is ruled ms on both carriers), the honest DELIVERY
+  fallback — is the ONE named per-carrier exception; the hub NEVER stamps a
+  seconds `server_time`; `time_pong` is ruled ms on both carriers), the honest DELIVERY
   POLICY (playback arms normalize at parse via `serverTimeToMs`; the
   `time_sync` advisory is the one arm delivered VERBATIM as the unit-named
   `serverTimeSec` — curing a live docs-lie: the previous §4 text claimed EVERY
@@ -24,14 +24,24 @@ adheres to [Semantic Versioning](https://semver.org/).
   §4 `server_time` mention-sites annotated inline, and unit labels added to
   `group_state.created_at`/`last_activity_at` (verified `time()` on server
   `GroupState.php:241-242`, UNIX seconds on hub `SyncPlayRelayWorker.php:1367`
-  too). Producer bytes re-verified at phlix-server `c22b9d2e`
+  too). r2 — review `syncplay__writer` M15r1 RF-1: the re-pointed §2
+  footnote's BODY initially kept a hub-wide-ms universal that contradicted
+  §4 (ii)'s roster seconds (and grouped the JWT `exp` claim as ms); the
+  footnote is now a roster-consistent detail site — every `:8804`
+  §3-catalog unit is delegated to §4 (hub `server_time` ms; roster/lifecycle
+  stamps UNIX seconds there too, hub bytes cited), and only the out-of-band
+  `pending_command.issued_at` metadata stamp is stated as fact, expressly as
+  outside §4's field scope; this bullet's NEVER-stamps claim is bounded to
+  `server_time` accordingly.
+  Producer bytes re-verified at phlix-server `c22b9d2e`
   (`:1076`/`:1128`/`:1175` `?? time()`, echo `:1517-1524`, nudge
   `:1569-1585`, `handleTimeSync` `:1652-1660`, `TimeSync::processPing()` ms)
   and phlix-hub `5731fc79` (`nowMs()` stamps, `canonicalInt` pass-through).
-  New `test/specUnitLaw.test.ts` (9): 7 SPEC-text pins (law heading, named
+  New `test/specUnitLaw.test.ts` (10): 8 SPEC-text pins (law heading, named
   exception arms, docs-lie tripwire, mention-site coverage, no-second-authority
-  tripwires — all red on parent `a09506f`) + 2 behavioral pins of the
-  documented delivery policy. vitest 195 → 204 (+9 exact).**
+  tripwires — all red on parent `a09506f` — plus the r2 footnote-BODY
+  roster-consistency pin, red on the r1 head `3672447`) + 2 behavioral pins of
+  the documented delivery policy. vitest 195 → 205 (+10 exact).**
 - **`memberId` ↔ `your_id` identity contract DOCUMENTED; README example cured
   to join-response truth (fix lane M-SYNCPLAY-12, review `syncplay__gameux`
   M5; semver PATCH — documentation + tests only, zero executable surface

@@ -52,16 +52,30 @@ Every message — inbound or outbound — is a single flat JSON object:
   on inbound; always present on outbound from `@phlix/syncplay`.
 - All payload fields are spread at the **top level** (NOT nested under `data`).
 
-> **Units footnote — the §4 unit law, hub-relay detail site.** On the hub
-> SyncPlay relay surface (`:8804`), every server stamp is in **milliseconds** *except*
-> `pending_command` envelopes' `issued_at`, which is **UNIX SECONDS** —
-> deliberately, matching the DB `TIMESTAMP` it mirrors (the hub's own unit
-> note: `phlix-hub/src/SyncPlay/PendingCommandDispatcher.php:117-119`, value
-> written at `:132` via `time()`). A client comparing `issued_at` against an
-> `exp`, `server_time`, or frame `timestamp` (all ms) must multiply by 1000
-> first; this exception is pinned so no consumer "fixes" it into drift. The
-> single unit law itself is §4; this footnote is a detail site for one of its
-> named exceptions, not a second authority.
+> **Units footnote — the §4 unit law, hub-relay detail site.** There is no
+> hub-wide "everything is milliseconds" rule on `:8804`, and this footnote
+> states no universal of its own — it restates §4's roster for this carrier,
+> delegating every unit to that law. Per §4: the envelope `timestamp` is ms;
+> `server_time` is ms **here**, because the hub never stamps a seconds
+> `server_time` and the seconds side of §4's "Named exception" is `:8097`
+> server-stamped arms only; the §4 family-(ii) roster/lifecycle stamps
+> `joined_at`, `created_at`, `last_activity_at` and `added_at` are UNIX
+> SECONDS **here too** — the hub's own docblock concurs
+> (`phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:1367`; `$now = time()` at
+> `:1376`, emitted at `:1385`/`:1402`/`:1403`). The one unit stated as fact
+> rather than delegated is outside §4's field scope: `pending_command` is the
+> push/Alexa delivery lane, not one of §3's syncplay types, and its envelope's
+> `issued_at` is **UNIX SECONDS** — deliberately, matching the DB `TIMESTAMP`
+> it mirrors (the hub's own unit note:
+> `phlix-hub/src/SyncPlay/PendingCommandDispatcher.php:117-119`, value written
+> at `:132` via `time()`). Comparison scale: `issued_at` is already seconds —
+> the same scale as a JWT `exp` claim (RFC 7519 seconds; the hub signs
+> `time() + $ttl` in `src/Hub/EnrollmentJwtService.php:101-112`) and the §4
+> (ii) roster stamps, so compare those directly; against an ms-scale stamp — a
+> frame `timestamp`, or a hub `server_time` — multiply `issued_at` by 1000
+> first. The exception is pinned so no consumer "fixes" it into drift. This
+> footnote is a detail site for §4's named exceptions plus one
+> out-of-§4-scope delivery-metadata note, not a second authority.
 
 `@phlix/syncplay` `encodeMessage(type, payload, now)` produces this object;
 `decodeMessage(raw)` parses it and, for backward compatibility only, unwraps the

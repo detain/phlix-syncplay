@@ -11,7 +11,7 @@
  * consumers) names its one verbatim arm — the `time_sync` advisory's
  * `serverTimeSec`.
  *
- * The pins below therefore lock THREE things:
+ * The pins below therefore lock FOUR things:
  *  1. §4 contains the law heading, the named exception, and the delivery
  *     policy; the retired docs-lie ("normalizes every delivered server_time"
  *     — false for `time_sync`, see `handleTimeSync`) must never return.
@@ -21,10 +21,16 @@
  *  3. Every §4 `server_time` mention-site carries the law inline, and the
  *     library's actual parse behavior matches the documented policy —
  *     playback arms normalized to ms, `time_sync` delivered VERBATIM seconds.
+ *  4. (r2, review RF-1) The §2 footnote BODY is roster-consistent: the
+ *     retired hub-wide "every server stamp is milliseconds" universal —
+ *     disproved by §4 (ii) and the hub's own `SyncPlayRelayWorker.php:1367`
+ *     bytes — never returns, and the body carries the delegated roster
+ *     (hub `server_time` ms, family-(ii) stamps seconds, JWT `exp` seconds).
  *
  * Red-on-parent: at a09506f §4's heading, exception clause and delivery
  * policy do not exist, §8.4 still states its own law, and the mention-sites
- * point at §8.4 instead of §4.
+ * point at §8.4 instead of §4. The r2 body pin is additionally red at the
+ * r1 head 3672447, whose footnote kept the universal.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  */
@@ -111,6 +117,24 @@ describe('SPEC — no second unit authority outside §4', () => {
     const sec2 = section('## 2. Framing', '## 3.');
     expect(sec2).toContain('the §4 unit law, hub-relay detail site');
     expect(sec2).toContain('not a second authority');
+  });
+
+  it('the §2 footnote BODY is roster-consistent — no hub-wide-ms universal (r2, RF-1)', () => {
+    // The r1 cure re-pointed the footnote's delegation SENTENCE but left its
+    // body asserting "every server stamp is in milliseconds except issued_at"
+    // — a live contradiction of §4 family (ii) (roster/lifecycle stamps are
+    // UNIX SECONDS on every carrier, hub `SyncPlayRelayWorker.php:1367`) and
+    // of the RFC 7519 seconds scale of a JWT `exp`. §2's body must never
+    // state an independent wire-unit universal again.
+    const sec2 = section('## 2. Framing', '## 3.');
+    expect(sec2).not.toMatch(/every server stamp is/);
+    expect(sec2).not.toContain('(all ms)');
+    // Positive body teeth: the delegated roster is actually restated here.
+    expect(sec2).toContain('the hub never stamps a seconds'); // §4 (i): ms server_time on :8804
+    expect(sec2).toContain('SyncPlayRelayWorker.php:1367'); // §4 (ii): hub seconds roster, cited
+    expect(sec2).toContain('UNIX');
+    expect(sec2).toContain('RFC 7519 seconds'); // `exp` is seconds scale
+    expect(sec2).toContain('out-of-§4-scope'); // issued_at is metadata, not a §4 wire unit
   });
 
   it('"single authority" appears exactly twice in the whole spec', () => {
