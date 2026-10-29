@@ -4,6 +4,38 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **`playback_sync` (and the play/pause/seek echo) `server_time` — the
+  consumer contract is now milliseconds on BOTH carriers (fix lane
+  M-SYNCPLAY-04, review `syncplay__crossfe` M4).** The library delivered the
+  raw wire stamp, but the two carriers disagree on units: the hub relay
+  stamps ms (`phlix-hub` `SyncPlayRelayWorker.php:1105`/`:1603` `nowMs()`),
+  while `:8097` stamps UNIX **seconds** (`phlix-server`
+  `SyncPlayManager.php:1506` `time()` group echo → broadcast `:1523`, S446
+  nudge `:1575`, and the play/pause/seek echo fallback `?? time()` at
+  `:1076`/`:1128`/`:1175`). All-ms consumers (`TimeSync.getAdjustedPosition`,
+  SPEC §4) fed seconds-scale stamps computed an elapsed of ≈ +56 years of ms
+  — the playhead teleported; the burn was already confessed in the wild
+  (`phlix-ui` `src/api/syncplay.ts` discarded the callback value with
+  `void serverTime;`). Shipped: `SyncPlayClient.serverTimeToMs()`, a public
+  static epoch-magnitude normalization (raw < 1e12 → ×1000; epoch-ms crossed
+  1e12 on 2001-09-09, epoch-seconds cannot reach it before 33658) applied at
+  the three decode sites (`handlePlaybackSync`/`handlePlayback`/`handleSeek`);
+  the local-clock FALLBACK (frame missing `server_time`) is already ms and is
+  deliberately NOT scaled. Not a signature break — the callback types and
+  documented unit law were always ms; this aligns the runtime with them. The
+  three stale pass-through pins were re-pinned to wire-truth carrier vectors
+  (file:line provenance comments), a six-case normalization suite added
+  (pure vectors, both carriers, un-scaled fallback, and an end-to-end
+  no-teleport pin through `getAdjustedPosition`); full serial suite 4 files /
+  145 tests. SPEC §4/§8.4 prose cured: §8.4's admitted per-carrier split now
+  records that the library papers over it at the decode boundary. Same-trap
+  family items M-SYNCPLAY-10/14 are cured by this fix and the §4-vs-§8.4 doc
+  contradiction (M-SYNCPLAY-15) by the SPEC cure; the nudge-payload sibling
+  M-SYNCPLAY-08 is a separate server-side defect, untouched here. Cascade
+  deferred per the v0.1.6 wave precedent: consumers
+  pin `github:#v0.1.5`, and the estate sweep found no live consumer of the
+  delivered value (`phlix-tizen-client` `useSyncPlayStore.ts:615` takes arity
+  3; `phlix-ui` discards it — its workaround can retire in the re-tag wave).
 - **`TimeSyncPayload` — the TIME_SYNC model now matches the REAL server wire
   (fix lane M-SYNCPLAY-03, review `syncplay__crossfe`).** The interface was
   FABRICATED: it promised `{ server_time (ms), client_time (ms) }` while the

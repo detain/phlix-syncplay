@@ -333,6 +333,9 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			joined_at: typeof e.joined_at == "number" ? e.joined_at : 0
 		}));
 	}
+	static serverTimeToMs(e) {
+		return e < 0xe8d4a51000 ? e * 1e3 : e;
+	}
 	handleGroupState(e) {
 		let n = e, r = n.group;
 		if (typeof r != "object" || !r) return;
@@ -351,22 +354,22 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			last_activity_at: r.last_activity_at
 		}, this.options.onState?.(this.group, n.your_id);
 	}
-	handlePlayback(e, t) {
-		if ((typeof t.member_id == "string" ? t.member_id : void 0) === this.memberId) return;
-		let n = typeof t.position == "number" ? t.position : 0, r = typeof t.server_time == "number" ? t.server_time : this.getSynchronizedTime();
+	handlePlayback(e, n) {
+		if ((typeof n.member_id == "string" ? n.member_id : void 0) === this.memberId) return;
+		let r = typeof n.position == "number" ? n.position : 0, i = typeof n.server_time == "number" ? t.serverTimeToMs(n.server_time) : this.getSynchronizedTime();
 		this.options.onPlaybackCommand?.({
 			type: e,
-			position: n,
-			serverTime: r
+			position: r,
+			serverTime: i
 		});
 	}
 	handleSeek(e) {
 		if ((typeof e.member_id == "string" ? e.member_id : void 0) === this.memberId) return;
-		let t = typeof e.to_position == "number" ? e.to_position : 0, n = typeof e.server_time == "number" ? e.server_time : this.getSynchronizedTime();
+		let n = typeof e.to_position == "number" ? e.to_position : 0, r = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime();
 		this.options.onPlaybackCommand?.({
 			type: "seek",
-			position: t,
-			serverTime: n
+			position: n,
+			serverTime: r
 		});
 	}
 	handleHostElect(e) {
@@ -399,8 +402,8 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		}), this.options.onHostTransfer?.(t.current_host_id, t.new_host_id));
 	}
 	handlePlaybackSync(e) {
-		let t = typeof e.member_id == "string" ? e.member_id : void 0, n = typeof e.position == "number" ? e.position : 0, r = typeof e.is_playing == "boolean" && e.is_playing, i = typeof e.server_time == "number" ? e.server_time : this.getSynchronizedTime();
-		this.options.onPlaybackSync?.(t ?? "", n, r, i);
+		let n = typeof e.member_id == "string" ? e.member_id : void 0, r = typeof e.position == "number" ? e.position : 0, i = typeof e.is_playing == "boolean" && e.is_playing, a = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime();
+		this.options.onPlaybackSync?.(n ?? "", r, i, a);
 	}
 	handleTimeSync(e) {
 		let t = e;

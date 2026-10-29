@@ -101,6 +101,10 @@ documented per-surface deviations.
 ## 4. Message payloads (exact wire fields)
 
 All field names are **snake_case**. Positions/durations are **milliseconds**.
+Wire `server_time` stamps are the one mixed-unit field — per carrier (§8.4:
+the hub relay stamps ms, `:8097` keeps a legacy UNIX-seconds stamp) — and the
+client library normalizes every delivered `server_time` to **milliseconds**
+(`SyncPlayClient.serverTimeToMs`), so consumer-visible time is uniformly ms.
 
 ### Group management
 
@@ -194,7 +198,9 @@ an existence-agnostic 404).
 group_id: string
 member_id: string
 position: number
-server_time: number        (synchronized timestamp, ms)
+server_time: number        (synchronized timestamp, ms; the :8097 echo falls
+                            back to UNIX seconds when the sender omits it —
+                            §8.4; the library normalizes echoes to ms)
 ```
 
 `syncplay_playback_seek`
@@ -203,7 +209,7 @@ group_id: string
 member_id: string
 from_position: number
 to_position: number
-server_time: number
+server_time: number        (same unit law as play/pause above)
 ```
 
 `syncplay_playback_queue`
@@ -219,7 +225,7 @@ group_id: string
 member_id: string
 position: number
 is_playing: boolean
-server_time: number
+server_time: number        (wire: UNIX seconds on :8097, ms on hub — §8.4; delivered as ms)
 ```
 > Broadcast to every group member including the originator — the server does not
 > exclude the sender for this type (unlike play/pause/seek) and stamps the frame
@@ -504,7 +510,9 @@ host departure elects the longest-present member (broadcast `syncplay_info`
 per §6 on join/leave, `syncplay_host_elect` followed by the refreshed
 `syncplay_group_state` on election); `syncplay_playback_sync`'s `server_time`
 is **milliseconds** here — per the §2 footnote's hub-wide ms law, whereas the
-`:8097` producer keeps a legacy seconds quirk; server-initiated
+`:8097` producer keeps a legacy seconds quirk (the client library papers over
+the split at its decode boundary — `SyncPlayClient.serverTimeToMs` — so
+consumers receive ms on both carriers); server-initiated
 `syncplay_time_sync` has no hub producer and its inbound use is refused
 (`hub.protocol_unsupported`) because the hub holds no clock authority beyond
 `syncplay_time_ping`/`_pong`; `password_hash` is accepted and ignored (the

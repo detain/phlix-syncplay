@@ -50,7 +50,10 @@ export interface PlaybackCommand {
   type: 'play' | 'pause' | 'seek';
   /** Target position in ms (for seek this is `to_position`). */
   position: number;
-  /** Server-synchronized timestamp the command was issued at (ms). */
+  /**
+   * Server-synchronized timestamp the command was issued at — ALWAYS ms
+   * (wire stamps are normalized per carrier; see `SyncPlayClient.serverTimeToMs`).
+   */
   serverTime: number;
 }
 
@@ -92,6 +95,10 @@ export interface SyncPlayClientOptions {
    * syncplay_playback_sync). Includes this client's own echo when it is the host
    * (the server re-broadcasts the host's frame to every member — the host
    * re-anchor source, see handlePlaybackSync).
+   *
+   * `_serverTime` is ALWAYS milliseconds: the wire mixes units per carrier
+   * (`:8097` stamps UNIX seconds, the hub relay stamps ms) and the decode
+   * boundary normalizes via `SyncPlayClient.serverTimeToMs` (SPEC §4/§8.4).
    */
   onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number) => void;
   /**
@@ -489,6 +496,37 @@ export class SyncPlayClient {
     }));
   }
 
+  /**
+   * Normalize a wire `server_time` stamp to MILLISECONDS (fix lane M-SYNCPLAY-04).
+   *
+   * The two carriers stamp the SAME field in DIFFERENT units — a per-carrier
+   * split-brain invisible at the API:
+   *  - `:8097` (phlix-server `SyncPlayManager`) stamps UNIX **seconds**: the
+   *    playback_sync group echo (`SyncPlayManager.php:1506` `$serverTime =
+   *    time();` → broadcast `:1523`), the S446 nudge echo (`:1575`), and the
+   *    play/pause/seek echo fallback when the sender omitted `server_time`
+   *    (`:1076/:1128/:1175` `?? time()`);
+   *  - the hub relay stamps **milliseconds** (`SyncPlayRelayWorker.php:1105/
+   *    :1603` `self::nowMs()`), and its command echoes pass the sender's own
+   *    ms stamp through `canonicalInt` (`:1535`).
+   *
+   * Handing a raw seconds stamp to the all-ms consumer contract
+   * (`TimeSync.getAdjustedPosition`) computes `synchronizedNow − serverTime`
+   * ≈ +56 years of elapsed ms and teleports the playhead — phlix-ui was
+   * demonstrably burned into discarding the field entirely
+   * (`src/api/syncplay.ts` `void serverTime;`).
+   *
+   * Parse-at-the-boundary (SPEC §4's ms law for the consumer surface, §8.4's
+   * per-carrier wire quirk): epoch MAGNITUDE decides the unit. Any stamp
+   * `< 1e12` is treated as seconds (×1000) — a plausible wall-clock epoch-ms
+   * value has been ≥ 1e12 ever since 2001-09-09, and epoch seconds stay
+   * `< 1e12` until the year 33658. Realistic stamps on either carrier decode
+   * exactly; ms stamps pass through untouched.
+   */
+  static serverTimeToMs(raw: number): number {
+    return raw < 1e12 ? raw * 1000 : raw;
+  }
+
   private handleGroupState(msg: RawMessage): void {
     const payload = msg as Partial<GroupStatePayload>;
     const group = payload.group;
@@ -531,7 +569,9 @@ export class SyncPlayClient {
     }
     const position = typeof msg.position === 'number' ? msg.position : 0;
     const serverTime =
-      typeof msg.server_time === 'number' ? msg.server_time : this.getSynchronizedTime();
+      typeof msg.server_time === 'number'
+        ? SyncPlayClient.serverTimeToMs(msg.server_time)
+        : this.getSynchronizedTime();
     this.options.onPlaybackCommand?.({ type, position, serverTime });
   }
 
@@ -546,7 +586,9 @@ export class SyncPlayClient {
     }
     const position = typeof msg.to_position === 'number' ? msg.to_position : 0;
     const serverTime =
-      typeof msg.server_time === 'number' ? msg.server_time : this.getSynchronizedTime();
+      typeof msg.server_time === 'number'
+        ? SyncPlayClient.serverTimeToMs(msg.server_time)
+        : this.getSynchronizedTime();
     this.options.onPlaybackCommand?.({ type: 'seek', position, serverTime });
   }
 
@@ -609,8 +651,12 @@ export class SyncPlayClient {
     // handlePlayback/handleSeek — acting on our own commands would loop).
     const position = typeof msg.position === 'number' ? msg.position : 0;
     const isPlaying = typeof msg.is_playing === 'boolean' ? msg.is_playing : false;
+    // Carrier unit normalization (M-SYNCPLAY-04): the `:8097` echo arrives in
+    // UNIX seconds, the hub echo in ms — consumers get ms either way.
     const serverTime =
-      typeof msg.server_time === 'number' ? msg.server_time : this.getSynchronizedTime();
+      typeof msg.server_time === 'number'
+        ? SyncPlayClient.serverTimeToMs(msg.server_time)
+        : this.getSynchronizedTime();
     this.options.onPlaybackSync?.(senderId ?? '', position, isPlaying, serverTime);
   }
 

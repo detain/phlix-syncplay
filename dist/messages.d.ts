@@ -177,6 +177,13 @@ export interface PlaybackSyncPayload {
     member_id: string;
     position: number;
     is_playing: boolean;
+    /**
+     * WIRE UNITS MIX PER CARRIER (SPEC §8.4): UNIX **seconds** on `:8097`
+     * (`SyncPlayManager.php:1506/:1523/:1575` `time()`) vs **milliseconds**
+     * on the hub relay (`SyncPlayRelayWorker.php:1105/:1603` `nowMs()`).
+     * `SyncPlayClient.serverTimeToMs` normalizes every delivered `server_time`
+     * to ms — the §4 ms law holds for consumers.
+     */
     server_time: number;
 }
 export interface ChatPayload {

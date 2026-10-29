@@ -203,7 +203,9 @@ describe('SyncPlayClient — playback commands inbound', () => {
       protocol_version: 1,
       member_id: 'host1',
       position: 5000,
-      server_time: 123,
+      // :8097 wire truth: the echo fallback stamps UNIX SECONDS
+      // (SyncPlayManager.php:1076 `?? time()`) — consumers must receive ms.
+      server_time: 1761900000,
     });
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
@@ -211,12 +213,14 @@ describe('SyncPlayClient — playback commands inbound', () => {
       member_id: 'host1',
       from_position: 5000,
       to_position: 9000,
-      server_time: 456,
+      // hub wire truth: ms pass-through (SyncPlayRelayWorker.php:1535
+      // canonicalInt of the sender's ms stamp) — must arrive UNTOUCHED.
+      server_time: 1761900000123,
     });
 
     expect(h.commands).toEqual([
-      { type: 'play', position: 5000, serverTime: 123 },
-      { type: 'seek', position: 9000, serverTime: 456 },
+      { type: 'play', position: 5000, serverTime: 1761900000000 },
+      { type: 'seek', position: 9000, serverTime: 1761900000123 },
     ]);
   });
 
@@ -525,10 +529,14 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
       member_id: 'host1',
       position: 5000,
       is_playing: true,
-      server_time: 12345,
+      // :8097 wire truth: the group echo stamps UNIX SECONDS
+      // (SyncPlayManager.php:1506 `time()` → broadcast :1523).
+      server_time: 1761900000,
     });
 
-    expect(syncs).toEqual([{ memberId: 'host1', position: 5000, isPlaying: true, serverTime: 12345 }]);
+    expect(syncs).toEqual([
+      { memberId: 'host1', position: 5000, isPlaying: true, serverTime: 1761900000000 },
+    ]);
   });
 
   it('handlePlaybackSync consumes a playback_sync echoed back to ourselves (host re-anchor)', () => {
@@ -547,7 +555,8 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
     // protocol_version/timestamp envelope, which decodeMessage tolerates). It
     // is encoded + serialized through the library's own framing — the same
     // functions the transport layer uses — then decoded back through
-    // handleIncoming.
+    // handleIncoming. The stamp is UNIX seconds per the :8097 producer; the
+    // host's re-anchor callback must still receive MILLISECONDS.
     client.handleIncoming(
       serializeMessage(
         encodeMessage(
@@ -558,14 +567,16 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
             current_media_id: 'media_1',
             position: 5000,
             is_playing: true,
-            server_time: 12345,
+            server_time: 1761900000,
           },
           () => 1000,
         ),
       ),
     );
 
-    expect(syncs).toEqual([{ memberId: 'me', position: 5000, isPlaying: true, serverTime: 12345 }]);
+    expect(syncs).toEqual([
+      { memberId: 'me', position: 5000, isPlaying: true, serverTime: 1761900000000 },
+    ]);
   });
 
   // S294 control — the pair that distinguishes a fix from deleting the guard
@@ -1065,10 +1076,118 @@ describe('SyncPlayClient — handleSeek inbound from another member', () => {
       member_id: 'host1',
       from_position: 1000,
       to_position: 5000,
-      server_time: 123,
+      // :8097 seconds echo fallback (SyncPlayManager.php:1175 `?? time()`) —
+      // the library must deliver ms.
+      server_time: 1761900000,
     });
 
-    expect(h.commands).toEqual([{ type: 'seek', position: 5000, serverTime: 123 }]);
+    expect(h.commands).toEqual([
+      { type: 'seek', position: 5000, serverTime: 1761900000000 },
+    ]);
+  });
+});
+
+describe('SyncPlayClient.serverTimeToMs — per-carrier wire-unit normalization (M-SYNCPLAY-04)', () => {
+  // The `:8097` producer stamps `server_time` with UNIX seconds
+  // (SyncPlayManager.php:1506/:1575 `time()`); the hub relay stamps ms
+  // (SyncPlayRelayWorker.php:1105/:1603 `nowMs()`). The library's consumer
+  // contract is all-ms (SPEC §4); the decode boundary reconciles (§8.4).
+
+  it('promotes an epoch-seconds stamp to ms', () => {
+    expect(SyncPlayClient.serverTimeToMs(1761900000)).toBe(1761900000000);
+  });
+
+  it('passes an epoch-ms stamp through untouched', () => {
+    expect(SyncPlayClient.serverTimeToMs(1761900000123)).toBe(1761900000123);
+  });
+
+  it('treats one below the epoch-magnitude boundary as seconds', () => {
+    expect(SyncPlayClient.serverTimeToMs(1e12 - 1)).toBe((1e12 - 1) * 1000);
+  });
+
+  it('treats the boundary value itself as ms (2001-09-09 epoch-ms)', () => {
+    expect(SyncPlayClient.serverTimeToMs(1e12)).toBe(1e12);
+  });
+
+  it('delivers playback_sync as ms on BOTH carriers and keeps the ms fallback un-scaled', () => {
+    const syncs: Array<{ position: number; isPlaying: boolean; serverTime: number }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onPlaybackSync: (_m, position, isPlaying, serverTime) =>
+        syncs.push({ position, isPlaying, serverTime }),
+    });
+
+    // hub carrier — ms echo must arrive untouched
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 5000,
+      is_playing: true,
+      server_time: 1761900000123,
+    });
+    // no server_time on the frame — local synchronized time (already ms)
+    // must be delivered WITHOUT the ×1000 promotion.
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 6000,
+      is_playing: false,
+    });
+
+    expect(syncs).toEqual([
+      { position: 5000, isPlaying: true, serverTime: 1761900000123 },
+      { position: 6000, isPlaying: false, serverTime: 1000 },
+    ]);
+  });
+
+  it('a seconds-stamped :8097 re-anchor frame no longer teleports getAdjustedPosition', () => {
+    const syncs: Array<{ position: number; serverTime: number }> = [];
+    const clock = { t: 1761900000000 };
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => clock.t,
+      memberId: 'me',
+      onPlaybackSync: (_m, position, _p, serverTime) => syncs.push({ position, serverTime }),
+    });
+
+    // Seed one ping/pong quad exactly like the live handshake (client_time
+    // echoed verbatim by Messages::timePong()).
+    client.pingTime();
+    clock.t = 1761900000002;
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1761900000000,
+      server_time: 1761900000100,
+    });
+    const syncNow = client.getSynchronizedTime();
+
+    // The `:8097` echo for the SAME instant carries UNIX seconds of syncNow.
+    const secondsStamp = Math.floor(syncNow / 1000);
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 5000,
+      is_playing: true,
+      server_time: secondsStamp,
+    });
+
+    expect(syncs).toHaveLength(1);
+    expect(syncs[0].serverTime).toBe(secondsStamp * 1000);
+
+    // Pre-fix, the raw seconds stamp fed getAdjustedPosition an elapsed of
+    // syncNow − 1.76e9 ≈ +56 years of ms → playhead ≈ 1.76e12. Post-fix the
+    // elapsed is only the sub-second floor remainder: position + [0,1000).
+    const adjusted = client
+      .getTimeSync()
+      .getAdjustedPosition(5000, syncs[0].serverTime, clock.t);
+    expect(adjusted).toBeGreaterThanOrEqual(5000);
+    expect(adjusted).toBeLessThan(6000);
   });
 });
 
