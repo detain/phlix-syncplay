@@ -76,7 +76,7 @@ const client = new SyncPlayClient({
   now: () => Date.now(),
   memberId: 'member_123',
   memberName: 'Alice',
-  onState: (group, yourId) => { /* render group (`group.members` normalized to an array); you are yourId */ },
+  onState: (group, yourId) => { /* render group (`group.members` normalized to an array; `group.queue` delivered per producer — SPEC §4); you are yourId */ },
   onSync: ({ offset, latency, isStable }) => { /* time-sync status */ },
   onPlaybackCommand: ({ type, position, serverTime }) => { /* apply locally */ },
   onMemberJoined: ({ id, name }) => {},

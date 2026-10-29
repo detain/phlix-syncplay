@@ -145,6 +145,9 @@ export type SyncPlayMembersWire =
  * S416: on the WIRE, `members` arrives as a DICTIONARY keyed by member id
  * ({@link SyncPlayGroupWire}); this model is the library's NORMALIZED view —
  * `handleGroupState` folds the dict (or a tolerated array) into this array.
+ * `queue` is carried verbatim per the producers, with per-carrier item
+ * fields — see {@link PlaybackQueueItem} (M-SYNCPLAY-06: before that fix
+ * `handleGroupState` silently dropped it).
  */
 export interface SyncPlayGroup {
   group_id: string;
@@ -158,6 +161,15 @@ export interface SyncPlayGroup {
   current_media_duration?: number | null;
   playback_position: number;
   playback_state: PlaybackState;
+  /**
+   * The playback queue, as the producer sent it (the SPEC §4 block is
+   * "verbatim getState()"). Both live carriers always emit the key (possibly
+   * `[]`); item fields are per-carrier ({@link PlaybackQueueItem}). The
+   * library normalizes defensively and NEVER fabricates a queue a frame did
+   * not carry — `undefined` means the frame omitted the key (hand-built
+   * frames only).
+   */
+  queue?: PlaybackQueueItem[];
   created_at?: number;
   last_activity_at?: number;
   /**
@@ -228,9 +240,28 @@ export interface PlaybackSeekPayload {
   server_time: number;
 }
 
+/**
+ * One playback-queue entry, exactly as the live producers emit it.
+ *
+ * `:8097` `phlix-server`: `GroupState::getState()` nests `$this->playbackQueue`
+ * under `group_state.group.queue` (`GroupState.php:970`) and
+ * `SyncPlayManager.php:1271-1273` broadcasts the same array under
+ * `syncplay_playback_queue`; items are built by `GroupState::addToQueue()`
+ * (`GroupState.php:812-817`): `media_id` + `media_info` (title, thumbnail, …)
+ * + `added_at` (UNIX seconds, `time()`) + `added_by` (the host member id at
+ * enqueue time, nullable — `hostId` may be null).
+ *
+ * `:8804` `phlix-hub` relay: items are narrowed to `media_id` + `media_info`
+ * ONLY (`SyncPlayRelayWorker.php:1713-1747`, emitted at :1401 and :1764) — on
+ * that carrier `added_at`/`added_by` are ABSENT, never zeroed.
+ */
 export interface PlaybackQueueItem {
   media_id: string;
   media_info?: Record<string, unknown>;
+  /** `:8097` server only (UNIX seconds); never emitted by the `:8804` hub relay. */
+  added_at?: number;
+  /** `:8097` server only (member id at enqueue time, nullable); never emitted by the `:8804` hub relay. */
+  added_by?: string | null;
 }
 
 export interface PlaybackQueuePayload {

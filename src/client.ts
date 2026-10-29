@@ -33,6 +33,7 @@ import {
   type HostElectPayload,
   type HostTransferPayload,
   type InfoPayload,
+  type PlaybackQueueItem,
   type RawMessage,
   type SyncPlayGroup,
   type SyncPlayMember,
@@ -534,6 +535,34 @@ export class SyncPlayClient {
     return raw < 1e12 ? raw * 1000 : raw;
   }
 
+  /**
+   * Normalize the `group.queue` array a `group_state` frame carries
+   * (M-SYNCPLAY-06: this handler used to drop the field entirely). Producer
+   * coordinates and per-carrier item fields are documented on
+   * {@link PlaybackQueueItem}. The narrowing follows the house idiom of
+   * {@link normalizeMembers}: defensive per-field coercion, nothing invented.
+   * A frame WITHOUT a `queue` key (only hand-built frames omit it — both live
+   * producers always emit it, possibly `[]`) yields `undefined`; the library
+   * never fabricates an empty queue for a frame that carried none.
+   */
+  private static normalizeQueue(
+    queue: Array<Partial<PlaybackQueueItem>> | undefined,
+  ): PlaybackQueueItem[] | undefined {
+    if (!Array.isArray(queue)) {
+      return undefined;
+    }
+    return queue.map((item) => ({
+      media_id: typeof item.media_id === 'string' ? item.media_id : '',
+      media_info:
+        typeof item.media_info === 'object' && item.media_info !== null
+          ? (item.media_info as Record<string, unknown>)
+          : undefined,
+      added_at: typeof item.added_at === 'number' ? item.added_at : undefined,
+      added_by:
+        typeof item.added_by === 'string' || item.added_by === null ? item.added_by : undefined,
+    }));
+  }
+
   private handleGroupState(msg: RawMessage): void {
     const payload = msg as Partial<GroupStatePayload>;
     const group = payload.group;
@@ -556,6 +585,7 @@ export class SyncPlayClient {
       current_media_duration: group.current_media_duration ?? null,
       playback_position: group.playback_position ?? 0,
       playback_state: group.playback_state ?? 'stopped',
+      queue: SyncPlayClient.normalizeQueue(group.queue),
       created_at: group.created_at,
       last_activity_at: group.last_activity_at,
     };

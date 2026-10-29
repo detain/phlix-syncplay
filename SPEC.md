@@ -165,6 +165,7 @@ group: {                            (verbatim GroupState::getState())
   playback_position: number
   playback_state: "playing" | "paused" | "buffering" | "stopped"
   queue: [ { media_id, media_info, added_at, added_by }, ... ]
+                                          (item fields per-carrier — see note)
   created_at: number
   last_activity_at: number
 }
@@ -179,6 +180,14 @@ your_id?: string           (the recipient's own member id)
 > (`SyncPlayGroup.members: SyncPlayMember[]`), tolerating the array spelling
 > for re-fed frames (S416). An array-only reader silently saw ZERO members on
 > every live frame — the exact bug class this note exists to kill.
+> `queue` item fields are **per-carrier**: the `:8097` server stamps every
+> item with `added_at` (UNIX seconds) + `added_by` (host member id at enqueue
+> time, nullable) — `GroupState.php` `addToQueue()` :812-817, nested at
+> `getState()` :970 — while the `:8804` hub relay narrows items to
+> `media_id` + `media_info` (`SyncPlayRelayWorker.php` :1713-1747, emitted
+> :1401/:1764); there those keys are ABSENT, never zeroed. The library
+> delivers the array under `SyncPlayGroup.queue` exactly as the frame
+> carried it (M-SYNCPLAY-06: `handleGroupState` used to drop the field).
 > `has_password` is NOT emitted here — it appears only in the `listGroups()`
 > summary, never on a `group_state` message.
 
@@ -243,9 +252,17 @@ server_time: number        (same unit law as play/pause above)
 `syncplay_playback_queue`
 ```
 group_id: string
-queue: [ { media_id: string, media_info?: object }, ... ]
+queue: [ { media_id: string, media_info?: object,
+           added_at?: number (unix s), added_by?: string | null }, ... ]
 member_id?: string
 ```
+> Same queue array as `group_state.group.queue`, same per-carrier item law
+> (`:8097` `SyncPlayManager.php:1271-1273` broadcasts `getPlaybackQueue()` —
+> full four-field items; the hub relay's broadcast
+> `SyncPlayRelayWorker.php:1764` carries `media_id` + `media_info` only).
+> The library documents this inbound type as carried-but-not-orchestrated
+> (ignored by design, `src/client.ts` dispatch note); the `SyncPlayClient`
+> does not consume it — read the queue off `onState`'s `group.queue`.
 
 `syncplay_playback_sync` (periodic position broadcast)
 ```

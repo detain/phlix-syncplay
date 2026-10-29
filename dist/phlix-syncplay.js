@@ -336,6 +336,14 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	static serverTimeToMs(e) {
 		return e < 0xe8d4a51000 ? e * 1e3 : e;
 	}
+	static normalizeQueue(e) {
+		if (Array.isArray(e)) return e.map((e) => ({
+			media_id: typeof e.media_id == "string" ? e.media_id : "",
+			media_info: typeof e.media_info == "object" && e.media_info !== null ? e.media_info : void 0,
+			added_at: typeof e.added_at == "number" ? e.added_at : void 0,
+			added_by: typeof e.added_by == "string" || e.added_by === null ? e.added_by : void 0
+		}));
+	}
 	handleGroupState(e) {
 		let n = e, r = n.group;
 		if (typeof r != "object" || !r) return;
@@ -350,6 +358,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			current_media_duration: r.current_media_duration ?? null,
 			playback_position: r.playback_position ?? 0,
 			playback_state: r.playback_state ?? "stopped",
+			queue: t.normalizeQueue(r.queue),
 			created_at: r.created_at,
 			last_activity_at: r.last_activity_at
 		}, this.options.onState?.(this.group, n.your_id);

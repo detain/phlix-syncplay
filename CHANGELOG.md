@@ -4,6 +4,38 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **`group_state.queue` is now DELIVERED — `handleGroupState` was silently
+  dropping the producer's queue (fix lane M-SYNCPLAY-06, review
+  `syncplay__docmaint` M2).** SPEC §4 calls the nested `group` block
+  "verbatim `GroupState::getState()`", and getState() always emitted
+  `queue` (`:8097` `phlix-server` `GroupState.php:970`; the `:8804`
+  `phlix-hub` relay synthesizes the same key,
+  `SyncPlayRelayWorker.php:1401`) — yet the library rebuilt the group
+  field-by-field and discarded it, so a queue UI written to SPEC §4 read
+  `undefined` through `onState` while the wire carried the array. Unlike
+  `syncplay_playback_queue` (documented-as-ignored at the dispatch), the
+  drop was never declared anywhere. Shipped: `PlaybackQueueItem`
+  re-specified to producer bytes — `media_id` + `media_info` plus
+  server-only `added_at` (UNIX seconds) + `added_by` (nullable host id at
+  enqueue, `GroupState::addToQueue()` :812-817); the hub relay narrows
+  items to the first two (`:1713-1747`), a per-carrier divergence now
+  pinned in SPEC §4 (both the `group_state` and `playback_queue` blocks)
+  and in the type docblock — absent on that carrier, never zeroed;
+  `SyncPlayGroup` gains `queue?: PlaybackQueueItem[]` (wire inherits via
+  `SyncPlayGroupWire`); `handleGroupState` carries it through
+  `normalizeQueue` (house per-field narrowing à la `normalizeMembers`;
+  a queue-less frame yields `undefined`, never a fabricated `[]`;
+  a non-array garbage value degrades to `undefined`, never a throw).
+  New `test/groupStateQueue.test.ts`: the primary vector is the VERBATIM
+  phlix-contracts capture `syncplay-envelope-vectors.json` rail
+  `groupState.state` (four-field item with real producer bytes) plus a
+  hub-relay vector mirrored from `canonicalGroupPayload()`/the queue
+  parser; 4 of the 6 tests are RED on the parent with the carry-through
+  stripped. README quick-start's `onState` line cured. BREAKING? No —
+  additive optional field + type widening; the old `PlaybackQueueItem`
+  remains structurally compatible. Minor bump at the next tag wave.
+  Full serial suite 5 files / 151 tests (+6 exact); typecheck/lint clean;
+  dist re-built deterministically (x2, aggregate md5 in the commit body).
 - **`group_list` reply rows are now the LIVE PRODUCER shape — `id`, `name`,
   `member_count`, `has_password`, `current_media`, `is_playing` inside the
   `{groups, count}` envelope (fix lane M-SYNCPLAY-05, review

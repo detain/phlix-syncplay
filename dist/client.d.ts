@@ -234,6 +234,17 @@ export declare class SyncPlayClient {
      * exactly; ms stamps pass through untouched.
      */
     static serverTimeToMs(raw: number): number;
+    /**
+     * Normalize the `group.queue` array a `group_state` frame carries
+     * (M-SYNCPLAY-06: this handler used to drop the field entirely). Producer
+     * coordinates and per-carrier item fields are documented on
+     * {@link PlaybackQueueItem}. The narrowing follows the house idiom of
+     * {@link normalizeMembers}: defensive per-field coercion, nothing invented.
+     * A frame WITHOUT a `queue` key (only hand-built frames omit it — both live
+     * producers always emit it, possibly `[]`) yields `undefined`; the library
+     * never fabricates an empty queue for a frame that carried none.
+     */
+    private static normalizeQueue;
     private handleGroupState;
     private handlePlayback;
     private handleSeek;
