@@ -52,14 +52,16 @@ Every message — inbound or outbound — is a single flat JSON object:
   on inbound; always present on outbound from `@phlix/syncplay`.
 - All payload fields are spread at the **top level** (NOT nested under `data`).
 
-> **Units footnote — one hub-relay exception.** On the hub SyncPlay relay
-> surface (`:8804`), every server stamp is in **milliseconds** *except*
+> **Units footnote — the §4 unit law, hub-relay detail site.** On the hub
+> SyncPlay relay surface (`:8804`), every server stamp is in **milliseconds** *except*
 > `pending_command` envelopes' `issued_at`, which is **UNIX SECONDS** —
 > deliberately, matching the DB `TIMESTAMP` it mirrors (the hub's own unit
 > note: `phlix-hub/src/SyncPlay/PendingCommandDispatcher.php:117-119`, value
 > written at `:132` via `time()`). A client comparing `issued_at` against an
 > `exp`, `server_time`, or frame `timestamp` (all ms) must multiply by 1000
-> first; this exception is pinned so no consumer "fixes" it into drift.
+> first; this exception is pinned so no consumer "fixes" it into drift. The
+> single unit law itself is §4; this footnote is a detail site for one of its
+> named exceptions, not a second authority.
 
 `@phlix/syncplay` `encodeMessage(type, payload, now)` produces this object;
 `decodeMessage(raw)` parses it and, for backward compatibility only, unwraps the
@@ -100,11 +102,46 @@ documented per-surface deviations.
 
 ## 4. Message payloads (exact wire fields)
 
-All field names are **snake_case**. Positions/durations are **milliseconds**.
-Wire `server_time` stamps are the one mixed-unit field — per carrier (§8.4:
-the hub relay stamps ms, `:8097` keeps a legacy UNIX-seconds stamp) — and the
-client library normalizes every delivered `server_time` to **milliseconds**
-(`SyncPlayClient.serverTimeToMs`), so consumer-visible time is uniformly ms.
+All field names are **snake_case**.
+
+> **§4 UNIT LAW — the single authority on wire time units.** Positions and
+> durations are **milliseconds** on both carriers, as is the envelope
+> `timestamp` (§2). Two families of wall-clock stamps depart from that, and
+> this text is where both are ruled: (i) `server_time`, the protocol's only
+> MIXED-unit field, carries the per-carrier named exception stated below and
+> referenced by every mention-site in this section; (ii) the roster/lifecycle
+> stamps `joined_at`, `created_at`, `last_activity_at` and `added_at` are
+> **UNIX SECONDS on every carrier by design** — a stable per-field unit, not a
+> per-carrier quirk (server `GroupState.php:241-242`/`:399`/`:813` `time()`;
+> hub `SyncPlayRelayWorker.php:1367` states the same law) — and each names its
+> unit inline at its field line. No other section states a unit law: the §2
+> units footnote and the §8.4 carrier table are detail sites for these
+> exceptions and defer to this text.
+>
+> **Named exception — `server_time` in UNIX SECONDS (`:8097` only).** The
+> `:8097` server stamps `time()` (SECONDS) on every `server_time` it WRITES:
+> the `playback_sync` group echo and the S446 nudge unicast
+> (`phlix-server/src/Session/SyncPlay/SyncPlayManager.php` `handlePlaybackSync()`,
+> echo `:1517-1524`, nudge `:1569-1585`), the `time_sync` advisory reply
+> (`handleTimeSync()` `:1652-1660`), and the play/pause/seek echo FALLBACK
+> (`:1076` / `:1128` / `:1175` `?? time()`) — a sender-supplied ms stamp is
+> echoed verbatim, so even one frame type can carry either scale depending on
+> the sender. Outside those arms the field is ms: the `:8804` hub relay NEVER
+> emits a seconds `server_time` (it stamps `nowMs()` and passes a sender's ms
+> stamp through untouched), and `time_pong`'s `server_time` is ms on BOTH
+> carriers (server `TimeSync::processPing()` `(int)(microtime(true) * 1000)`).
+> The exception covers the `:8097` server-stamped arms above and nothing else.
+>
+> **Delivery policy — what `@phlix/syncplay` consumers see.** Playhead-bearing
+> frames are normalized to ms AT PARSE: `SyncPlayClient.serverTimeToMs`
+> (`src/client.ts`, epoch-magnitude rule) is applied by `handlePlayback`,
+> `handleSeek` and `handlePlaybackSync`, so `onPlaybackCommand` and
+> `onPlaybackSync` receive milliseconds whichever carrier stamped. The ONE
+> deliberate verbatim arm is the `time_sync` advisory: `handleTimeSync`
+> surfaces its seconds stamp UNCONVERTED as the unit-named `serverTimeSec`,
+> because that snapshot's siblings are `_ms`-named and it is read per-field
+> (see the §4 `time_sync` block below). A consumer that needs ms there
+> multiplies by 1000 itself.
 
 ### Group management
 
@@ -166,8 +203,8 @@ group: {                            (verbatim GroupState::getState())
   playback_state: "playing" | "paused" | "buffering" | "stopped"
   queue: [ { media_id, media_info, added_at, added_by }, ... ]
                                           (item fields per-carrier — see note)
-  created_at: number
-  last_activity_at: number
+  created_at: number                    (UNIX seconds — both carriers)
+  last_activity_at: number              (UNIX seconds — both carriers)
 }
 your_id?: string           (the recipient's own member id)
 ```
@@ -235,9 +272,9 @@ an existence-agnostic 404).
 group_id: string
 member_id: string
 position: number
-server_time: number        (synchronized timestamp, ms; the :8097 echo falls
-                            back to UNIX seconds when the sender omits it —
-                            §8.4; the library normalizes echoes to ms)
+server_time: number        (ms; the :8097 echo fallback is the §4 unit law's
+                            named seconds exception; the library normalizes
+                            echoes to ms — §4 delivery policy)
 ```
 
 `syncplay_playback_seek`
@@ -246,7 +283,7 @@ group_id: string
 member_id: string
 from_position: number
 to_position: number
-server_time: number        (same unit law as play/pause above)
+server_time: number        (same §4 unit law as play/pause above)
 ```
 
 `syncplay_playback_queue` (both directions — the shapes DIFFER)
@@ -287,7 +324,8 @@ current_media_id: string|null  (:1520 echo, :1572 nudge; hub relay
                                  `SyncPlayRelayWorker.php:1676`)
 position: number
 is_playing: boolean
-server_time: number        (wire: UNIX seconds on :8097, ms on hub — §8.4; delivered as ms)
+server_time: number        (§4 named exception: UNIX seconds on :8097, ms on hub;
+                            delivered as ms via serverTimeToMs — §4 delivery policy)
 nudge?: {                  (S446 soft-desync correction — directed frames ONLY, see below)
   drift_ms: number,        (group position − reported position, ms; >0 = behind — :1566)
   direction: 'behind' | 'ahead',   (:1578)
@@ -387,7 +425,8 @@ client_time: number        (t1: client send time, ms)
 `syncplay_time_pong` (server → client)
 ```
 client_time: number        (echoed t1)
-server_time: number        (t2: server RECEIVE time, ms)
+server_time: number        (t2: server RECEIVE time, ms on BOTH carriers — explicitly
+                            NOT the §4 seconds exception)
 protocol_version: number
 ```
 > There is **no** `server_receive_time` / t3 field. `server_time` IS the server
@@ -399,13 +438,16 @@ protocol_version: number
 (`phlix-server` `SyncPlayManager::handleTimeSync()`, emit at
 `src/Session/SyncPlay/SyncPlayManager.php:1653-1659`) — NOT a group broadcast
 (the old one-line stub here predated the field audit). Units are mixed per
-field: `server_time` carries the `:8097` legacy **seconds** quirk, the
-`_ms` fields are milliseconds.
+field — this is the §4 unit law's named exception in its `time_sync` arm:
+`server_time` is UNIX **seconds** on `:8097`, the `_ms` fields are
+milliseconds.
 
 ```
 member_id: string          (server-derived requester identity — S289, payload member_id ignored)
 group_id: string
-server_time: number        (UNIX SECONDS via time() — NOT ms)
+server_time: number        (UNIX SECONDS via time() — NOT ms; the library
+                            delivers it VERBATIM as `serverTimeSec`, never
+                            normalized — §4 delivery policy)
 offset_ms: number          (server TimeSync::getTimeOffset(), ms)
 latency_ms: number         (server TimeSync::getEstimatedLatency(), ms)
 drift_rate: number         (server drift factor, float ≈1.0)
@@ -413,7 +455,7 @@ is_stable: boolean         (server TimeSync::isSyncStable())
 ```
 > There is **no** `client_time` field on this frame (the `client_time` name
 > belongs to `time_ping`/`time_pong` only). On `:8804` the hub has no producer
-> and refuses inbound use (see §4).
+> and refuses inbound use (see §8.4).
 
 ### Informational
 
@@ -623,9 +665,9 @@ over the relay impossible by construction; the first member is host and a
 host departure elects the longest-present member (broadcast `syncplay_info`
 per §6 on join/leave, `syncplay_host_elect` followed by the refreshed
 `syncplay_group_state` on election); `syncplay_playback_sync`'s `server_time`
-is **milliseconds** here — per the §2 footnote's hub-wide ms law, whereas the
-`:8097` producer keeps a legacy seconds quirk (the client library papers over
-the split at its decode boundary — `SyncPlayClient.serverTimeToMs` — so
+is **milliseconds** here — the hub arm of the §4 unit law's named exception
+(§4 is the single authority; the `:8097` server-stamped arms are the seconds
+side and `SyncPlayClient.serverTimeToMs` normalizes them at parse, so
 consumers receive ms on both carriers); server-initiated
 `syncplay_time_sync` has no hub producer and its inbound use is refused
 (`hub.protocol_unsupported`) because the hub holds no clock authority beyond

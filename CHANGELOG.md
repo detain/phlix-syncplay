@@ -4,6 +4,34 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **SPEC §4 is now the SINGLE time-unit law with the named `:8097` seconds
+  exception; every mention-site and §8.4/§2 delegate to it (fix lane
+  M-SYNCPLAY-15, review `syncplay__writer` MAJ-1; docs + tests only — zero
+  executable surface change: the emitted bundle is byte-ident, `dist/`
+  untouched, no `.d.ts` movement; v0.1.6 wave rider).** The law and §8.4's
+  quirk disclosure used to be two separate law-statements about the same
+  `server_time` field — the contract-text hazard that shipped mobile's
+  2×-undercorrect bug class. Shipped: §4's UNIT LAW block (ms is the rule;
+  `server_time` on the `:8097` server-stamped arms — `playback_sync` group
+  echo + S446 nudge unicast, `time_sync` advisory, play/pause/seek echo
+  fallback — is the ONE named per-carrier exception; the hub NEVER stamps
+  seconds; `time_pong` is ruled ms on both carriers), the honest DELIVERY
+  POLICY (playback arms normalize at parse via `serverTimeToMs`; the
+  `time_sync` advisory is the one arm delivered VERBATIM as the unit-named
+  `serverTimeSec` — curing a live docs-lie: the previous §4 text claimed EVERY
+  delivered `server_time` was normalized, which `handleTimeSync` never did),
+  §8.4 and the §2 footnote re-pointed to §4 as the single authority, all five
+  §4 `server_time` mention-sites annotated inline, and unit labels added to
+  `group_state.created_at`/`last_activity_at` (verified `time()` on server
+  `GroupState.php:241-242`, UNIX seconds on hub `SyncPlayRelayWorker.php:1367`
+  too). Producer bytes re-verified at phlix-server `c22b9d2e`
+  (`:1076`/`:1128`/`:1175` `?? time()`, echo `:1517-1524`, nudge
+  `:1569-1585`, `handleTimeSync` `:1652-1660`, `TimeSync::processPing()` ms)
+  and phlix-hub `5731fc79` (`nowMs()` stamps, `canonicalInt` pass-through).
+  New `test/specUnitLaw.test.ts` (9): 7 SPEC-text pins (law heading, named
+  exception arms, docs-lie tripwire, mention-site coverage, no-second-authority
+  tripwires — all red on parent `a09506f`) + 2 behavioral pins of the
+  documented delivery policy. vitest 195 → 204 (+9 exact).**
 - **`memberId` ↔ `your_id` identity contract DOCUMENTED; README example cured
   to join-response truth (fix lane M-SYNCPLAY-12, review `syncplay__gameux`
   M5; semver PATCH — documentation + tests only, zero executable surface
