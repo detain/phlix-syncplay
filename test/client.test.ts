@@ -1232,6 +1232,98 @@ describe('SyncPlayClient.serverTimeToMs — per-carrier wire-unit normalization 
   });
 });
 
+describe('SyncPlayClient — playback_sync echo carrier-pair scale law (M-SYNCPLAY-10 close-out)', () => {
+  // The review (`syncplay__gameux` M3) counted THREE unlabeled scales at this
+  // one decode site: `:8097` UNIX-seconds echoes (phlix-server
+  // `SyncPlayManager.php:1506` `$serverTime = time();` → broadcast field
+  // `:1523`), hub-relay ms echoes (phlix-hub `SyncPlayRelayWorker.php:1679`
+  // `self::nowMs()` — review-era cite `:1603`, drift @f85f48ec noted), and the
+  // handler's own already-ms fallback when the frame carries no stamp.
+  // M-SYNCPLAY-04 normalized the wire stamps; these pins lock the law the
+  // item names: both carriers describing the SAME instant land in consumer
+  // hands as the SAME ms stamp — identical age against the synchronized clock,
+  // no playhead teleport on either leg. Mutation-toothed: stripping
+  // `serverTimeToMs` in `handlePlaybackSync` lands the seconds leg 1000× low
+  // (age ≈ −1.76e12 ms) → red.
+  it('seconds-carrier and ms-carrier echoes of one instant deliver identical ms stamps and ages', () => {
+    // Whole-second instant: `time()` floor-truncation is exact, so both
+    // carriers genuinely describe the same millisecond.
+    const instantMs = 1761900000000;
+    const clock = { t: instantMs + 500 };
+    const syncs: Array<{ serverTime: number }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => clock.t,
+      memberId: 'me',
+      onPlaybackSync: (_m, _p, _i, serverTime) => syncs.push({ serverTime }),
+    });
+
+    // Carrier 1 — `:8097`: the group echo stamps UNIX SECONDS.
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 5000,
+      is_playing: true,
+      server_time: Math.floor(instantMs / 1000),
+    });
+    // Carrier 2 — hub relay: the same echo for the SAME instant stamps ms.
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 5000,
+      is_playing: true,
+      server_time: instantMs,
+    });
+
+    expect(syncs).toHaveLength(2);
+    // The all-ms consumer contract (SPEC §4) holds whichever producer stamped.
+    expect(syncs[0].serverTime).toBe(instantMs);
+    expect(syncs[1].serverTime).toBe(instantMs);
+
+    // Age and extrapolation are carrier-indifferent: 500 ms elapsed on both
+    // legs → playhead 5500 on both. A raw seconds stamp would teleport this.
+    const timeSync = client.getTimeSync();
+    for (const { serverTime } of syncs) {
+      expect(clock.t - serverTime).toBe(500);
+      expect(timeSync.getAdjustedPosition(5000, serverTime, clock.t)).toBe(5500);
+    }
+  });
+
+  it('the no-stamp fallback arm keeps the same ms age law (the third scale the review named)', () => {
+    // Small fake clock: an epoch-scale stamp would make a wrongful ×1000
+    // promotion of the fallback a no-op (≥ 1e12 passes the heuristic
+    // untouched), so the mutation teeth here REQUIRE a sub-1e12 clock —
+    // scaling the fallback yields 1000 × 1000 = 1000000 → red, and dropping
+    // the ms-passthrough of the fallback likewise reds the age assertions.
+    const clock = { t: 1000 };
+    const syncs: Array<{ serverTime: number }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => clock.t,
+      memberId: 'me',
+      onPlaybackSync: (_m, _p, _i, serverTime) => syncs.push({ serverTime }),
+    });
+
+    // Stripped frame (hand-built / legacy relay): no `server_time` — the
+    // handler substitutes `getSynchronizedTime()`, ALREADY ms; the ×1000
+    // promotion must not touch it.
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 5000,
+      is_playing: true,
+    });
+
+    expect(syncs[0].serverTime).toBe(1000);
+    expect(
+      client.getTimeSync().getAdjustedPosition(5000, syncs[0].serverTime, clock.t),
+    ).toBe(5000);
+  });
+});
+
 describe('SyncPlayClient — switch default case (unknown message type)', () => {
   it('unknown message types are ignored when no onUnknownFrame hook is registered (no crash, no state change)', () => {
     const states: Array<{ group: SyncPlayGroup; yourId: string | undefined }> = [];

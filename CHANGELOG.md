@@ -4,6 +4,38 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **`server_time` scale trap (M-SYNCPLAY-10) closed-out: carrier-pair age pins +
+  docblock currency (semver PATCH — no consumer-visible shape change; doc/test
+  only).** The review (`syncplay__gameux` M3) named the playback_sync echo path
+  where `:8097` stamps UNIX seconds (phlix-server `SyncPlayManager.php:1506`
+  `$serverTime = time();` → broadcast `:1523` — review-era cite `:1508`, 2-line
+  drift @84e55800), the hub relay stamps ms (`SyncPlayRelayWorker.php:1679`
+  `self::nowMs()` — review-era cite `:1603`, drift @f85f48ec) and the handler's
+  own no-stamp fallback is already ms. The `39433e1` normalize (M-SYNCPLAY-04)
+  already covers this decode site: at HEAD every `server_time` reaching
+  `onPlaybackSync`/`onPlaybackCommand` passes `SyncPlayClient.serverTimeToMs`
+  (magnitude heuristic `< 1e12 → ×1000`) and no raw-stamp consumer path remains
+  (all decode sites + the ms-pinned TIME_PONG producers on both carriers —
+  server `TimeSync::processPing:113` — were re-traced). Shipped here: two
+  fake-clock pins locking the item's exact law — seconds-carrier and
+  ms-carrier echoes of ONE instant deliver identical ms stamps and identical
+  synchronized-clock age/`getAdjustedPosition` extrapolation through the SAME
+  handler, and the no-stamp fallback arm stays un-scaled (small-clock vector so
+  a wrongful promotion cannot pass the heuristic silently; mutation-proven:
+  stripping the decode-site normalize reddens the carrier-pair pin, and 3
+  sibling normalization pins move with it). Plus one stale docblock cure:
+  `messages.ts` `TimeSyncState.serverTimeSec` claimed "same raw-pass law as
+  `onPlaybackSync`'s serverTime" — false since `39433e1` (that stamp is now
+  NORMALIZED ms, never raw); rewritten with both-sides producer cites. Rider
+  for the server lane (recorded, NOT edited here): the play/pause/seek echo
+  fallbacks `?? time()` (`:1076/:1128/:1175`) make the SAME `:8097` handler emit
+  TWO scales for one frame type depending on whether the SENDER stamped —
+  library-safe under the magnitude heuristic, exposed to non-library wire
+  readers; recommended cure is `?? Messages::nowMs()` behind a SPEC producer-
+  bytes re-pin. SPEC §4/§8.4 verified current against shipped behavior (no
+  drift → untouched). Serial suite 7 files / 172 → 174 (+2 exact);
+  typecheck/lint clean; `dist/` rebuilt deterministically (aggregate md5
+  `26604ebe439fbc2764899102806c6c08` ×2).
 - **`sendSeek` is now a coalescing throttle — command-repeat protection with
   a documented stance (fix lane M-SYNCPLAY-09, review `syncplay__gameux`
   M2; consumer-visible feat — semver MINOR).** A TV remote held on a seek bar

@@ -463,8 +463,11 @@ export interface TimeSyncPayload {
  * Normalized TIME_SYNC model handed to `SyncPlayClientOptions.onTimeSync`.
  * Field units are named into the identifiers (`...Sec` vs `...Ms`) because the
  * wire itself mixes seconds and milliseconds. `serverTimeSec` is passed
- * VERBATIM (seconds quirk preserved, same raw-pass law as
- * `onPlaybackSync`'s serverTime) — multiply by 1000 for ms.
+ * VERBATIM — the `:8097` advisory's seconds stamp is preserved (phlix-server
+ * `SyncPlayManager.php:1655` `time()`, @84e55800) — multiply by 1000 for ms.
+ * This is NOT the `onPlaybackSync` law: since M-SYNCPLAY-04 that callback's
+ * `serverTime` arrives NORMALIZED to ms at the decode boundary
+ * (`SyncPlayClient.serverTimeToMs`, SPEC §4/§8.4) — never raw.
  */
 export interface TimeSyncState {
   memberId: string;
