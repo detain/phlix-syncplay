@@ -279,7 +279,7 @@ ruling gates the REST reads `GET /api/v1/syncplay/groups` and
 `GET /api/v1/syncplay/groups/{id}` (a non-member's read of a foreign room is
 an existence-agnostic 404).
 
-### Playback control (host-only on the server; non-hosts get a `NOT_HOST` error)
+### Playback control (play/pause/seek/queue host-only on the server, non-hosts get a `NOT_HOST` error; `syncplay_playback_sync` is the member-permitted state report — §9 item 2)
 
 `syncplay_playback_play` / `syncplay_playback_pause`
 ```
@@ -744,12 +744,29 @@ A correct server MUST:
    to detect obvious self-references / for logging).
 
 2. **Authorize host-only actions by connection identity, not by claimed id.**
-   Host-only commands (`syncplay_playback_play` / `_pause` / `_seek` /
-   `_sync` and `syncplay_host_transfer`) MUST be authorized by checking that the
-   *authenticated connection* is the current host — never by trusting the
-   `member_id` / `current_host_id` fields the client placed in the frame. For
-   host transfer, the server authorizes the transfer by the connection's
-   authenticated identity and sets the resulting host id authoritatively.
+   The host-only COMMANDS are `syncplay_playback_play` / `_pause` / `_seek` /
+   `_queue` and `syncplay_host_transfer`: each MUST be authorized by checking
+   that the *authenticated connection* is the current host — never by trusting
+   the `member_id` / `current_host_id` fields the client placed in the frame.
+   (M-SYNCPLAY-17 correction, aligned to both live producers: the server's
+   `NOT_HOST` gates sit on play / pause / seek / queue / transfer —
+   phlix-server `SyncPlayManager.php:1071, :1123, :1169, :1219, :1413` @
+   3cfd26c2 — and the hub relay mirrors that set — phlix-hub
+   `SyncPlayRelayWorker.php:1605, :1707, :1873` @ 34ae8e3e. The old list
+   gated `_sync` and omitted `_queue`: both wrong.) For host transfer, the
+   server authorizes the transfer by the connection's authenticated identity
+   and sets the resulting host id authoritatively.
+   `syncplay_playback_sync` is **not** in that set: it is a member-permitted
+   STATE REPORT (see §9.1). Both producers guard it only for authentication
+   and membership — server `handlePlaybackSync()` :1483 (`NOT_AUTHENTICATED`
+   :1490, `NOT_IN_GROUP` :1498, no `NOT_HOST` arm anywhere in the body; its
+   own docblock, :1452: "Any member can request a playback sync"), hub
+   `handleCanonicalPlaybackSync()` :1661 (docblock :1650: "state report,
+   anyone may send"; sole guard `NOT_IN_GROUP` :1665). The ungated arm is
+   intentional law, not a server gap: the whole S446 per-member drift policy
+   (the server ingests every reporter's position at :1513 and aims a nudge at
+   the drifting member — :1530, :1562) exists only because non-hosts report,
+   and §9.1's S294 re-anchor design starves without them.
 
 3. **Set the true sender id on rebroadcast.** When the server rebroadcasts a
    command to the group, it MUST stamp the authoritative sender `member_id`

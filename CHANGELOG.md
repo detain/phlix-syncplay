@@ -4,6 +4,42 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **M-SYNCPLAY-17 lane: §9's host-only command list now equals the live
+  producers' gate set, and `playback_sync`'s member-permission law is stated
+  affirmatively (review `syncplay__writer` MAJ-3; docs + tests + this entry
+  only — zero executable surface change: `dist/` rebuilt twice, byte-ident
+  to the committed bundle both ways, `git status` on `dist/` empty, no
+  `.d.ts` movement).** §9 item 2 had declared `syncplay_playback_play` /
+  `_pause` / `_seek` / `_sync` and `syncplay_host_transfer` host-only MUSTs
+  while §9.1 three lines later called `syncplay_playback_sync` a STATE
+  REPORT broadcast to EVERY member. The producers settle it against the doc,
+  not between the doc's halves: the `NOT_HOST` gates sit on play/pause/seek/
+  QUEUE/host_transfer (phlix-server `SyncPlayManager.php:1071, :1123,
+  :1169, :1219, :1413` @ 3cfd26c2 — the old list wrongly INCLUDED `_sync` and
+  wrongly OMITTED the gated `_queue`) and `handlePlaybackSync` :1483 guards
+  only authentication (:1490) and membership (:1498) before ingesting every
+  reporter's position (:1513) for the S446 per-member drift policy (:1530,
+  nudge slot :1562) — its own docblock :1452: "Any member can request a
+  playback sync". The hub relay carries the same law:
+  `handleCanonicalPlaybackSync` :1661 (docblock :1650 "state report, anyone
+  may send"; sole guard `NOT_IN_GROUP` :1665) with gates at :1605/:1707/
+  :1873 (phlix-hub @ 34ae8e3e). Shipped: the corrected item-2 list plus an
+  affirmative member-permitted clause ruling the ungated sync arm
+  INTENTIONAL LAW, not a server gap (S446 and §9.1's S294 re-anchor exist
+  only because non-hosts report); §4's "Playback control" heading retitled
+  (its unscoped "(host-only on the server…)" parenthetical had contradicted
+  the sync field block directly beneath it); the README quick-start's
+  copy-paste example moved `reportPosition` out of the "Host-only controls"
+  block — a server team following the old text would 4xx every non-host's
+  position report. New tripwire `test/specPlaybackSyncAuth.test.ts` (+5):
+  item-2 list ≡ producer set, the affirmative clause + ruling sentence, the
+  §9.1 held-side sentence (the cure may not flip the true side), §4 heading
+  scoping, README block membership. Red-on-parent: 4 of the 5 legs red at
+  72e8aac3f (the held-side pin is green on both sides by design). Suite
+  206 → 211 committed (+5 exact, measured full serial against the M16 tip
+  34cf0a56; typecheck, lint, and build ×2 (aggregate md5
+  `feef378e40c177f3e080bb82df323cd7`, identical both runs and to the
+  committed `dist/`) all clean.
 - **M-SYNCPLAY-16 lane: the §4 `time_sync` field block is producer-verified
   AND tripwired (review `syncplay__writer` MAJ-2; test + this entry only —
   zero executable surface change: `dist/` rebuilt twice, byte-ident to the

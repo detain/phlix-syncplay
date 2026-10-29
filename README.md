@@ -153,10 +153,15 @@ ws.onopen = () => {
   client.createGroup('Movie Night'); // or joinGroup(groupId)
 };
 
-// Host-only controls (the server rejects non-hosts with NOT_HOST):
+// Host-only controls (the server rejects non-hosts with NOT_HOST — the gated
+// set is play/pause/seek/queue/transfer, SPEC §9 item 2):
 client.sendPlay(positionMs);
 client.sendPause(positionMs);
 client.sendSeek(fromMs, toMs);
+
+// Position report — ANY authenticated member may send it; NOT host-gated
+// (state report, §9.1: the server ingests every member's position for the
+// S446 drift policy and echoes the group state back to everyone):
 client.reportPosition(positionMs, isPlaying);
 
 // Party surface (any member; identity is server-derived, SPEC §4/§9):
