@@ -386,7 +386,14 @@ export declare class SyncPlayClient {
     private closeSeekWindow;
     /** Drop any coalesced intent and disarm the window (leave/disconnect). */
     private cancelSeekCoalescing;
-    /** Periodic position report (PLAYBACK_SYNC) — typically host-driven. */
+    /**
+     * Periodic position report (PLAYBACK_SYNC).
+     *
+     * Member-permitted on both producers — no `NOT_HOST` gate covers this type
+     * (SPEC §9 item 2 / §9.1); on `:8097` each accepted report is additionally
+     * ingested for the S446 per-member drift policy (§4 `nudge`). Host-driven
+     * pacing is an integration convention, never an authorization precondition.
+     */
     reportPosition(position: number, isPlaying: boolean): void;
     /**
      * Send a chat message to the group. Outbound shape mirrors the server's own

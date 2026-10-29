@@ -27,11 +27,19 @@
  *  4. README quick-start: `reportPosition` does not sit in the Host-only
  *     controls block (it moved in the cure; the pre-cure example — the exact
  *     copy-paste a client team follows — listed it there).
+ *  5. (M17 rider, this-lane src cure) `src/client.ts` doc-comments carry the
+ *     same truth: the playback section banner no longer over-claims "host
+ *     only" across `reportPosition`, and the `reportPosition` docblock states
+ *     member-permission instead of the "typically host-driven" hedge — the
+ *     docblock ships verbatim in `dist/client.d.ts`, so the wrong side
+ *     reached every JS consumer's IDE, not just this repo's readers.
  *
  * Red-on-parent: at 72e8aac leg 1 trips on `_sync` in the item-2 list (and
  * the absent `_queue`/ruling clauses), leg 3 on the blanket heading, leg 4 on
  * `reportPosition` inside the Host-only block. Legs 2 is the held-side pin,
- * green on both sides by design.
+ * green on both sides by design. Leg 5 is red at the cure head `eff7fec`
+ * (that lane left the src fiction as a named rider) and green only where the
+ * banner/docblock cure coexists.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  */
@@ -42,8 +50,10 @@ import { describe, it, expect } from 'vitest';
 
 const SPEC_PATH = fileURLToPath(new URL('../SPEC.md', import.meta.url));
 const README_PATH = fileURLToPath(new URL('../README.md', import.meta.url));
+const CLIENT_TS_PATH = fileURLToPath(new URL('../src/client.ts', import.meta.url));
 const SPEC = readFileSync(SPEC_PATH, 'utf8');
 const README = readFileSync(README_PATH, 'utf8');
+const CLIENT_TS = readFileSync(CLIENT_TS_PATH, 'utf8');
 
 /** Slice one headline-delimited section body. */
 function between(text: string, startMark: string, endMark: string): string {
@@ -112,5 +122,25 @@ describe('SPEC §4 and README repeat-sites agree with the producer (M-SYNCPLAY-1
     expect(reportLead).toContain('ANY authenticated member');
     // The gated-set comment must name the producer set, not the old list.
     expect(hostBlock).toContain('play/pause/seek/queue/transfer');
+  });
+});
+
+describe('src/client.ts doc-comments carry the roster truth (M17 rider)', () => {
+  it('the playback banner names the real gate set and exempts the report', () => {
+    const banner = between(CLIENT_TS, '// --- Playback', 'sendPlay(position: number)');
+    // The retired over-claim (an unscoped "host only" banner sitting above
+    // reportPosition too) must never return — in the old wording it shipped
+    // verbatim into dist/client.d.ts and taught the fiction to consumers.
+    expect(banner).not.toContain('host only; server rejects non-hosts');
+    expect(banner).toContain('NOT on that roster');
+    expect(banner).toContain('STATE REPORT');
+    expect(banner).toContain('§9 item 2');
+  });
+
+  it('the reportPosition docblock states member-permission, not host convention', () => {
+    const doc = between(CLIENT_TS, '   * Periodic position report', 'reportPosition(position: number');
+    expect(doc).not.toContain('typically host-driven');
+    expect(doc).toContain('Member-permitted on both producers');
+    expect(doc).toContain('never an authorization precondition');
   });
 });

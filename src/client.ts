@@ -483,13 +483,19 @@ export class SyncPlayClient {
     this.group = null;
   }
 
-  // --- Playback (host only; server rejects non-hosts) ----------------------
+  // --- Playback ------------------------------------------------------------
+  //
+  // Roster truth (SPEC §9 item 2 / §9.1): the producers NOT_HOST-gate play,
+  // pause, seek, queue and host_transfer to the current host. sendPlay/
+  // sendPause/sendSeek below are those host commands; reportPosition's
+  // PLAYBACK_SYNC frame is NOT on that roster — it is a member-permitted
+  // STATE REPORT any authenticated group member may send on both carriers.
   //
   // SECURITY (see SPEC §9): every playback sender below stamps the frame with
-  // this client's self-asserted `member_id`. The server MUST authorize these
-  // host-only actions by the *authenticated connection's* identity (not by the
-  // claimed `member_id`) and MUST overwrite the sender id with the authenticated
-  // one before rebroadcasting. The echo-suppression in handlePlayback/handleSeek
+  // this client's self-asserted `member_id`. The server MUST authorize the
+  // action by the *authenticated connection's* identity (not by the claimed
+  // `member_id`) and MUST overwrite the sender id with the authenticated one
+  // before rebroadcasting. The echo-suppression in handlePlayback/handleSeek
   // relies on that server-set sender id.
 
   sendPlay(position: number): void {
@@ -596,7 +602,14 @@ export class SyncPlayClient {
     this.seekWindowOpen = false;
   }
 
-  /** Periodic position report (PLAYBACK_SYNC) — typically host-driven. */
+  /**
+   * Periodic position report (PLAYBACK_SYNC).
+   *
+   * Member-permitted on both producers — no `NOT_HOST` gate covers this type
+   * (SPEC §9 item 2 / §9.1); on `:8097` each accepted report is additionally
+   * ingested for the S446 per-member drift policy (§4 `nudge`). Host-driven
+   * pacing is an integration convention, never an authorization precondition.
+   */
   reportPosition(position: number, isPlaying: boolean): void {
     if (this.group === null) {
       return;

@@ -4,6 +4,28 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **M-SYNCPLAY-17 rider: the src doc-comment repeat-sites of the §9 roster
+  fiction are cured to producer truth (second lane on the same item; the
+  sibling cure `eff7fec` shipped SPEC/README + the tripwire and left these
+  two lines as its named out-of-whitelist rider).** `src/client.ts` carried
+  the same contradiction in comment form: the playback-section banner
+  claimed "host only; server rejects non-hosts" while sitting above
+  `reportPosition` (whose `PLAYBACK_SYNC` the live producers accept from ANY
+  authenticated member — SPEC §9 item 2 as corrected), and the
+  `reportPosition` docblock hedged "typically host-driven" — THAT one-liner
+  shipped verbatim in `dist/client.d.ts`, teaching the wrong side into every
+  JS consumer's IDE. Now: the banner names the real gate set
+  (play/pause/seek/queue/transfer) and exempts the report; the docblock
+  states member-permission with the §9 item 2 / §9.1 / S446 cites and rules
+  host-driven pacing a convention, "never an authorization precondition".
+  Zero behavior change — the library never gated a non-host report (the
+  fiction was comment-only, enforcement-true already); locked by two new legs
+  in `specPlaybackSyncAuth.test.ts` (red-on-parent at `eff7fec`: exactly 2
+  rider legs red, the 5 cure legs green). Suite 211 → 213 (+2 exact, full
+  serial `--no-file-parallelism`); typecheck + lint clean. DIST MOVES:
+  `dist/client.d.ts` re-emitted with the cured docblock (bundle + umd bytes
+  unchanged; map `sourcesContent` re-embeds src); builds ×2 deterministic,
+  aggregate md5 `428b3da4ff5257232071fdf22b283039`. v0.1.6 wave rider.
 - **M-SYNCPLAY-17 lane: §9's host-only command list now equals the live
   producers' gate set, and `playback_sync`'s member-permission law is stated
   affirmatively (review `syncplay__writer` MAJ-3; docs + tests + this entry
