@@ -183,6 +183,34 @@ your_id?: string           (the recipient's own member id)
 > summary, never on a `group_state` message.
 
 `syncplay_group_list` (client → server) — bare request, no fields.
+
+`syncplay_group_list` (server → client reply) — **live-producer truth, both
+carriers** (`:8097` `phlix-server` `SyncPlayManager.php` `handleGroupList`
+reply send :1686-1689 + `groupSummary()` :1740-1750; `:8804` `phlix-hub`
+`SyncPlayRelayWorker.php` `handleCanonicalGroupList` :1925-1950, whose row
+literally mirrors the Server summary). Payload keys alongside the
+`Messages::frame` envelope:
+```
+groups: [                          (array of summary rows — SIX keys, always all emitted)
+  {
+    id: string                     (the group id — NOT `group_id`)
+    name: string                   (display name — NOT `group_name`)
+    member_count: number           (integer)
+    has_password: boolean          (real bool, always present; hub: always false —
+                                    it gates by ownership scope, not passwords)
+    current_media: string | null   (media id or null — NOT an "und" sentinel)
+    is_playing: boolean
+  }, ...
+]
+count: number                      (integer, === groups.length on both producers)
+```
+> This block exists because the reply row was NEVER documented here, and the
+> library/README/test all drifted into an invented `{group_id, group_name,
+> has_password}` row that matches no wire byte on either carrier — reading
+> `groups[0].group_id` against a live reply yields nothing. `id`/`name` are the
+> summary spelling (like the REST listing rows); the `group_id`/`group_name`
+> spelling belongs ONLY to the nested `group_state.group` block above.
+
 The server's `syncplay_group_list` reply is scoped per requester: rooms the
 requester is a member of, plus every room when the requester is an active
 admin (MED-2 owner ruling 2026-10-02 — visibility is members-or-admin; joining

@@ -303,16 +303,50 @@ export interface TimeSyncState {
     isStable: boolean;
 }
 /**
- * GROUP_LIST as the server emits it — a list of available groups.
- * Mirrors the response from `SyncPlayManager::listGroups()`.
+ * One `group_list` reply summary row — LIVE PRODUCER TRUTH, identical on both
+ * carriers (all six keys are ALWAYS emitted):
+ *  - `:8097`: `phlix-server/src/Session/SyncPlay/SyncPlayManager.php`
+ *    `groupSummary()` :1740-1750 (`'id'`:1743 `'name'`:1744 `'member_count'`:1745
+ *    `'has_password'`:1746 `'current_media'`:1747 `'is_playing'`:1748;
+ *    `current_media` is `GroupState::getCurrentMediaId(): ?string`,
+ *    GroupState.php:565);
+ *  - `:8804`: `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php`
+ *    `handleCanonicalGroupList()` row literal :1938-1943 (deliberately mirrors
+ *    the Server summary; `has_password` is the truthful constant `false`).
+ *
+ * The identity keys are `id` / `name` — NOT `group_id` / `group_name` (that
+ * spelling belongs only to the nested `group_state.group` block). The previous
+ * model here was FABRICATED (`{group_id, group_name, has_password?}`): it
+ * matched no byte on either socket, so consumers reading it against a live
+ * reply silently saw `''`/`undefined` (SPEC §4 group_list reply block).
+ */
+export interface GroupListSummaryRow {
+    /** Group id — producer key `id` (NOT `group_id`). */
+    id: string;
+    /** Display name — producer key `name` (NOT `group_name`). */
+    name: string;
+    /** Integer member count. */
+    member_count: number;
+    /** Whether the room is password-gated (always a real bool on the wire). */
+    has_password: boolean;
+    /** Current media id, or null when the room has no media loaded. */
+    current_media: string | null;
+    /** Whether the room is currently playing. */
+    is_playing: boolean;
+}
+/**
+ * GROUP_LIST reply as the server emits it — `syncplay_group_list`
+ * (server → client). Producers: `phlix-server` `SyncPlayManager::handleGroupList`
+ * reply send :1686-1689 and `phlix-hub` `SyncPlayRelayWorker::
+ * handleCanonicalGroupList` send :1947-1950 — both frame
+ * `{groups: <summary rows>, count: <int>}` beside the `Messages::frame`
+ * envelope keys. `count === groups.length` on both.
  */
 export interface GroupListResponsePayload {
-    /** Array of group summary objects. */
-    groups: {
-        group_id: string;
-        group_name: string;
-        has_password?: boolean;
-    }[];
+    /** Array of group summary rows (see {@link GroupListSummaryRow}). */
+    groups: GroupListSummaryRow[];
+    /** Integer row count, emitted alongside `groups` by both producers. */
+    count: number;
 }
 /** ERROR message (Messages::error). */
 export interface ErrorPayload {

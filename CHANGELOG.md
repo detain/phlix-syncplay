@@ -4,6 +4,34 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **`group_list` reply rows are now the LIVE PRODUCER shape — `id`, `name`,
+  `member_count`, `has_password`, `current_media`, `is_playing` inside the
+  `{groups, count}` envelope (fix lane M-SYNCPLAY-05, review
+  `syncplay__docmaint` M1).** SPEC §4 documented the client→server request
+  and the MED-2 visibility ruling but NEVER the reply row; into that hole the
+  library, README and test fixtures all poured the same invented
+  `{group_id, group_name, has_password?}` row — which exists on no socket:
+  `:8097` `phlix-server` `SyncPlayManager.php` `groupSummary()` :1740-1750
+  (reply send :1686-1689) and `:8804` `phlix-hub` `SyncPlayRelayWorker.php`
+  `handleCanonicalGroupList()` row :1938-1943 (send :1947-1950) both emit the
+  six keys, always. A consumer following the old docs against a live reply
+  read `groups[0].group_id` → the library's defensive `''` — the fabricated-
+  field-hidden-by-fixture class, this time mirrored only against itself.
+  Shipped: SPEC §4 gains a reply block pinning the six keys + `count` with
+  producer coords; `GroupListResponsePayload` re-specified truthfully and
+  `GroupListSummaryRow` exported; `handleGroupList` maps the real keys with
+  total per-field coercion (`current_media` keeps the producer's null
+  sentinel, `GroupState.php:565` `?string`); README quick-start line cured;
+  test fixtures re-vendored from the quoted producer bytes (provenance header
+  in-file) and the two invented-shape coercion tests converted — RED on
+  parent (3), green at head. BREAKING signature: `onGroupList` now receives
+  `GroupListSummaryRow[]` and `GroupListResponsePayload.groups` re-types —
+  estate-wide grep of ui/mobile/server/tizen/windows `src` shows ZERO call
+  sites of the WS callback or these types (their `listGroups` hits are the
+  separate REST surface, already `id`/`name`-true). Consumers pin remote tags
+  (`#v0.1.5`); cascade rides the next tag wave. Full serial suite 4 files /
+  145 tests (delta 0 — in-place conversion, fixtures re-vendored not
+  counted); typecheck/lint clean; dist re-built deterministically.
 - **`playback_sync` (and the play/pause/seek echo) `server_time` — the
   consumer contract is now milliseconds on BOTH carriers (fix lane
   M-SYNCPLAY-04, review `syncplay__crossfe` M4).** The library delivered the

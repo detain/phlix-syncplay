@@ -22,7 +22,7 @@
  * historical divergences).
  */
 import { type NowFn } from './framing';
-import { type RawMessage, type SyncPlayGroup, type TimeSyncState, type UnknownFrame } from './messages';
+import { type GroupListSummaryRow, type RawMessage, type SyncPlayGroup, type TimeSyncState, type UnknownFrame } from './messages';
 import { TimeSync } from './time-sync';
 /** A play/pause/seek command surfaced to the consumer for local application. */
 export interface PlaybackCommand {
@@ -90,12 +90,14 @@ export interface SyncPlayClientOptions {
      * `client_time`, so consumers silently received a defaulted `0`.
      */
     onTimeSync?: (_state: TimeSyncState) => void;
-    /** Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list). */
-    onGroupList?: (_groups: {
-        group_id: string;
-        group_name: string;
-        has_password?: boolean;
-    }[]) => void;
+    /**
+     * Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list).
+     * Rows carry the LIVE producer summary shape — `id`/`name`/`member_count`/
+     * `has_password`/`current_media`/`is_playing` (SPEC §4 group_list reply;
+     * `GroupListSummaryRow`). The previous invented `{group_id, group_name}`
+     * spelling matched no wire byte and handed consumers silent `''`s.
+     */
+    onGroupList?: (_groups: GroupListSummaryRow[]) => void;
     /**
      * Extension point for non-SyncPlay vocabulary. This library owns ONLY the 19
      * canonical `syncplay_*` types; ONLY frames whose type is NOT one of them

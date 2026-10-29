@@ -28,6 +28,7 @@ import {
   SYNCPLAY_MESSAGE_TYPES,
   type ErrorPayload,
   type GroupListResponsePayload,
+  type GroupListSummaryRow,
   type GroupStatePayload,
   type HostElectPayload,
   type HostTransferPayload,
@@ -111,8 +112,14 @@ export interface SyncPlayClientOptions {
    * `client_time`, so consumers silently received a defaulted `0`.
    */
   onTimeSync?: (_state: TimeSyncState) => void;
-  /** Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list). */
-  onGroupList?: (_groups: { group_id: string; group_name: string; has_password?: boolean }[]) => void;
+  /**
+   * Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list).
+   * Rows carry the LIVE producer summary shape — `id`/`name`/`member_count`/
+   * `has_password`/`current_media`/`is_playing` (SPEC §4 group_list reply;
+   * `GroupListSummaryRow`). The previous invented `{group_id, group_name}`
+   * spelling matched no wire byte and handed consumers silent `''`s.
+   */
+  onGroupList?: (_groups: GroupListSummaryRow[]) => void;
   /**
    * Extension point for non-SyncPlay vocabulary. This library owns ONLY the 19
    * canonical `syncplay_*` types; ONLY frames whose type is NOT one of them
@@ -692,16 +699,24 @@ export class SyncPlayClient {
 
   private handleGroupList(msg: RawMessage): void {
     const payload = msg as Partial<GroupListResponsePayload>;
-    // The server returns an object with a 'groups' array
+    // The reply envelope is `{groups, count}` on BOTH carriers; only `groups`
+    // is surfaced to consumers (`count === groups.length` there, so it is
+    // derivable — see SPEC §4 group_list reply block).
     const groups = payload.groups;
     if (!Array.isArray(groups)) {
       return;
     }
-    const list: { group_id: string; group_name: string; has_password?: boolean }[] = groups.map(
-      (g) => ({
-        group_id: typeof g.group_id === 'string' ? g.group_id : '',
-        group_name: typeof g.group_name === 'string' ? g.group_name : '',
-        has_password: typeof g.has_password === 'boolean' ? g.has_password : undefined,
+    // Parse-at-the-boundary against the REAL producer keys (server
+    // groupSummary() :1740-1750, hub handleCanonicalGroupList() :1938-1943 —
+    // every key always emitted, so each row is total-typed, never optional).
+    const list: GroupListSummaryRow[] = groups.map(
+      (g): GroupListSummaryRow => ({
+        id: typeof g.id === 'string' ? g.id : '',
+        name: typeof g.name === 'string' ? g.name : '',
+        member_count: typeof g.member_count === 'number' ? g.member_count : 0,
+        has_password: typeof g.has_password === 'boolean' ? g.has_password : false,
+        current_media: typeof g.current_media === 'string' ? g.current_media : null,
+        is_playing: typeof g.is_playing === 'boolean' ? g.is_playing : false,
       }),
     );
     this.options.onGroupList?.(list);

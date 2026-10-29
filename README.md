@@ -86,7 +86,7 @@ const client = new SyncPlayClient({
   onHostTransfer: (currentHostId, newHostId) => {},
   onPlaybackSync: (memberId, position, isPlaying, serverTime) => {},
   onTimeSync: (state) => { /* { memberId, groupId, serverTimeSec, offsetMs, latencyMs, driftRate, isStable } */ },
-  onGroupList: (groups) => { /* [{ group_id, group_name, has_password }] */ },
+  onGroupList: (groups) => { /* [{ id, name, member_count, has_password, current_media, is_playing }] — live producer row, SPEC §4 */ },
   onUnknownFrame: (frame) => { /* non-SyncPlay types only, e.g. the hub relay's `pending_command` */ },
   onDisconnect: () => { /* UI hook, e.g. show a "reconnecting…" banner */ },
 });

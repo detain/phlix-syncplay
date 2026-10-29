@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SyncPlayClient, type PlaybackCommand } from '../src/client';
 import { encodeMessage, serializeMessage } from '../src/framing';
-import { SYNCPLAY_MESSAGE_TYPES, type RawMessage, type SyncPlayGroup, type TimeSyncPayload, type TimeSyncState, type UnknownFrame } from '../src/messages';
+import { SYNCPLAY_MESSAGE_TYPES, type GroupListSummaryRow, type RawMessage, type SyncPlayGroup, type TimeSyncPayload, type TimeSyncState, type UnknownFrame } from '../src/messages';
 
 /** A fake transport + clock harness. */
 function makeHarness(memberId = 'me') {
@@ -663,8 +663,16 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
     ]);
   });
 
-  it('handleGroupList maps groups array to onGroupList callback', () => {
-    const lists: Array<Array<{ group_id: string; group_name: string; has_password?: boolean }>> = [];
+  // FIXTURE PROVENANCE (re-vendored from the LIVE PRODUCERS, M-SYNCPLAY-05):
+  // rows below are byte-shaped copies of what `:8097` `phlix-server`
+  // `SyncPlayManager.php` `groupSummary()` :1740-1750 and `:8804` `phlix-hub`
+  // `SyncPlayRelayWorker.php` `handleCanonicalGroupList()` :1938-1943 send
+  // inside the `{groups, count}` reply envelope (send :1686-1689 / :1947-1950).
+  // The pre-fix fixtures encoded a FABRICATED `{group_id, group_name,
+  // has_password?}` row that existed on no socket — the estate's
+  // fabricated-field-hidden-by-fixture class, this time in our own tests.
+  it('handleGroupList maps live-producer summary rows to onGroupList', () => {
+    const lists: GroupListSummaryRow[][] = [];
     const client = new SyncPlayClient({
       send: () => {},
       now: () => 1000,
@@ -672,19 +680,51 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
       onGroupList: (groups) => lists.push(groups),
     });
 
+    // Server carrier: all six keys, current_media set.
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.GROUP_LIST,
       protocol_version: 1,
       groups: [
-        { group_id: 'g1', group_name: 'Group One', has_password: true },
-        { group_id: 'g2', group_name: 'Group Two' },
+        {
+          id: 'g1',
+          name: 'Group One',
+          member_count: 3,
+          has_password: true,
+          current_media: 'media-7',
+          is_playing: true,
+        },
+        // Hub carrier truths: has_password is the constant false,
+        // current_media the null sentinel (GroupState.php:565 `?string`).
+        {
+          id: 'g2',
+          name: 'g2',
+          member_count: 1,
+          has_password: false,
+          current_media: null,
+          is_playing: false,
+        },
       ],
+      count: 2,
     });
 
     expect(lists).toEqual([
       [
-        { group_id: 'g1', group_name: 'Group One', has_password: true },
-        { group_id: 'g2', group_name: 'Group Two' },
+        {
+          id: 'g1',
+          name: 'Group One',
+          member_count: 3,
+          has_password: true,
+          current_media: 'media-7',
+          is_playing: true,
+        },
+        {
+          id: 'g2',
+          name: 'g2',
+          member_count: 1,
+          has_password: false,
+          current_media: null,
+          is_playing: false,
+        },
       ],
     ]);
   });
@@ -702,6 +742,7 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
       type: SYNCPLAY_MESSAGE_TYPES.GROUP_LIST,
       protocol_version: 1,
       groups: 'not-an-array',
+      count: 0,
     });
 
     expect(lists).toHaveLength(0);
@@ -1424,9 +1465,13 @@ describe('SyncPlayClient — handleTimeSync drops frames that miss the server sh
   });
 });
 
-describe('SyncPlayClient — handleGroupList type coercion defaults', () => {
-  it('uses empty string for non-string group_id (line 528)', () => {
-    const lists: Array<Array<{ group_id: string; group_name: string; has_password?: boolean }>> = [];
+describe('SyncPlayClient — handleGroupList type coercion defaults (producer keys)', () => {
+  // Every coercion is asserted on the REAL producer key names; the row that
+  // carries the OLD fabricated `{group_id, group_name}` spelling is pinned to
+  // decode into EMPTY defaults — the exact silent-`''` bug class this fix
+  // lane kills, now test-permanent.
+  it('coerces every non-conforming producer field to its total default', () => {
+    const lists: GroupListSummaryRow[][] = [];
     const client = new SyncPlayClient({
       send: () => {},
       now: () => 1000,
@@ -1438,15 +1483,30 @@ describe('SyncPlayClient — handleGroupList type coercion defaults', () => {
       type: SYNCPLAY_MESSAGE_TYPES.GROUP_LIST,
       protocol_version: 1,
       groups: [
-        { group_id: 123, group_name: 'Group One', has_password: true }, // group_id is number
+        {
+          id: 123, // non-string id
+          name: { text: 'nope' }, // non-string name
+          member_count: 'three', // non-number
+          has_password: 'yes', // non-bool
+          current_media: 42, // non-string, non-null
+          is_playing: 'playing', // non-bool
+        },
       ],
+      count: 1,
     });
 
-    expect(lists[0][0].group_id).toBe('');
+    expect(lists[0][0]).toEqual({
+      id: '',
+      name: '',
+      member_count: 0,
+      has_password: false,
+      current_media: null,
+      is_playing: false,
+    });
   });
 
-  it('uses empty string for non-string group_name (line 529)', () => {
-    const lists: Array<Array<{ group_id: string; group_name: string; has_password?: boolean }>> = [];
+  it('a fabricated-shape row (group_id/group_name) yields empty producer fields', () => {
+    const lists: GroupListSummaryRow[][] = [];
     const client = new SyncPlayClient({
       send: () => {},
       now: () => 1000,
@@ -1457,12 +1517,22 @@ describe('SyncPlayClient — handleGroupList type coercion defaults', () => {
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.GROUP_LIST,
       protocol_version: 1,
-      groups: [
-        { group_id: 'g1', group_name: { text: 'Group One' }, has_password: true }, // group_name is object
-      ],
+      groups: [{ group_id: 'g1', group_name: 'Group One', has_password: true }],
+      count: 1,
     });
 
-    expect(lists[0][0].group_name).toBe('');
+    // The pre-fix reader would have seen 'g1'/'Group One' here; on the fixed
+    // boundary the invented IDENTITY names are absent data. `has_password`
+    // survives — it is a REAL producer key that happened to share the old
+    // fixture's spelling.
+    expect(lists[0][0]).toEqual({
+      id: '',
+      name: '',
+      member_count: 0,
+      has_password: true,
+      current_media: null,
+      is_playing: false,
+    });
   });
 });
 

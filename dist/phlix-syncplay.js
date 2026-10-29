@@ -421,9 +421,12 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		let t = e.groups;
 		if (!Array.isArray(t)) return;
 		let n = t.map((e) => ({
-			group_id: typeof e.group_id == "string" ? e.group_id : "",
-			group_name: typeof e.group_name == "string" ? e.group_name : "",
-			has_password: typeof e.has_password == "boolean" ? e.has_password : void 0
+			id: typeof e.id == "string" ? e.id : "",
+			name: typeof e.name == "string" ? e.name : "",
+			member_count: typeof e.member_count == "number" ? e.member_count : 0,
+			has_password: typeof e.has_password == "boolean" && e.has_password,
+			current_media: typeof e.current_media == "string" ? e.current_media : null,
+			is_playing: typeof e.is_playing == "boolean" && e.is_playing
 		}));
 		this.options.onGroupList?.(n);
 	}
