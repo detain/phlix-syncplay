@@ -243,15 +243,57 @@ export interface TimePongPayload {
     protocol_version: number;
 }
 /**
- * TIME_SYNC as the server emits it for periodic clock drift correction.
- * The server sends its current time and the client's last known time to
- * allow the client to calculate and apply drift correction.
+ * TIME_SYNC as the server emits it — SERVER WIRE TRUTH,
+ * `phlix-server/src/Session/SyncPlay/SyncPlayManager.php:1653-1659`
+ * (`handleTimeSync`, reply sent with `Messages::frame` over the requesting
+ * connection). The previous model here was FABRICATED: it promised a
+ * `client_time` the server has never emitted (the handler silently defaulted
+ * it to 0) and claimed `server_time` was ms. The live frame is an ADVISORY
+ * sync-STATE snapshot answering a client `syncplay_time_sync` request — a
+ * unicast reply, not a group broadcast. Units are mixed ON PURPOSE and must
+ * be read per-field: `server_time` carries the `:8097` legacy seconds quirk
+ * (`time()`), while `offset_ms` / `latency_ms` are milliseconds. The hub
+ * relay (`:8804`) has no producer for this type and refuses inbound use
+ * (SPEC §4; `hub.protocol_unsupported`).
  */
 export interface TimeSyncPayload {
-    /** Server's current time (ms). */
+    /** Server-derived identity of the requester (S289 — payload member_id is ignored). */
+    member_id: string;
+    /** The requester's current group. */
+    group_id: string;
+    /** Server wall-clock in UNIX SECONDS (`time()` — the `:8097` seconds quirk), NOT ms. */
     server_time: number;
-    /** Client's last known time from a prior request (ms). */
-    client_time: number;
+    /** Server's own clock-offset estimate in ms (`TimeSync::getTimeOffset()`). */
+    offset_ms: number;
+    /** Server's estimated one-way latency in ms (`TimeSync::getEstimatedLatency()`). */
+    latency_ms: number;
+    /** Server multiplicative drift factor, float ≈1.0 (`TimeSync::$localDriftRate`). */
+    drift_rate: number;
+    /** Whether the server deems its own sync stable (`TimeSync::isSyncStable()`). */
+    is_stable: boolean;
+    /** `Messages::frame` envelope stamp — always present on the wire. */
+    protocol_version: number;
+}
+/**
+ * Normalized TIME_SYNC model handed to `SyncPlayClientOptions.onTimeSync`.
+ * Field units are named into the identifiers (`...Sec` vs `...Ms`) because the
+ * wire itself mixes seconds and milliseconds. `serverTimeSec` is passed
+ * VERBATIM (seconds quirk preserved, same raw-pass law as
+ * `onPlaybackSync`'s serverTime) — multiply by 1000 for ms.
+ */
+export interface TimeSyncState {
+    memberId: string;
+    groupId: string;
+    /** Server wall-clock, UNIX SECONDS (raw wire value). */
+    serverTimeSec: number;
+    /** Server clock-offset estimate, ms. */
+    offsetMs: number;
+    /** Server estimated one-way latency, ms. */
+    latencyMs: number;
+    /** Server drift factor (≈1.0). */
+    driftRate: number;
+    /** Whether the server deems its sync stable. */
+    isStable: boolean;
 }
 /**
  * GROUP_LIST as the server emits it — a list of available groups.

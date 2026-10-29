@@ -22,7 +22,7 @@
  * historical divergences).
  */
 import { type NowFn } from './framing';
-import { type RawMessage, type SyncPlayGroup, type UnknownFrame } from './messages';
+import { type RawMessage, type SyncPlayGroup, type TimeSyncState, type UnknownFrame } from './messages';
 import { TimeSync } from './time-sync';
 /** A play/pause/seek command surfaced to the consumer for local application. */
 export interface PlaybackCommand {
@@ -73,8 +73,16 @@ export interface SyncPlayClientOptions {
      * re-anchor source, see handlePlaybackSync).
      */
     onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number) => void;
-    /** Server-initiated clock drift correction (TYPE_TIME_SYNC / syncplay_time_sync). */
-    onTimeSync?: (_serverTime: number, _clientTime: number) => void;
+    /**
+     * Advisory server sync-state snapshot (TYPE_TIME_SYNC / syncplay_time_sync):
+     * the server's UNICAST reply to a `syncplay_time_sync` request. Units are
+     * named per-field — `serverTimeSec` is UNIX seconds (the `:8097` seconds
+     * quirk), `offsetMs`/`latencyMs` are ms. Server wire truth:
+     * `SyncPlayManager.php:1653-1659`. The pre-fix `(serverTime, clientTime)`
+     * signature modeled a fabricated frame: the live wire carries no
+     * `client_time`, so consumers silently received a defaulted `0`.
+     */
+    onTimeSync?: (_state: TimeSyncState) => void;
     /** Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list). */
     onGroupList?: (_groups: {
         group_id: string;

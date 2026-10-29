@@ -4,6 +4,31 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **`TimeSyncPayload` — the TIME_SYNC model now matches the REAL server wire
+  (fix lane M-SYNCPLAY-03, review `syncplay__crossfe`).** The interface was
+  FABRICATED: it promised `{ server_time (ms), client_time (ms) }` while the
+  live emit site (`phlix-server` `SyncPlayManager::handleTimeSync()`,
+  `src/Session/SyncPlay/SyncPlayManager.php:1653-1659`) sends seven fields —
+  `member_id`, `group_id`, `server_time` (UNIX **seconds**, `time()` — the
+  `:8097` legacy quirk), `offset_ms`, `latency_ms`, `drift_rate` (float
+  ≈1.0), `is_stable` — and has NEVER carried `client_time` (that name belongs
+  to ping/pong only). Consumer bug path: `handleTimeSync()` read the missing
+  `client_time` straight off the frame and defaulted it to `0`, handing every
+  `onTimeSync` consumer a timestamp that never existed on any socket, while
+  the seconds-scale `server_time` was documented as ms. Shipped: wire-truth
+  `TimeSyncPayload` (byte-for-byte snake_case per the file's own mirror law),
+  a new normalized `TimeSyncState` domain model with units named into the
+  fields (`serverTimeSec` vs `offsetMs`), and parse-at-the-boundary handling —
+  a frame that misses the server shape is DROPPED (the `handleGroupList`
+  precedent) instead of half-defaulted. `onTimeSync`'s callback signature
+  changes from `(serverTime, clientTime)` to `(state)`. SPEC.md §3's stale
+  one-line stub ("full sync-state broadcast") is cured to the audited field
+  list + unicast-reply semantics (the wire authority is the server; the stub
+  predated the audit). Tests: the two fiction-pinning `handleTimeSync` cases
+  flipped to server-wire truth (fixture provenance file:line-labeled), a
+  regression pin proves the historic fabricated shape is now dropped, and
+  `messages.test.ts` gains a compile+runtime wire-shape pin. BREAKING for any
+  `onTimeSync` consumer — none exists in the estate today (grep zero hits).
 - **`SyncPlayClient.handleTimePong()` — SPEC §10.1.3 now enforced on the LIVE
   pong shape; a late pong from a torn-down connection can no longer seed a
   time-sync sample (fix lane M-SYNCPLAY-02, review `syncplay__crossfe` M2).**

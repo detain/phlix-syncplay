@@ -11,6 +11,7 @@ import {
   PROTOCOL_VERSION,
   isValidMessageType,
   type PlaybackState,
+  type TimeSyncPayload,
 } from '../src/messages';
 import {
   encodeMessage,
@@ -161,5 +162,42 @@ describe('framing — decodeMessage', () => {
     expect(decodeMessage('[1,2,3]')).toBeNull();
     expect(decodeMessage({ protocol_version: 1 })).toBeNull();
     expect(decodeMessage(null)).toBeNull();
+  });
+});
+
+describe('TimeSyncPayload — server wire-shape pin (M-SYNCPLAY-03)', () => {
+  // Server wire truth: phlix-server src/Session/SyncPlay/SyncPlayManager.php:1653-1659
+  // (handleTimeSync). This fixture is typed AS the interface, so any drift
+  // between the model and the real emit site reddens `tsc` — and its key set
+  // is pinned at runtime, so the never-emitted `client_time` of the old
+  // fabricated model can never sneak back into the contract.
+  const serverWireFrame: TimeSyncPayload = {
+    member_id: 'user-1',
+    group_id: 'group-1',
+    server_time: 1761900000, // UNIX seconds — the :8097 quirk (time())
+    offset_ms: 42,
+    latency_ms: 7,
+    drift_rate: 1.0002,
+    is_stable: true,
+    protocol_version: 1,
+  };
+
+  it('carries exactly the fields the server emits, in the server spelling', () => {
+    expect(Object.keys(serverWireFrame).sort()).toEqual(
+      [
+        'drift_rate',
+        'group_id',
+        'is_stable',
+        'latency_ms',
+        'member_id',
+        'offset_ms',
+        'protocol_version',
+        'server_time',
+      ].sort(),
+    );
+  });
+
+  it('does not carry the fabricated client_time field', () => {
+    expect(serverWireFrame).not.toHaveProperty('client_time');
   });
 });

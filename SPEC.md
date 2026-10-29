@@ -274,7 +274,26 @@ protocol_version: number
 > receive time. The client must derive RTT from t1 and t4 only (it passes
 > `t3 = t2` to the sample function).
 
-`syncplay_time_sync` (server → client) — full sync-state broadcast (advisory).
+`syncplay_time_sync` (server → client) — advisory sync-STATE snapshot. It is a
+**unicast reply** on the connection that sent a `syncplay_time_sync` request
+(`phlix-server` `SyncPlayManager::handleTimeSync()`, emit at
+`src/Session/SyncPlay/SyncPlayManager.php:1653-1659`) — NOT a group broadcast
+(the old one-line stub here predated the field audit). Units are mixed per
+field: `server_time` carries the `:8097` legacy **seconds** quirk, the
+`_ms` fields are milliseconds.
+
+```
+member_id: string          (server-derived requester identity — S289, payload member_id ignored)
+group_id: string
+server_time: number        (UNIX SECONDS via time() — NOT ms)
+offset_ms: number          (server TimeSync::getTimeOffset(), ms)
+latency_ms: number         (server TimeSync::getEstimatedLatency(), ms)
+drift_rate: number         (server drift factor, float ≈1.0)
+is_stable: boolean         (server TimeSync::isSyncStable())
+```
+> There is **no** `client_time` field on this frame (the `client_time` name
+> belongs to `time_ping`/`time_pong` only). On `:8804` the hub has no producer
+> and refuses inbound use (see §4).
 
 ### Informational
 

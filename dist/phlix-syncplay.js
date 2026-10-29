@@ -403,8 +403,16 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		this.options.onPlaybackSync?.(t ?? "", n, r, i);
 	}
 	handleTimeSync(e) {
-		let t = e, n = typeof t.server_time == "number" ? t.server_time : 0, r = typeof t.client_time == "number" ? t.client_time : 0;
-		this.options.onTimeSync?.(n, r);
+		let t = e;
+		typeof t.member_id == "string" && typeof t.group_id == "string" && typeof t.server_time == "number" && typeof t.offset_ms == "number" && typeof t.latency_ms == "number" && typeof t.drift_rate == "number" && typeof t.is_stable == "boolean" && this.options.onTimeSync?.({
+			memberId: t.member_id,
+			groupId: t.group_id,
+			serverTimeSec: t.server_time,
+			offsetMs: t.offset_ms,
+			latencyMs: t.latency_ms,
+			driftRate: t.drift_rate,
+			isStable: t.is_stable
+		});
 	}
 	handleGroupList(e) {
 		let t = e.groups;

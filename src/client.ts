@@ -39,6 +39,7 @@ import {
   type SyncPlayMessageType,
   type TimePongPayload,
   type TimeSyncPayload,
+  type TimeSyncState,
   type TypingPayload,
   type UnknownFrame,
 } from './messages';
@@ -93,8 +94,16 @@ export interface SyncPlayClientOptions {
    * re-anchor source, see handlePlaybackSync).
    */
   onPlaybackSync?: (_memberId: string, position: number, isPlaying: boolean, _serverTime: number) => void;
-  /** Server-initiated clock drift correction (TYPE_TIME_SYNC / syncplay_time_sync). */
-  onTimeSync?: (_serverTime: number, _clientTime: number) => void;
+  /**
+   * Advisory server sync-state snapshot (TYPE_TIME_SYNC / syncplay_time_sync):
+   * the server's UNICAST reply to a `syncplay_time_sync` request. Units are
+   * named per-field — `serverTimeSec` is UNIX seconds (the `:8097` seconds
+   * quirk), `offsetMs`/`latencyMs` are ms. Server wire truth:
+   * `SyncPlayManager.php:1653-1659`. The pre-fix `(serverTime, clientTime)`
+   * signature modeled a fabricated frame: the live wire carries no
+   * `client_time`, so consumers silently received a defaulted `0`.
+   */
+  onTimeSync?: (_state: TimeSyncState) => void;
   /** Group list enumeration reply (TYPE_GROUP_LIST / syncplay_group_list). */
   onGroupList?: (_groups: { group_id: string; group_name: string; has_password?: boolean }[]) => void;
   /**
@@ -606,10 +615,33 @@ export class SyncPlayClient {
   }
 
   private handleTimeSync(msg: RawMessage): void {
+    // Server wire truth: SyncPlayManager.php:1653-1659 — seven fields, mixed
+    // units, NO `client_time`. Parse-at-the-boundary: an advisory snapshot is
+    // only meaningful whole, so a frame failing the real shape is DROPPED
+    // (handleGroupList precedent). The pre-fix code read the fabricated
+    // `client_time` off the frame and defaulted it to 0, handing consumers a
+    // timestamp that never existed on any socket.
     const payload = msg as Partial<TimeSyncPayload>;
-    const serverTime = typeof payload.server_time === 'number' ? payload.server_time : 0;
-    const clientTime = typeof payload.client_time === 'number' ? payload.client_time : 0;
-    this.options.onTimeSync?.(serverTime, clientTime);
+    if (
+      typeof payload.member_id !== 'string' ||
+      typeof payload.group_id !== 'string' ||
+      typeof payload.server_time !== 'number' ||
+      typeof payload.offset_ms !== 'number' ||
+      typeof payload.latency_ms !== 'number' ||
+      typeof payload.drift_rate !== 'number' ||
+      typeof payload.is_stable !== 'boolean'
+    ) {
+      return;
+    }
+    this.options.onTimeSync?.({
+      memberId: payload.member_id,
+      groupId: payload.group_id,
+      serverTimeSec: payload.server_time,
+      offsetMs: payload.offset_ms,
+      latencyMs: payload.latency_ms,
+      driftRate: payload.drift_rate,
+      isStable: payload.is_stable,
+    });
   }
 
   private handleGroupList(msg: RawMessage): void {

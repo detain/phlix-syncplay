@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SyncPlayClient, type PlaybackCommand } from '../src/client';
 import { encodeMessage, serializeMessage } from '../src/framing';
-import { SYNCPLAY_MESSAGE_TYPES, type RawMessage, type SyncPlayGroup, type UnknownFrame } from '../src/messages';
+import { SYNCPLAY_MESSAGE_TYPES, type RawMessage, type SyncPlayGroup, type TimeSyncPayload, type TimeSyncState, type UnknownFrame } from '../src/messages';
 
 /** A fake transport + clock harness. */
 function makeHarness(memberId = 'me') {
@@ -614,23 +614,42 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
     expect(h.commands).toHaveLength(0);
   });
 
-  it('handleTimeSync fires onTimeSync callback', () => {
-    const timeSyncs: Array<{ serverTime: number; clientTime: number }> = [];
+  it('handleTimeSync maps the real server frame to the TimeSyncState model', () => {
+    const states: TimeSyncState[] = [];
     const client = new SyncPlayClient({
       send: () => {},
       now: () => 1000,
       memberId: 'me',
-      onTimeSync: (serverTime, clientTime) => timeSyncs.push({ serverTime, clientTime }),
+      onTimeSync: (state) => states.push(state),
     });
 
-    client.handleIncoming({
-      type: SYNCPLAY_MESSAGE_TYPES.TIME_SYNC,
+    // Server wire truth — copied field-for-field from
+    // phlix-server src/Session/SyncPlay/SyncPlayManager.php:1653-1659
+    // (handleTimeSync → Messages::frame). Seven fields, NO `client_time`;
+    // `server_time` is UNIX seconds, `offset_ms`/`latency_ms` are ms.
+    const serverFrame: TimeSyncPayload = {
+      member_id: 'user-1',
+      group_id: 'group-1',
+      server_time: 1761900000,
+      offset_ms: 42,
+      latency_ms: 7,
+      drift_rate: 1.0002,
+      is_stable: true,
       protocol_version: 1,
-      server_time: 50000,
-      client_time: 40000,
-    });
+    };
+    client.handleIncoming({ type: SYNCPLAY_MESSAGE_TYPES.TIME_SYNC, ...serverFrame });
 
-    expect(timeSyncs).toEqual([{ serverTime: 50000, clientTime: 40000 }]);
+    expect(states).toEqual([
+      {
+        memberId: 'user-1',
+        groupId: 'group-1',
+        serverTimeSec: 1761900000,
+        offsetMs: 42,
+        latencyMs: 7,
+        driftRate: 1.0002,
+        isStable: true,
+      },
+    ]);
   });
 
   it('handleGroupList maps groups array to onGroupList callback', () => {
@@ -1229,43 +1248,60 @@ describe('SyncPlayClient — handlePlaybackSync type coercion defaults', () => {
   });
 });
 
-describe('SyncPlayClient — handleTimeSync type coercion defaults', () => {
-  it('uses default server_time when not a number (line 514)', () => {
-    const timeSyncs: Array<{ serverTime: number; clientTime: number }> = [];
-    const client = new SyncPlayClient({
+describe('SyncPlayClient — handleTimeSync drops frames that miss the server shape', () => {
+  const realFrame = {
+    // Server wire truth: phlix-server SyncPlayManager.php:1653-1659.
+    member_id: 'user-1',
+    group_id: 'group-1',
+    server_time: 1761900000,
+    offset_ms: 42,
+    latency_ms: 7,
+    drift_rate: 1.0002,
+    is_stable: true,
+    protocol_version: 1,
+  };
+
+  const wireTruthClient = (sink: (s: TimeSyncState) => void) =>
+    new SyncPlayClient({
       send: () => {},
       now: () => 1000,
       memberId: 'me',
-      onTimeSync: (serverTime, clientTime) => timeSyncs.push({ serverTime, clientTime }),
+      onTimeSync: sink,
     });
 
-    client.handleIncoming({
+  it('a non-numeric server_time drops the frame (no defaulted 0 reaches the consumer)', () => {
+    const states: TimeSyncState[] = [];
+    wireTruthClient((s) => states.push(s)).handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.TIME_SYNC,
-      protocol_version: 1,
-      server_time: 'fifty-thousand', // wrong type
-      client_time: 40000,
+      ...realFrame,
+      server_time: 'seventeen-six',
     });
-
-    expect(timeSyncs[0].serverTime).toBe(0); // default
+    expect(states).toHaveLength(0);
   });
 
-  it('uses default client_time when not a number (line 515)', () => {
-    const timeSyncs: Array<{ serverTime: number; clientTime: number }> = [];
-    const client = new SyncPlayClient({
-      send: () => {},
-      now: () => 1000,
-      memberId: 'me',
-      onTimeSync: (serverTime, clientTime) => timeSyncs.push({ serverTime, clientTime }),
+  it('a non-boolean is_stable drops the frame', () => {
+    const states: TimeSyncState[] = [];
+    wireTruthClient((s) => states.push(s)).handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_SYNC,
+      ...realFrame,
+      is_stable: 'yes',
     });
+    expect(states).toHaveLength(0);
+  });
 
-    client.handleIncoming({
+  it('the historic FABRICATED shape (server_time + client_time only) is dropped', () => {
+    // Regression pin for the M-SYNCPLAY-03 cure: the pre-fix handler accepted
+    // this never-emitted frame and called back (server_time, 0) — a client
+    // time that never existed on any socket. Real wire frames carry no
+    // `client_time`; anything missing the seven server fields dies at parse.
+    const states: TimeSyncState[] = [];
+    wireTruthClient((s) => states.push(s)).handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.TIME_SYNC,
       protocol_version: 1,
       server_time: 50000,
-      client_time: [40000], // wrong type (array)
+      client_time: 40000,
     });
-
-    expect(timeSyncs[0].clientTime).toBe(0); // default
+    expect(states).toHaveLength(0);
   });
 });
 
