@@ -8,8 +8,22 @@
  * TimeSync — NTP-style network time synchronization.
  *
  * This is a faithful TypeScript port of the server's
- * `src/Session/SyncPlay/TimeSync.php`. The math reproduces the server formula
- * exactly so client and server agree on offset, latency, stability, and drift.
+ * `src/Session/SyncPlay/TimeSync.php`. The ping/quad math (rtt, one-way
+ * latency, per-sample offset) reproduces the server formula exactly.
+ *
+ * ## Documented divergence (offset aggregation)
+ *
+ * The server's `getTimeOffset()` divides the weighted sum by
+ * `max(1, $weightSum)`. At realistic RTTs every weight is `< 1` and the window
+ * total falls below 1, so the divisor freezes at 1 and the result is the raw
+ * weighted SUM — an offset crush toward zero (a true 120 ms offset read back
+ * as 3 ms). The estate ruled that a defect and fixed the mobile copy
+ * (`phlix-mobile-client` `src/syncplay/SyncPlayService.ts`); `getOffset()`
+ * here implements SPEC §5's actual weighted mean, `sum(w * offset) / sum(w)`,
+ * in lockstep with that fix. The server's local estimator still carries the
+ * crush until its own fix lands — a SAFE divergence: this aggregation is
+ * per-side local math and never crosses the wire (ping/pong carry raw t1/t2
+ * timestamps only; client and server need not agree on how they average them).
  *
  * ## Algorithm
  *
@@ -25,8 +39,9 @@
  *
  * Samples with `rtt < 0` (corrupt: negative one-way latency) or
  * `rtt > MAX_ACCEPTABLE_RTT` are rejected. `getOffset()` returns a
- * weighted mean (weight = 1/rtt, favouring low-RTT samples) over the most
- * recent `OFFSET_SAMPLE_COUNT` samples. Sync is "stable" once at least
+ * weighted mean (`weight = 1 / max(1, rtt)`, favouring low-RTT samples;
+ * mean = `sum(w * offset) / sum(w)`) over the most recent
+ * `OFFSET_SAMPLE_COUNT` samples. Sync is "stable" once at least
  * `OFFSET_SAMPLE_COUNT` samples exist AND the variance of recent offsets is
  * < 50ms. Drift is an EMA: `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`.
  *
@@ -189,8 +204,10 @@ export class TimeSync {
   }
 
   /**
-   * Weighted-mean offset (ms) over the most recent samples. Lower-RTT samples
-   * carry more weight. Add this to local time to get server time.
+   * Weighted-mean offset (ms) over the most recent samples:
+   * `sum(weight * offset) / sum(weight)` with `weight = 1 / max(1, rtt)`, so
+   * lower-RTT samples carry more weight (SPEC §5). Add this to local time to
+   * get server time.
    *
    * Memoized: returns the cached value unless the sample window has changed
    * since it was last computed (see {@link ensureWindowCache}).
@@ -216,7 +233,24 @@ export class TimeSync {
       weightSum += weight;
     }
 
-    return Math.trunc(weightedSum / Math.max(1, weightSum));
+    // Every accepted sample has rtt <= MAX_ACCEPTABLE_RTT, so each weight is
+    // >= 1/1000 > 0 and weightSum is strictly positive for a non-empty window
+    // — unreachable today. The guard keeps the function total (never NaN/∞)
+    // if the admission bounds ever change.
+    if (weightSum === 0) {
+      return 0;
+    }
+
+    // Divide by the REAL weight sum. The server's legacy
+    // `max(1, $weightSum)` divisor froze at 1 for realistic RTTs and crushed
+    // the raw weighted sum toward zero (true 120 ms read back as 3) — ruled a
+    // defect by the estate and already fixed the same way in the mobile copy
+    // (`Math.round(weightedSum / weightSum)`); see the class header divergence
+    // note. `Math.round` (not `Math.trunc`): round is symmetric, trunc would
+    // retain a toward-zero shrinkage bias on negative offsets. SPEC §5 does
+    // not prescribe an integer rule — disclosed divergence from the server's
+    // int cast.
+    return Math.round(weightedSum / weightSum);
   }
 
   /**

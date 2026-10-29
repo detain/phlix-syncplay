@@ -16,13 +16,22 @@ import {
 } from '../src/time-sync';
 
 /**
- * NOTE on the server's weighted-mean quirk (faithfully ported):
- * getOffset() divides by `max(1, weightSum)`. When the only samples have
- * rtt > 1 the total weight is < 1, so the guard clamps the divisor to 1 and
- * the returned offset is the *weighted sum*, not a true mean. This matches
- * TimeSync.php (`(int)($weightedSum / max(1, $weightSum))`) and the mobile
- * client exactly. Tests below use rtt values that make the math exact and
- * also assert the quirk explicitly.
+ * Offset aggregation law (crush-defect cured 2026-10-29).
+ *
+ * getOffset() returns the TRUE weighted mean of the recent window:
+ * `sum(w * offset) / sum(w)` with `w = 1 / max(1, rtt)` — SPEC §5's "weighted
+ * mean … favours low-RTT samples". Every weight in a non-empty accepted window
+ * is positive, so the divisor is the real weight sum. The server's
+ * `TimeSync.php::getTimeOffset()` historically divided by `max(1, $weightSum)`:
+ * at realistic RTTs (20–1000 ms) every weight is < 1, the window total drops
+ * below 1, the divisor freezes at 1, and the raw weighted SUM is returned —
+ * crushing the offset toward zero (a true 120 ms offset read back as 3 ms).
+ * The estate already ruled that a defect and fixed the mobile copy
+ * (`phlix-mobile-client` `src/syncplay/SyncPlayService.ts`:
+ * `Math.round(weightedSum / weightSum)`); this library matches that fix. The
+ * server's local estimator still carries the crush until its own lockstep fix
+ * lands — safe divergence, because this aggregation is per-side LOCAL math and
+ * is never on the wire (ping/pong carry raw t1/t2 timestamps only).
  */
 
 /** A controllable clock for deterministic tests. */
@@ -64,7 +73,7 @@ describe('TimeSync.addSample — server formula', () => {
     // rtt = 1001 - 1000 - 0 = 1
     // oneWay = trunc(0.5) = 0
     // offset = 1100 - 1000 + 0 = 100
-    // weight = 1/max(1,1) = 1 → getOffset = trunc(100*1 / max(1,1)) = 100
+    // weight = 1/max(1,1) = 1 → getOffset = round(100*1 / 1) = 100
     const accepted = ts.addSample(1000, 1100, 1100, 1001);
     expect(accepted).toBe(true);
     expect(ts.getOffset()).toBe(100);
@@ -78,18 +87,21 @@ describe('TimeSync.addSample — server formula', () => {
     // t1=0, t2=100, t3=102 (2ms processing), t4=4
     // rtt = 4 - 0 - (102 - 100) = 2
     // oneWay = 1, offset = 100 - 0 + 1 = 101, weight = 1/2 = 0.5
-    // getOffset = trunc(101*0.5 / max(1, 0.5)) = trunc(50.5 / 1) = 50  (clamp quirk)
+    // getOffset = round(101*0.5 / 0.5) = 101 (true weighted mean; the pre-fix
+    // max(1, weightSum) divisor froze at 1 and crushed this to 50).
     expect(ts.addSample(0, 100, 102, 4)).toBe(true);
     expect(ts.getLatency()).toBe(1);
-    expect(ts.getOffset()).toBe(50);
+    expect(ts.getOffset()).toBe(101);
   });
 
-  it('exposes the max(1, weightSum) clamp quirk for high-rtt single samples', () => {
+  it('does NOT crush a realistic-RTT single sample (regression: weightSum divisor)', () => {
     const clock = makeClock();
     const ts = new TimeSync(clock.now);
-    // rtt=40 → weight 0.025; offset 120; getOffset = trunc(120*0.025 / 1) = 3.
+    // rtt=40 → weight 0.025. The pre-fix `max(1, weightSum)` divisor froze at
+    // 1 and returned the crushed weighted SUM: trunc(120*0.025) = 3. The true
+    // weighted mean divides by the real weight sum: round(3 / 0.025) = 120.
     ts.addSample(0, 100, 100, 40);
-    expect(ts.getOffset()).toBe(3);
+    expect(ts.getOffset()).toBe(120);
   });
 
   it('rejects samples with rtt > MAX_ACCEPTABLE_RTT', () => {
@@ -185,7 +197,8 @@ describe('TimeSync.getOffset — weighted mean favours low RTT', () => {
 
     const weightA = 1; // 1/max(1,1)
     const weightB = 1 / 1000;
-    const expected = Math.trunc((100 * weightA + 1000 * weightB) / Math.max(1, weightA + weightB));
+    // True weighted mean: round((100*1 + 1000*0.001) / (1 + 0.001)) = round(100.899…) = 101.
+    const expected = Math.round((100 * weightA + 1000 * weightB) / (weightA + weightB));
     expect(ts.getOffset()).toBe(expected);
     // Result lies far closer to the low-rtt sample (100) than to 1000.
     expect(ts.getOffset()).toBeLessThan(150);
@@ -199,8 +212,121 @@ describe('TimeSync.getOffset — weighted mean favours low RTT', () => {
       clock.advance(1000);
       ts.addSample(0, 100, 100, 1);
     }
-    // weights all 1, weightSum 5 → trunc(100*5 / 5) = 100.
+    // weights all 1, weightSum 5 → round(100*5 / 5) = 100.
     expect(ts.getOffset()).toBe(100);
+  });
+});
+
+describe('TimeSync.getOffset — realistic-sample vectors (crush-defect regression)', () => {
+  /** Ground-truth server offset these vectors are built to recover (ms). */
+  const TRUE_OFFSET_MS = 120;
+
+  /**
+   * Build a t1..t4 quad whose per-sample offset equals TRUE_OFFSET_MS and
+   * whose round-trip time is exactly `rtt` (pong carries no separate response
+   * stamp, so t3 == t2 — the same-process wire law, SPEC §5).
+   * sample offset = t2 - t1 + trunc(rtt / 2) = TRUE_OFFSET_MS.
+   */
+  function quadAtTrueOffset(t1: number, rtt: number): [number, number, number, number] {
+    const oneWay = Math.trunc(rtt / 2);
+    const t2 = t1 + TRUE_OFFSET_MS - oneWay;
+    return [t1, t2, t2, t1 + rtt];
+  }
+
+  it('recovers the true offset from a jittery TV/phone RTT window (20-100 ms)', () => {
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    // A plausible living-room window: wired TV ~20 ms, wifi phone ~45-80 ms,
+    // one congested sample at 100 ms. All offsets sit exactly on truth.
+    const rtts = [20, 45, 45, 80, 100];
+    rtts.forEach((rtt, i) => {
+      clock.advance(1000);
+      const [t1, t2, t3, t4] = quadAtTrueOffset(1_000_000 + i * 1000, rtt);
+      expect(ts.addSample(t1, t2, t3, t4)).toBe(true);
+    });
+
+    // PRE-FIX this window returned trunc(120 * 0.11444… / max(1, 0.11444…)) =
+    // 13 — a ~10x crush. The weighted mean must land on truth exactly here
+    // (all samples carry the same offset, so weights cannot skew the result).
+    expect(ts.getOffset()).toBe(120);
+    // The user-visible law: a box whose clock is 120 ms behind server time
+    // gets server time back from getSynchronizedTime.
+    expect(ts.getSynchronizedTime(1_000_000)).toBe(1_000_120);
+    // And with a stable window, isStable() no longer certifies a crushed lie.
+    expect(ts.isStable()).toBe(true);
+  });
+
+  it('tracks ground truth within ±2 ms across per-sample jitter', () => {
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    // Offsets jitter ±2 ms around truth, RTTs 30-90 ms.
+    const vectors: Array<[rtt: number, offsetJitter: number]> = [
+      [30, -2],
+      [40, +1],
+      [55, 0],
+      [70, +2],
+      [90, -1],
+    ];
+    const sampleOffsets: number[] = [];
+    vectors.forEach(([rtt, jitter], i) => {
+      clock.advance(1500);
+      const t1 = 2_000_000 + i * 1500;
+      const oneWay = Math.trunc(rtt / 2);
+      const t2 = t1 + TRUE_OFFSET_MS + jitter - oneWay;
+      expect(ts.addSample(t1, t2, t2, t1 + rtt)).toBe(true);
+      sampleOffsets.push(TRUE_OFFSET_MS + jitter);
+    });
+
+    const offset = ts.getOffset();
+    const mean = sampleOffsets.reduce((a, b) => a + b, 0) / sampleOffsets.length;
+    // Lands within 2 ms of ground truth — and far clear of the pre-fix crushed
+    // value trunc(120.16 * 0.08238…) = 9.
+    expect(Math.abs(offset - TRUE_OFFSET_MS)).toBeLessThanOrEqual(2);
+    expect(Math.abs(offset - mean)).toBeLessThanOrEqual(2);
+  });
+
+  it('actually WEIGHTS: a low-RTT outlier dominates a high-RTT consensus', () => {
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    // Four noisy consensus samples (rtt 40, w 0.025 each) and one crisp
+    // low-RTT sample (rtt 2, w 0.5): the crisp sample's weight exceeds the
+    // four consensus weights combined.
+    for (let i = 0; i < 4; i++) {
+      clock.advance(1000);
+      ts.addSample(0, 98, 98, 40); // rtt 40, oneWay 20, offset = 98 + 20 = 118
+    }
+    ts.addSample(0, 199, 199, 2); // rtt 2, oneWay 1, offset = 199 + 1 = 200
+
+    // consensus samples: rtt 40, oneWay 20, offset = 98 + 20 = 118, w 0.025.
+    // crisp sample: offset 200, w 0.5.
+    // weighted mean = (4*118*0.025 + 200*0.5) / (4*0.025 + 0.5)
+    //               = (11.8 + 100) / 0.6 = 186.33… → round 186.
+    // A plain (unweighted) mean would be 134; the PRE-FIX crushed sum was 111.
+    expect(ts.getOffset()).toBe(186);
+  });
+
+  it('is symmetric for negative offsets (local clock ahead of server)', () => {
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    // True offset -250 ms: local wall clock runs ahead of the server.
+    for (let i = 0; i < 5; i++) {
+      clock.advance(1000);
+      const t1 = 3_000_000 + i * 1000;
+      const rtt = 40;
+      const oneWay = Math.trunc(rtt / 2);
+      const t2 = t1 - 250 - oneWay;
+      expect(ts.addSample(t1, t2, t2, t1 + rtt)).toBe(true);
+    }
+
+    // PRE-FIX the crush returned trunc(-31.25) = -31 AND Math.trunc's
+    // toward-zero bias is the same shrinkage family as the divisor defect;
+    // the cured estimator lands on -250 exactly.
+    expect(ts.getOffset()).toBe(-250);
+    expect(ts.getSynchronizedTime(3_000_000)).toBe(2_999_750);
   });
 });
 

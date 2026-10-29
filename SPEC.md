@@ -337,7 +337,14 @@ do not inject a seconds clock.
 - Reject the sample if `rtt < 0` or `rtt > MAX_ACCEPTABLE_RTT`.
 - Keep a rolling buffer of up to `2 * OFFSET_SAMPLE_COUNT` samples.
 - **Offset** = weighted mean over the last `OFFSET_SAMPLE_COUNT` samples,
-  weight `= 1 / max(1, rtt)` (favours low-RTT samples).
+  weight `= 1 / max(1, rtt)` (favours low-RTT samples), i.e. exactly
+  `sum(weight * offset) / sum(weight)` — the divisor is the REAL weight sum.
+  Clamping that divisor to `≥ 1` (the server's legacy
+  `max(1, $weightSum)` in `TimeSync.php::getTimeOffset()`) returns the raw
+  weighted sum at realistic RTTs and crushes offsets toward zero — ruled a
+  defect by the estate and cured here and in the mobile copy; the server's
+  local estimator awaits its lockstep fix, which is safe because this
+  aggregation never crosses the wire. Result rounded to whole ms.
 - **Latency** = mean of `rtt / 2` over recent samples.
 - **Stable** when `samples ≥ OFFSET_SAMPLE_COUNT` AND variance of recent
   offsets `< 50`.

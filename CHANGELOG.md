@@ -4,6 +4,28 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **`TimeSync.getOffset()` — the weighted mean no longer crushes realistic
+  offsets toward zero (fix lane C09, review `syncplay__gameux` C1).** The
+  divisor was `max(1, weightSum)`: with every accepted weight
+  `1 / max(1, rtt)` strictly below 1 at realistic RTTs (≥ 20 ms), the window's
+  `weightSum` fell below 1, froze the divisor at 1, and returned the raw
+  weighted SUM — a true 120 ms offset read back as 3 ms, and `isStable()`/
+  `onSync` certified the lie (the library's headline cross-device clock
+  alignment was mathematically inert). Cured to SPEC §5's actual weighted mean
+  `sum(w * offset) / sum(w)`, guarded only against `weightSum === 0`
+  (unreachable: accepted samples carry weight ≥ 1/1000), `Math.round` for
+  symmetric whole-ms output (matches the estate's shipped mobile fix
+  `phlix-mobile-client` `SyncPlayService.ts`; `trunc` would retain a
+  toward-zero bias on negative offsets — SPEC silent on the integer rule,
+  disclosed). Honest doc divergence: the server's `TimeSync.php::getTimeOffset()`
+  still carries the crush; safe because the aggregation is per-side local math
+  and never on the wire (ping/pong carry raw t1/t2 only) — server lockstep fix
+  reported to the orchestrator. SPEC §5 gains the explicit divisor law.
+  Regression vectors: TV/phone RTT windows (20–100 ms) must land on the 120 ms
+  ground truth (pre-fix measured 14), ±2 ms jitter tolerance (pre-fix |Δ|=108),
+  low-RTT outlier genuinely dominating a high-RTT consensus (186; pre-fix 111,
+  unweighted 134), negative-offset symmetry (−250; pre-fix −31), and the stale
+  test header claiming parity with mobile's already-fixed copy is retired.
 - **SPEC.md §8.4 — hub carrier cite re-anchored (docs-only micro-nit from the
   dialect-bundle review).** The `:8804` row's first carrier coordinate moved:
   `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:47-49` → `:52-55`. The

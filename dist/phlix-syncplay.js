@@ -114,7 +114,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			let e = 1 / Math.max(1, r.rtt);
 			t += r.offset * e, n += e;
 		}
-		return Math.trunc(t / Math.max(1, n));
+		return n === 0 ? 0 : Math.round(t / n);
 	}
 	getLatency() {
 		return this.ensureWindowCache(), this.cachedLatency;
@@ -304,9 +304,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 				break;
 			case e.CHAT:
 			case e.PLAYBACK_QUEUE: break;
-			default:
-				this.options.onUnknownFrame?.(n);
-				break;
+			default: this.options.onUnknownFrame?.(n);
 		}
 	}
 	handleTimePong(e) {
@@ -391,13 +389,13 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	}
 	handleHostTransfer(e) {
 		let t = e;
-		typeof t.current_host_id != "string" || typeof t.new_host_id != "string" || (this.group !== null && (this.group = {
+		typeof t.current_host_id == "string" && typeof t.new_host_id == "string" && (this.group !== null && (this.group = {
 			...this.group,
 			host_id: t.new_host_id
 		}), this.options.onHostTransfer?.(t.current_host_id, t.new_host_id));
 	}
 	handlePlaybackSync(e) {
-		let t = typeof e.member_id == "string" ? e.member_id : void 0, n = typeof e.position == "number" ? e.position : 0, r = typeof e.is_playing == "boolean" ? e.is_playing : !1, i = typeof e.server_time == "number" ? e.server_time : this.getSynchronizedTime();
+		let t = typeof e.member_id == "string" ? e.member_id : void 0, n = typeof e.position == "number" ? e.position : 0, r = typeof e.is_playing == "boolean" && e.is_playing, i = typeof e.server_time == "number" ? e.server_time : this.getSynchronizedTime();
 		this.options.onPlaybackSync?.(t ?? "", n, r, i);
 	}
 	handleTimeSync(e) {
