@@ -279,6 +279,20 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			server_time: this.getSynchronizedTime()
 		});
 	}
+	sendChat(t) {
+		this.group !== null && this.dispatch(e.CHAT, {
+			group_id: this.group.group_id,
+			member_id: this.memberId,
+			message: t
+		});
+	}
+	sendTyping(t) {
+		this.group !== null && this.dispatch(e.TYPING, {
+			group_id: this.group.group_id,
+			member_id: this.memberId,
+			is_typing: t
+		});
+	}
 	pingTime() {
 		let t = this.now();
 		this.lastPingSendTime = t, this.dispatch(e.TIME_PING, { client_time: t });
@@ -329,7 +343,11 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 				this.handleGroupList(n);
 				break;
 			case e.CHAT:
-			case e.PLAYBACK_QUEUE: break;
+				this.handleChat(n);
+				break;
+			case e.PLAYBACK_QUEUE:
+				this.handlePlaybackQueueBroadcast(n);
+				break;
 			default: this.options.onUnknownFrame?.(n);
 		}
 	}
@@ -439,6 +457,19 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	handleTyping(e) {
 		let t = e;
 		typeof t.member_id == "string" && this.options.onMemberTyping?.(t.member_id, t.is_typing ?? !1);
+	}
+	handleChat(e) {
+		let t = e;
+		if (typeof t.member_id != "string" || typeof t.message != "string") return;
+		let n = typeof t.member_name == "string" ? t.member_name : "", r = typeof e.timestamp == "number" ? e.timestamp : void 0;
+		this.options.onChat?.(t.member_id, n, t.message, r);
+	}
+	handlePlaybackQueueBroadcast(e) {
+		let n = e, r = t.normalizeQueue(n.queue);
+		r !== void 0 && (this.group !== null && (this.group = {
+			...this.group,
+			queue: r
+		}), this.options.onQueueChanged?.(r));
 	}
 	handleHostTransfer(e) {
 		let t = e;

@@ -249,20 +249,34 @@ to_position: number
 server_time: number        (same unit law as play/pause above)
 ```
 
-`syncplay_playback_queue`
+`syncplay_playback_queue` (both directions — the shapes DIFFER)
 ```
+client → server (host replaces the queue; Messages::playbackQueue,
+               `Messages.php:502-511`-family factory shape):
 group_id: string
+queue: [ { media_id: string, media_info?: object }, ... ]
+
+server → group (broadcast after the update is ACCEPTED):
 queue: [ { media_id: string, media_info?: object,
            added_at?: number (unix s), added_by?: string | null }, ... ]
-member_id?: string
 ```
-> Same queue array as `group_state.group.queue`, same per-carrier item law
-> (`:8097` `SyncPlayManager.php:1271-1273` broadcasts `getPlaybackQueue()` —
-> full four-field items; the hub relay's broadcast
-> `SyncPlayRelayWorker.php:1764` carries `media_id` + `media_info` only).
-> The library documents this inbound type as carried-but-not-orchestrated
-> (ignored by design, `src/client.ts` dispatch note); the `SyncPlayClient`
-> does not consume it — read the queue off `onState`'s `group.queue`.
+> Same queue array semantics as `group_state.group.queue`, same per-carrier
+> item law (`:8097` `SyncPlayManager.php:1271-1273` broadcasts
+> `getPlaybackQueue()` — full four-field items stamped by `addToQueue()`
+> (`GroupState.php:812-817`); the hub relay's broadcast
+> `SyncPlayRelayWorker.php:1763-1765` carries `media_id` + `media_info` only
+> — narrowed at :1713-1747, `added_*` ABSENT, never zeroed). The BROADCAST
+> carries NO `group_id`/`member_id` (the producers derive both server-side,
+> S289); fan-out includes the sender on both carriers. Refusals are separate
+> error frames (`syncplay.queue_limit_exceeded` `SyncPlayManager.php:1253-1263`
+> / `NOT_HOST` :1219; hub :1707 / :1748-1757) with the live queue UNTOUCHED —
+> and there is no `group_state` re-broadcast after an accepted update
+> (`publishSnapshot()` :1278 is an internal HTTP-worker snapshot), so this
+> broadcast is the ONLY live queue-change signal. The library orchestrates
+> it since M-SYNCPLAY-11: `onQueueChanged` fires with the normalized queue
+> and the cached group is folded (former "carried-but-not-orchestrated /
+> ignored by design" law retired; reading the queue off `onState` remains
+> valid for the `group_state` copy).
 
 `syncplay_playback_sync` (periodic position broadcast)
 ```
@@ -301,19 +315,51 @@ nudge?: {                  (S446 soft-desync correction — directed frames ONLY
 
 ### Chat
 
-`syncplay_chat`
+`syncplay_chat` (both directions — the shapes DIFFER; M-SYNCPLAY-11 cure of the
+single-shape drift)
 ```
+client → server (any member; Messages::chatMessage `Messages.php:564-574`):
 group_id: string
-member_id: string
+member_id: string          (SELF-ASSERTED — the server never reads it, S289:
+                            `SyncPlayManager.php:1297` derives the speaker from
+                            the authenticated connection)
+message: string
+
+server → group (broadcast of the accepted message):
+member_id: string          (AUTHENTICATED id — overwrites the claim)
+member_name: string        (group member record, server fallback 'Unknown' :1312)
 message: string
 ```
+> The broadcast carries NO `group_id` key — membership is implicit in the
+> fan-out. A blank/whitespace message is dropped IN SILENCE on both carriers
+> (server :1314-1316, hub `SyncPlayRelayWorker.php:1791-1793`): no error frame,
+> no echo. Envelope `timestamp` is the authoritative send time in
+> MILLISECONDS on both carriers (`Messages.php:924-927` microtime×1000; hub
+> `canonicalFrame` `nowMs()` :1230) — the seconds-level payload duplicate was
+> dropped at S417. Fan-out INCLUDES the sender on both carriers
+> (`broadcastToGroup` default `$excludeIds = []`, `SyncPlayManager.php:1932`,
+> the chat call at :1323 passes none; hub :1795 omits the exclusion): your own
+> message comes back to you. The library delivers every chat frame — echo
+> included — via `onChat(memberId, memberName, message, timestampMs)`; the
+> outbound arm is `sendChat(message)`.
 
-`syncplay_typing`
+`syncplay_typing` (both directions)
 ```
+client → server (any member; Messages::chatTyping `Messages.php:590-600`):
 group_id: string
-member_id: string
+member_id: string          (self-asserted — ignored, S289 :1364)
+is_typing: boolean         (producers read `=== true` or legacy `'1'`:
+                            server :1375, hub :1822-1823)
+
+server → group (broadcast):
+member_id: string          (authenticated id)
 is_typing: boolean
 ```
+> Unlike chat, the typing fan-out EXCLUDES the sender (server `[$memberId]`
+> :1380, hub `$client->clientId` :1828) and guard misses are SILENT (no error
+> frames for a transient indicator). Inbound is delivered by `onMemberTyping`;
+> outbound is `sendTyping(isTyping)` since M-SYNCPLAY-11 (the inbound arm was
+> already wired — the missing sender half made the indicator one-way).
 
 ### Host management
 

@@ -29,7 +29,7 @@
  * historical divergences).
  */
 import { type NowFn } from './framing';
-import { type GroupListSummaryRow, type PlaybackSyncNudge, type RawMessage, type SyncPlayGroup, type TimeSyncState, type UnknownFrame } from './messages';
+import { type GroupListSummaryRow, type PlaybackQueueItem, type PlaybackSyncNudge, type RawMessage, type SyncPlayGroup, type TimeSyncState, type UnknownFrame } from './messages';
 import { TimeSync } from './time-sync';
 /** A play/pause/seek command surfaced to the consumer for local application. */
 export interface PlaybackCommand {
@@ -101,8 +101,40 @@ export interface SyncPlayClientOptions {
     onHostChanged?: (_newHostId: string | null) => void;
     onError?: (_code: string, _message: string) => void;
     onInfo?: (_message: string) => void;
-    /** A member started or stopped typing (TYPE_CHAT_TYPING / syncplay_typing). */
+    /** A member started or stopped typing (TYPE_CHAT_TYPING / syncplay_typing).
+     *  Unlike chat, this fan-out EXCLUDES the sender on both carriers (phlix-server
+     *  `SyncPlayManager.php:1377-1380` passes `[$memberId]`; hub
+     *  `SyncPlayRelayWorker.php:1825-1828` passes `$client->clientId`), so your own
+     *  indicator never echoes back here. */
     onMemberTyping?: (_memberId: string, isTyping: boolean) => void;
+    /**
+     * A chat message from a group member (TYPE_CHAT_MESSAGE / syncplay_chat),
+     * delivered per the PRODUCER BYTES of the broadcast — wire sites, the S289
+     * identity law and the silent-blank rule are documented on
+     * {@link ChatBroadcastPayload}. (M-SYNCPLAY-11: before this callback existed
+     * the frame hit a silent-ignore arm, so the library shipped "Bob is
+     * typing…" without any way for Bob's message to arrive through the public
+     * API.)
+     *
+     * SELF-ECHO ARRIVES — this is wire law, not a leak: both carriers fan chat
+     * out INCLUDING the sender (server `broadcastToGroup` default
+     * `$excludeIds = []`, `SyncPlayManager.php:1932`, chat call passes none
+     * :1323; hub call omits the exclusion, `SyncPlayRelayWorker.php:1795`).
+     * The library deliberately does NOT suppress the echo here: command-echo
+     * suppression keys on ctor-`memberId` vs stamped id, and that identity is
+     * UNRECONCILED (SPEC §9; the review-M5 class — a fabricated ctor id would
+     * make a peer's message look like your echo, or your echo look foreign).
+     * Consumers render chat from THIS callback only (do not also locally
+     * append on {@link SyncPlayClient.sendChat}) and are correct on both
+     * carriers by construction.
+     *
+     * `_timestampMs` is the envelope `timestamp` — the server's send time,
+     * authoritative MILLISECONDS on both carriers (S417;
+     * `Messages.php:924-927`, `SyncPlayRelayWorker.php:1230`). `undefined`
+     * only on hand-built frames that omitted it; the library never fabricates
+     * a send time.
+     */
+    onChat?: (_memberId: string, memberName: string, message: string, _timestampMs?: number) => void;
     /** The group host transferred to another member (TYPE_HOST_TRANSFER / syncplay_host_transfer). */
     onHostTransfer?: (_currentHostId: string, _newHostId: string) => void;
     /**
@@ -144,14 +176,43 @@ export interface SyncPlayClientOptions {
      */
     onGroupList?: (_groups: GroupListSummaryRow[]) => void;
     /**
+     * The group's playback queue was REPLACED wholesale
+     * (PLAYBACK_QUEUE / syncplay_playback_queue broadcast). Producer bytes and
+     * the per-carrier item law (`:8097` full four-field items vs hub-relay
+     * items narrowed to `media_id` + `media_info`) are documented on
+     * {@link QueueBroadcastPayload}. (M-SYNCPLAY-11: the frame used to hit a
+     * silent-ignore arm although SPEC §4 promised "verbatim getState()" queue
+     * currency — and the server does NOT rebroadcast `group_state` after a
+     * queue update (`SyncPlayManager.php:1271-1278` broadcasts + publishes an
+     * internal HTTP snapshot only), so before this callback a next-up UI had
+     * either to re-poll or to sniff raw frames around `handleIncoming` — the
+     * divergence economy this package exists to abolish.)
+     *
+     * Delivery model (host-change precedent, `handleHostElect`): the library
+     * folds the new queue into the cached group — `getGroup().queue` stays
+     * true afterwards — and fires THIS callback; it does NOT re-fire
+     * `onState`, because the group identity/members did not change. A cleared
+     * queue arrives as `[]` (the producers emit the key always, possibly
+     * empty); `[]` and "no frame" are never conflated. Fan-out includes the
+     * host, so the sender sees its own accepted update (no suppression — the
+     * onChat rationale applies verbatim). Refusals never reach here: an
+     * over-cap or non-host submission is answered with an error frame
+     * (`syncplay.queue_limit_exceeded` :1253-1263 / `NOT_HOST` :1219, hub
+     * `SyncPlayRelayWorker.php:1707` / overflow :1748-1757) and arrives via `onError`, with the
+     * live queue left UNTOUCHED.
+     */
+    onQueueChanged?: (_queue: PlaybackQueueItem[]) => void;
+    /**
      * Extension point for non-SyncPlay vocabulary. This library owns ONLY the 19
      * canonical `syncplay_*` types; ONLY frames whose type is NOT one of them
      * (e.g. the hub relay's `pending_command`) reach this hook — untouched, no
-     * validation, no mutation. The two canonical types the library does not
-     * orchestrate — syncplay_chat, syncplay_playback_queue — stay ignored, as
-     * before. This is the extension point the old default-arm comment promised;
-     * consumers route non-SyncPlay vocabulary through it and the library stays
-     * protocol-pure.
+     * validation, no mutation. The two canonical types that used to be named
+     * here as "carried but not orchestrated" — syncplay_chat,
+     * syncplay_playback_queue — are ORCHESTRATED since M-SYNCPLAY-11 (they fire
+     * {@link SyncPlayClientOptions.onChat} / {@link SyncPlayClientOptions.onQueueChanged});
+     * they still NEVER reach this hook. This remains the extension point the old
+     * default-arm comment promised; consumers route non-SyncPlay vocabulary
+     * through it and the library stays protocol-pure.
      */
     onUnknownFrame?: (_frame: UnknownFrame) => void;
     /**
@@ -250,6 +311,41 @@ export declare class SyncPlayClient {
     private cancelSeekCoalescing;
     /** Periodic position report (PLAYBACK_SYNC) — typically host-driven. */
     reportPosition(position: number, isPlaying: boolean): void;
+    /**
+     * Send a chat message to the group. Outbound shape mirrors the server's own
+     * factory `Messages::chatMessage` (phlix-server
+     * `src/Session/SyncPlay/Messages.php:564-574`): `group_id` + this client's
+     * self-asserted `member_id` + `message`.
+     *
+     * Producer law this method deliberately does NOT paper over (each half is
+     * documented on {@link ChatBroadcastPayload} with cites):
+     *  - the server IGNORES the claimed `member_id` and stamps the
+     *    authenticated id on the rebroadcast (S289, `SyncPlayManager.php:1297`);
+     *  - a blank/whitespace `message` is dropped IN SILENCE on both carriers
+     *    (server :1314-1316, hub :1791-1793) — no error frame, no echo. Gate
+     *    your own senders (e.g. disable Send on empty) if you want that UX
+     *    signal locally;
+     *  - the accepted message ECHOES BACK TO YOU through
+     *    {@link SyncPlayClientOptions.onChat} (fan-out includes the sender) —
+     *    render chat from the callback only, never twice.
+     * No-op outside a group (sendPlay precedent — the frame's `group_id` comes
+     * from the cached group).
+     */
+    sendChat(message: string): void;
+    /**
+     * Announce typing state (`syncplay_typing`, {@link SyncPlayClientOptions.onMemberTyping}
+     * is the inbound arm). Shape mirrors `Messages::chatTyping` (phlix-server
+     * `Messages.php:590-600`). Producers read `is_typing` as `=== true` or the
+     * legacy `'1'` string (server `SyncPlayManager.php:1375`, hub
+     * `SyncPlayRelayWorker.php:1822-1823`) — a real boolean passes cleanly.
+     * Identity is again server-derived (S289 :1364). Unlike chat, the typing
+     * fan-out EXCLUDES the sender (server `[$memberId]` :1380, hub
+     * `$client->clientId` :1828), so your own indicator never echoes back, and
+     * guard misses are SILENT for typing on both producers (no error frames for
+     * a transient indicator — there is nothing to observe beyond the peers'
+     * view).
+     */
+    sendTyping(isTyping: boolean): void;
     /** Send a time_ping. Call periodically (e.g. every 10–30s). */
     pingTime(): void;
     /**
@@ -273,12 +369,14 @@ export declare class SyncPlayClient {
     onDisconnect(): void;
     /**
      * Route one inbound frame (string or parsed object). Feeds time-sync on pong,
-     * applies group_state, surfaces playback commands, host changes, errors, info.
-     * Frames whose type is outside the 19 canonical `syncplay_*` types are
-     * surfaced via {@link SyncPlayClientOptions.onUnknownFrame}; the two canonical
-     * types the library does not orchestrate (syncplay_chat,
-     * syncplay_playback_queue) stay silently ignored; invalid/undecodable frames
-     * (decodeMessage returns null) are still ignored.
+     * applies group_state, surfaces playback commands, host changes, errors, info,
+     * chat and queue updates. Frames whose type is outside the 19 canonical
+     * `syncplay_*` types are surfaced via {@link SyncPlayClientOptions.onUnknownFrame};
+     * the two formerly-ignored canonical types (syncplay_chat,
+     * syncplay_playback_queue) are orchestrated since M-SYNCPLAY-11 through
+     * {@link SyncPlayClientOptions.onChat} / {@link SyncPlayClientOptions.onQueueChanged}
+     * and never reach that hook; invalid/undecodable frames (decodeMessage
+     * returns null) are still ignored.
      */
     handleIncoming(raw: unknown): void;
     private handleTimePong;
@@ -353,6 +451,32 @@ export declare class SyncPlayClient {
     private handleInfo;
     private handleError;
     private handleTyping;
+    /**
+     * Surface a `syncplay_chat` broadcast (M-SYNCPLAY-11; wire bytes on
+     * {@link ChatBroadcastPayload}). Refuse-garbage precedent
+     * ({@link handleTyping} / handleTimeSync / handleGroupList): the speaker id
+     * and the text are the message — a frame missing either has no producer on
+     * either carrier and must not be rendered (the m1-class lesson: defaulted
+     * garbage becomes visible UX). `member_name` is an adjacent field both live
+     * producers always stamp, so its absence (hand-built frames only) coerces
+     * to `''` per the {@link normalizeMembers} idiom — never an invented
+     * 'Unknown' (that fallback is the SERVER's record-level law, not the
+     * library's). No self-echo suppression: see the onChat docblock for the
+     * fan-out law and the identity rationale.
+     */
+    private handleChat;
+    /**
+     * Surface a `syncplay_playback_queue` broadcast (M-SYNCPLAY-11; wire bytes
+     * on {@link QueueBroadcastPayload}) and fold it into the cached group —
+     * this frame, not a `group_state` re-broadcast, is the ONLY live
+     * queue-change signal the producers emit (server :1271-1278, hub
+     * :1763-1765). Normalization REUSES {@link normalizeQueue} verbatim: the
+     * broadcast items and `group_state.group.queue` items share both producers'
+     * per-carrier shape, and a frame whose `queue` is absent or not an array
+     * is garbage the handleGroupList precedent drops — half-applied (or
+     * fabricated-empty) queue state is exactly how next-up UIs start lying.
+     */
+    private handlePlaybackQueueBroadcast;
     private handleHostTransfer;
     private handlePlaybackSync;
     private handleTimeSync;

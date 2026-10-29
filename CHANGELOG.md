@@ -4,6 +4,60 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **Watch-party chat and queue frames are ORCHESTRATED — `onChat` /
+  `onQueueChanged` + `sendChat` / `sendTyping` (fix lane M-SYNCPLAY-11, review
+  `syncplay__gameux` M4; semver MINOR — additive public surface, no existing
+  shape changes).** The dispatch arms for inbound `syncplay_chat` and
+  `syncplay_playback_queue` were silent ignores: the two party-wire frame
+  types SPEC §4 documents could reach a consumer only by sniffing raw frames
+  (`syncplay_typing` had an `onMemberTyping` handler but NO sender, making the
+  indicator one-way; chat had neither arm reachable). Shipped: two new
+  optional callbacks matching the repo options idiom — `onChat(memberId,
+  memberName, message, timestampMs)` fed the broadcast's PRODUCER BYTES
+  (server `SyncPlayManager.php:1323-1326`, hub
+  `SyncPlayRelayWorker.php` :1795-1799: `member_id`/`member_name`/`message`,
+  no `group_id`; envelope
+  `timestamp` is authoritative ms on both carriers) with per-field coercion
+  (absent `member_name` → `''`, never an invented `Unknown` — that fallback
+  is the server's record-level law, not the library's) — and
+  `onQueueChanged(queue)` reusing `normalizeQueue` verbatim, folding the
+  cached group WITHOUT re-firing `onState` (the `handleHostElect` precedent)
+  because the producers do NOT re-broadcast `group_state` after a queue
+  update (server :1271-1278 — `publishSnapshot()` is internal HTTP-worker
+  only): this frame is the ONLY live queue signal. Both handlers REFUSE
+  garbage per the `handleGroupList` precedent (chat needs string `member_id`
+  + `message`; a queue frame without an array is dropped whole — `[]` means
+  "cleared" and never mixes with "no frame"; refusals
+  (`queue_limit_exceeded`/`NOT_HOST`) arrive via `onError`, never here).
+  Chat fan-out INCLUDES the sender on both carriers (:1932 default
+  `$excludeIds = []`; hub call omits it — the server's "excluding sender"
+  docblock is stale prose, disk-verified @84e55800/5731fc79) so the library
+  surfaces the echo and documents the render-from-callback-only law; typing
+  is the documented exception (its broadcast EXCLUDES the sender :1380/
+  :1828). New senders `sendChat(message)` / `sendTyping(isTyping)` mirror
+  the PHP factories `Messages::chatMessage` (:564-574) / `chatTyping`
+  (:590-600) — envelope + `group_id`/`member_id`/payload, no-ops outside a
+  group (the `sendPlay` precedent). The `onUnknownFrame` law (S298) holds
+  UNCHANGED: no canonical type may reach the hook — the bug-adjacent S298
+  pins that fed CHAT/PLAYBACK_QUEUE assert `unknown === 0` and stayed green
+  UNMODIFIED (only their stale "not orchestrated" comment cured). New
+  exported payload types `ChatBroadcastPayload` / `QueueBroadcastPayload`
+  pin the inbound wire shapes. This cure owns NO timers: handlers are
+  synchronous folds/dispatches (fake-timer zero-count pin + stray-frames-
+  after-teardown safety pin). SPEC §4 amended ONLY where it drifted from the
+  producers: the two single-shape blocks rewritten both-directions (the
+  broadcast shapes genuinely differ from the outbound factory shapes — no
+  `group_id`/`member_id` claim, `member_name`/`added_*` per-carrier law,
+  silent blank-drop :1314-1316/:1791-1793), the playback_queue "carried but
+  not orchestrated (ignored by design)" law retired; README gained the party
+  usage + law section. The `group_state.group.queue` half of the review was
+  ALREADY cured at `d687560` (`SyncPlayGroup.queue?` via `normalizeQueue`) —
+  untouched, disk-verified. Red-on-parent: 13 of 15 new-file tests fail at
+  `87fd030` (the 2 green are the garbage-refusal cases, vacuous on a parent
+  that drops everything). Serial suite 7 files / 174 → 8 files / 189 tests
+  (+15 exact); typecheck/lint clean; `dist/` rebuilt deterministically
+  (aggregate md5 `4fd23470b0856eada8edd9553bcc8f4d` ×2). Consumers pin
+  `#v0.1.5` remotely — live for them at the v0.1.6 tag wave (rider note).
 - **`server_time` scale trap (M-SYNCPLAY-10) closed-out: carrier-pair age pins +
   docblock currency (semver PATCH — no consumer-visible shape change; doc/test
   only).** The review (`syncplay__gameux` M3) named the playback_sync echo path

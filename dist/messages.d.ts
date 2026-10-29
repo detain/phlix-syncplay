@@ -291,6 +291,66 @@ export interface TypingPayload {
     member_id: string;
     is_typing: boolean;
 }
+/**
+ * `syncplay_chat` AS THE LIVE CARRIERS BROADCAST IT — the inbound bytes
+ * {@link SyncPlayClientOptions.onChat} consumes. The previous SPEC §4 block
+ * listed only the OUTBOUND request shape ({@link ChatPayload}) for this type;
+ * the fan-out rewrites it (M-SYNCPLAY-11, review `syncplay__gameux` M4 —
+ * before that fix the library silently dropped these frames):
+ *  - `:8097` phlix-server `SyncPlayManager::handleChatMessage` broadcast data
+ *    :1323-1326 (@84e55800): `member_id` is the AUTHENTICATED id — the
+ *    payload's self-asserted claim is never read (S289, `getUserId()` :1297) —
+ *    `member_name` comes from the group member record with the server-side
+ *    fallback `'Unknown'` (:1312), `message` is the trimmed-nonblank text
+ *    (blank messages are dropped IN SILENCE, :1314-1316 — no error frame).
+ *    NO `group_id` key rides the broadcast; membership is implicit in the
+ *    fan-out.
+ *  - `:8804` phlix-hub relay `handleCanonicalChat` broadcast :1795-1799
+ *    (@5731fc79): the same three keys — `member_id` = the relay client id,
+ *    `member_name` = the relay display name, same silent-blank law (:1791-1793).
+ * Envelope `timestamp` is authoritative MILLISECONDS on both carriers
+ * (phlix-server `Messages::getCurrentTimestamp()` = `microtime(true) * 1000`,
+ * `Messages.php:924-927`; hub `canonicalFrame` stamps `self::nowMs()`,
+ * `SyncPlayRelayWorker.php:1230`) — the former seconds-level payload
+ * duplicate was dropped at S417.
+ * Fan-out INCLUDES the sender on both carriers: the server call passes no
+ * exclusion list and `broadcastToGroup` defaults `$excludeIds = []`
+ * (`SyncPlayManager.php:1932`), the hub calls `broadcastCanonical` without an
+ * `$excludeClientId` (`SyncPlayRelayWorker.php:1795`). Your own message comes
+ * back to you as a chat frame — see {@link SyncPlayClientOptions.onChat}.
+ * (The `handleChatMessage` @fires docblock's "excluding sender" is stale
+ * server-side prose — the code carries no exclusion; the sibling
+ * `handleChatTyping` DOES pass `[$memberId]` (:1380).)
+ */
+export interface ChatBroadcastPayload {
+    /** Server-derived identity of the speaker (never the payload claim — S289). */
+    member_id: string;
+    member_name: string;
+    message: string;
+}
+/**
+ * `syncplay_playback_queue` AS THE LIVE CARRIERS BROADCAST IT — the inbound
+ * bytes {@link SyncPlayClientOptions.onQueueChanged} consumes. The broadcast
+ * payload carries EXACTLY ONE key beyond the envelope:
+ *  - `:8097` phlix-server `SyncPlayManager::handlePlaybackQueue` broadcast
+ *    :1271-1273 (@84e55800): `queue` = `GroupState::getPlaybackQueue()` —
+ *    full four-field items per `addToQueue()` (`GroupState.php:812-817`:
+ *    `media_id`, `media_info`, `added_at` UNIX seconds, `added_by` nullable).
+ *  - `:8804` phlix-hub relay `handleCanonicalPlaybackQueue` broadcast
+ *    :1763-1765 (@5731fc79): `queue` with items narrowed to `media_id` +
+ *    `media_info` by the same parser the relay's group_state uses
+ *    (:1713-1747) — `added_at`/`added_by` ABSENT, never zeroed.
+ * NO `group_id`/`member_id` rides either broadcast (unlike the OUTBOUND
+ * factory shape {@link PlaybackQueuePayload} — the server derives both, S289).
+ * Fan-out includes the sender on both carriers (no exclusion argument at
+ * `:1271` / `:1763`). The server additionally publishes an internal snapshot
+ * (`publishSnapshot()` :1278) but does NOT rebroadcast `group_state` — this
+ * frame is the ONLY live queue-change signal a client receives.
+ */
+export interface QueueBroadcastPayload {
+    /** Same per-carrier item law as `group_state.group.queue` — {@link PlaybackQueueItem}. */
+    queue: PlaybackQueueItem[];
+}
 export interface HostTransferPayload {
     group_id: string;
     current_host_id: string;

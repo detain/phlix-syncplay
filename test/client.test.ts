@@ -1811,8 +1811,9 @@ describe('SyncPlayClient — onUnknownFrame (S298 phantom-hook decision)', () =>
       member_id: 'guest1',
       member_name: 'Guest',
     });
-    // Canonical types the library does not orchestrate (SPEC §4 wire shapes)
-    // are dropped BEFORE the default arm — they must not reach the hook either.
+    // Since M-SYNCPLAY-11 EVERY canonical type — chat and playback_queue
+    // included — is orchestrated by its own handler; all 19 still route
+    // BEFORE the default arm, so none may reach this hook either.
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.CHAT,
       protocol_version: 1,

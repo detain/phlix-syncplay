@@ -119,6 +119,8 @@ const client = new SyncPlayClient({
   onHostChanged: (hostId) => {},
   onError: (code, message) => {},
   onMemberTyping: (memberId, isTyping) => {},
+  onChat: (memberId, memberName, message, timestampMs) => { /* every accepted message, INCLUDING your own echo (fan-out includes the sender) — render chat from here only */ },
+  onQueueChanged: (queue) => { /* wholesale queue replacement; also folded into getGroup().queue; [] = cleared */ },
   onHostTransfer: (currentHostId, newHostId) => {},
   onPlaybackSync: (memberId, position, isPlaying, serverTime, nudge) => { /* `nudge` = server-directed S446 soft correction ({drift_ms, direction, suggested_rate, tolerance_ms, cooldown_ms}); undefined unless the `:8097` server unicasted it to THIS member — apply suggested_rate, never seek (SPEC §4) */ },
   onTimeSync: (state) => { /* { memberId, groupId, serverTimeSec, offsetMs, latencyMs, driftRate, isStable } */ },
@@ -138,6 +140,10 @@ client.sendPlay(positionMs);
 client.sendPause(positionMs);
 client.sendSeek(fromMs, toMs);
 client.reportPosition(positionMs, isPlaying);
+
+// Party surface (any member; identity is server-derived, SPEC §4/§9):
+client.sendChat('popcorn tonight?');   // your message arrives back via onChat
+client.sendTyping(true);               // peers see it on THEIR onMemberTyping
 ```
 
 ### Command repeat policy
@@ -175,6 +181,36 @@ per-intent, not per-key-event.** How that is met per sender:
   reports (`SyncPlayManager.php:1569-1585`), so flooding them mis-signals as
   surely as long silence does. Remember background-tab timer clamping:
   resume your interval on visibility change.
+
+### Party chat and queue (M-SYNCPLAY-11)
+
+- **Render chat from `onChat` only — never also locally on `sendChat`.**
+  Both producers fan chat out **including the sender** (phlix-server
+  `SyncPlayManager.php:1323` broadcast via `broadcastToGroup`'s default
+  `$excludeIds = []` :1932; hub `SyncPlayRelayWorker.php:1795` omits the
+  exclusion), so your own message arrives back as a frame. The library
+  deliberately does not suppress that echo: suppression would key on the
+  ctor-vs-stamped identity gap SPEC §9 documents as unreconciled.
+  `onChat` carries `(memberId, memberName, message, timestampMs)` — the
+  broadcast's producer bytes (`member_id`/`member_name`/`message`,
+  `SyncPlayManager.php:1323-1326`; the envelope `timestamp` is authoritative
+  **ms** on both carriers, S417), and `undefined` for the timestamp only on
+  hand-built frames. Note the producers drop blank messages **in silence**
+  (server :1314-1316, hub :1791-1793) — no error, no echo — so gate empty
+  sends yourself.
+- **Typing is the exception that proves the law:** its fan-out EXCLUDES the
+  sender (server `[$memberId]` :1380, hub :1828), so your own indicator never
+  comes back to your `onMemberTyping`.
+- **`onQueueChanged` is the only live queue signal.** An accepted
+  `syncplay_playback_queue` broadcast replaces the queue wholesale and the
+  server does NOT re-broadcast `group_state` after it
+  (`SyncPlayManager.php:1271-1278` — the `publishSnapshot()` at :1278 is an
+  internal HTTP-worker snapshot). The library delivers the normalized items
+  (per-carrier item law, SPEC §4: hub items lack `added_*` — absent, never
+  zeroed), **folds them into `getGroup().queue`**, and does not re-fire
+  `onState`. A cleared queue arrives as `[]`, distinct from a frame that
+  carried no array (dropped whole). Refusals (`syncplay.queue_limit_exceeded`,
+  `NOT_HOST`) come through `onError`, never here.
 
 ### Reconnect recovery
 
