@@ -985,6 +985,16 @@ export class SyncPlayClient {
       return;
     }
 
+    // Room change mid-window (R-SYNCPLAY-03): joinGroup(B) while a seek
+    // coalescing window from room A is still open would otherwise flush A's
+    // pending target stamped with B's group_id — the same "belongs to the
+    // room we are leaving" law leaveGroup/onDisconnect already enforce.
+    // A SAME-group re-delivery is a state refresh, not a room change: the
+    // window must survive it (pinned in seekCoalescing.test).
+    if (this.group !== null && this.group.group_id !== (group.group_id ?? '')) {
+      this.cancelSeekCoalescing();
+    }
+
     // Normalize members (dict on the live wire; array tolerated — S416) and
     // derive is_host from host_id (server includes is_host on members, but
     // host_id is authoritative).

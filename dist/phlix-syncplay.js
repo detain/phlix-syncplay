@@ -402,6 +402,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	handleGroupState(e) {
 		let n = e, r = n.group;
 		if (typeof r != "object" || !r) return;
+		this.group !== null && this.group.group_id !== (r.group_id ?? "") && this.cancelSeekCoalescing();
 		let i = t.normalizeMembers(r.members, r.host_id ?? null);
 		this.group = {
 			group_id: r.group_id ?? "",

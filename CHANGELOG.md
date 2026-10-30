@@ -4,6 +4,17 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **R-W3 riders wave (R-SYNCPLAY-03): `handleGroupState` now cancels an open
+  seek-coalescing window when the state replaces the group.** A
+  `joinGroup(B)` landing while room A's throttle window was open let A's
+  pending target flush as a trailing `PLAYBACK_SEEK` stamped with B's
+  `group_id` (the flush reads `this.group` at window-close). Same
+  "belongs to the room we are leaving" law `leaveGroup`/`onDisconnect`
+  already enforce, extended to the replacement path; a SAME-group
+  `GROUP_STATE` re-delivery is a state refresh and keeps the window alive
+  (pinned). +3 tests in `test/seekCoalescing.test.ts` (red-first: the
+  A-target-into-B and cross-room-new-leading-edge symptoms both convicted
+  pre-cure); dist re-emitted at the same commit.
 - **R-W2 riders wave (R-SYNCPLAY-02): the README
   `:8804` relay sentence is law-complete on BOTH admitted carriers.** The
   sentence read "accepts the bearer subprotocol **only**" — true only in the

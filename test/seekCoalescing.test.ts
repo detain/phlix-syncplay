@@ -231,3 +231,75 @@ describe('SyncPlayClient — seekThrottleMs boundary parsing (M-SYNCPLAY-09)', (
     expect(() => new SyncPlayClient({ ...base(), seekThrottleMs: 250 })).not.toThrow();
   });
 });
+
+describe('SyncPlayClient — group replacement cancels the open seek window (R-SYNCPLAY-03)', () => {
+  /** Deliver a GROUP_STATE for a different room (what joinGroup(B) mid-A lands as). */
+  function enterOtherRoom(h: { client: SyncPlayClient; sent: RawMessage[] }): void {
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: {
+        group_id: 'sp_other',
+        group_name: 'Second Room',
+        member_count: 1,
+        host_id: 'me',
+        playback_position: 0,
+        playback_state: 'playing',
+      },
+    });
+  }
+
+  it('a pending target from room A NEVER flushes stamped with room B group_id', () => {
+    const h = makeHarness(250);
+    h.client.sendSeek(0, 5000); // leading — legitimately on the wire for sp_abc
+    h.client.sendSeek(0, 7000); // pending in the open window
+    enterOtherRoom(h);
+    vi.advanceTimersByTime(10_000);
+    const seeks = sentSeeks(h.sent);
+    // Exactly the leading frame survives; the coalesced A-target is dropped.
+    expect(seeks).toHaveLength(1);
+    expect(seeks[0]).toMatchObject({ group_id: 'sp_abc', to_position: 5000 });
+    // Nothing was ever dispatched against the new room's id.
+    expect(seeks.map((m) => m.group_id)).not.toContain('sp_other');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a re-delivered SAME-group GROUP_STATE keeps the window open (state refresh is not a room change)', () => {
+    const h = makeHarness(250);
+    h.client.sendSeek(0, 5000); // leading
+    h.client.sendSeek(0, 7000); // pending
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: {
+        group_id: 'sp_abc',
+        group_name: 'Movie Night',
+        member_count: 1,
+        host_id: 'me',
+        playback_position: 0,
+        playback_state: 'playing',
+      },
+    });
+    vi.advanceTimersByTime(250);
+    const seeks = sentSeeks(h.sent);
+    expect(seeks).toHaveLength(2);
+    expect(seeks[1]).toMatchObject({ group_id: 'sp_abc', to_position: 7000 });
+  });
+
+  it('seeks sent after the room change belong to the new room', () => {
+    const h = makeHarness(250);
+    h.client.sendSeek(0, 5000);
+    enterOtherRoom(h);
+    h.client.sendSeek(0, 9000); // new leading edge in sp_other
+    const seeks = sentSeeks(h.sent);
+    expect(seeks).toHaveLength(2);
+    expect(seeks[1]).toMatchObject({ group_id: 'sp_other', to_position: 9000 });
+    // Its window owns only the new room's leading frame; advancing time with
+    // nothing pending closes cleanly (no ghost, no re-arm).
+    vi.advanceTimersByTime(10_000);
+    expect(sentSeeks(h.sent)).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
