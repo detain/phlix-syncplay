@@ -21,7 +21,7 @@
  * ONE documented exception (M-SYNCPLAY-09, README "Command repeat policy"):
  * while {@link SyncPlayClient.sendSeek} coalescing is enabled (the default),
  * the client owns at most ONE short ambient `setTimeout` flush timer at a
- * time. {@link SyncPlayClientOptions.seekThrottleMs}`: 0 disables it and
+ * time. {@link SyncPlayClientOptions.seekThrottleMs}: 0 disables it and
  * restores a fully timer-free surface.
  *
  * This is the canonical surface that mobile / windows / tizen wrappers should
