@@ -29,6 +29,11 @@ import { describe, expect, it } from 'vitest';
 const SPEC = readFileSync(fileURLToPath(new URL('../SPEC.md', import.meta.url)), 'utf8');
 const README = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8');
 const CHANGELOG = readFileSync(fileURLToPath(new URL('../CHANGELOG.md', import.meta.url)), 'utf8');
+const CLIENT = readFileSync(fileURLToPath(new URL('../src/client.ts', import.meta.url)), 'utf8');
+const MESSAGES = readFileSync(fileURLToPath(new URL('../src/messages.ts', import.meta.url)), 'utf8');
+const TIMESYNC = readFileSync(fileURLToPath(new URL('../src/time-sync.ts', import.meta.url)), 'utf8');
+const MSGTEST = readFileSync(fileURLToPath(new URL('./messages.test.ts', import.meta.url)), 'utf8');
+const CLIENTTEST = readFileSync(fileURLToPath(new URL('./client.test.ts', import.meta.url)), 'utf8');
 
 /** Count of headings exactly matching `## [X]` (prefix-tolerant on the date suffix). */
 function headingCount(md: string, prefix: string): number {
@@ -83,6 +88,80 @@ describe('CHANGELOG structure (W-min119 M-SYNCPLAY-26/27, review writer MIN-7/MI
     expect(CHANGELOG).toMatch(/re-add|re-add/i);
     // Historical text untouched: the original 0.1.3 claim is still there verbatim.
     expect(CHANGELOG).toContain('Removed the redundant `?? 0` / `?? \'stopped\'` fallbacks');
+  });
+});
+
+describe('SPEC §5 stability units (W-min120 M-SYNCPLAY-25, review writer MIN-6)', () => {
+  it('labels the variance threshold with honest units — ms² in the table and the rule', () => {
+    expect(SPEC).toMatch(/\|\s*stability variance\s+\|\s*`< 50` ms² \|/);
+    // The rule text states the statistic (population variance of the recent
+    // integer-ms offsets) and the unit (ms², variance of ms).
+    expect(SPEC).toMatch(/population[\s\S]{0,80}variance/);
+    expect(SPEC).toMatch(/variance of ms/);
+  });
+
+  it('retires the bare "50ms" root-unit mislabel from every synced surface', () => {
+    // The server's own docblock still carries it (TimeSync.php:39) — that leg
+    // is owed to the server vein. In SPEC.md the token may occur exactly
+    // once: inside the quoted mislabel sentence that names it as one.
+    expect(SPEC.match(/50ms/g) ?? []).toHaveLength(1);
+    expect(SPEC).toContain('a mislabel owed');
+    expect(README).not.toContain('50ms');
+    expect(TIMESYNC).not.toContain('50ms');
+    expect(README).toContain('ms²');
+    expect(TIMESYNC).toContain('ms²');
+  });
+});
+
+describe('SPEC §1 coordinate-era law + §4 server cite re-anchors (W-min120 M-SYNCPLAY-28, review writer MIN-9)', () => {
+  it('declares server/hub coordinates era-pinned snapshots governed by @ <sha> stamps', () => {
+    expect(SPEC).toMatch(/era-pinned/);
+    expect(SPEC).toMatch(/`@ <sha>` stamp/);
+  });
+
+  it('re-anchors the password-gate cluster to the verified server tree', () => {
+    expect(SPEC).toContain('SyncPlayManager.php:2157-2178');
+    expect(SPEC).toContain('create at `:1779` and join at `:1832`');
+    expect(SPEC).toMatch(/createGroup` `:158`\/`:164`/);
+    expect(SPEC).toMatch(/joinGroup` `:252`\/`:262`/);
+    expect(SPEC).toContain('bc3b9b33');
+    // The drifted cites are gone, not merely re-labelled.
+    expect(SPEC).not.toContain(':2035-2071');
+    expect(SPEC).not.toContain('called for create at `:1695`');
+    expect(SPEC).not.toContain('`SyncPlayController::createGroup` `:127`');
+  });
+
+  it('rotates the drifted handleTimeSync emit cite on every surface that carries it', () => {
+    // At bc3b9b33 the emit block is SyncPlayManager.php:1650-1658; the old
+    // :1653-1659 predates the server's own drift.
+    for (const [surface, text] of [
+      ['SPEC.md', SPEC],
+      ['src/client.ts', CLIENT],
+      ['src/messages.ts', MESSAGES],
+      ['test/messages.test.ts', MSGTEST],
+      ['test/client.test.ts', CLIENTTEST],
+    ] as const) {
+      expect(text, surface).not.toContain('1653-1659');
+    }
+    expect(SPEC).toContain('1650-1658');
+    expect(MSGTEST).toContain('1650-1658');
+  });
+});
+
+describe('SPEC §4 group_create field line (W-min120 M-SYNCPLAY-33)', () => {
+  it('names password_hash unsalted SHA-256 hex at first definition', () => {
+    expect(SPEC).toMatch(/password_hash\?: string\s+\(unsalted SHA-256 hex of the password\)/);
+  });
+});
+
+describe('onHostTransfer defensive-only law (W-min120 M-SYNCPLAY-05, review gameux minor)', () => {
+  it('client.ts docblock states the zero-live-producer caveat next to the callback', () => {
+    expect(CLIENT).toMatch(/host transferred[\s\S]{0,700}?(?:DEFENSIVE|defensive)[\s\S]{0,400}?producer/);
+  });
+
+  it('README event row carries the same caveat and is no longer a bare no-op row', () => {
+    expect(README).toMatch(/onHostTransfer:[^\n]*defensive-only[^\n]*producer/i);
+    expect(README).not.toMatch(/^ {2}onHostTransfer: \(currentHostId, newHostId\) => \{\},$/m);
   });
 });
 

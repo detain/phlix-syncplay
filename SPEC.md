@@ -31,6 +31,13 @@ The authoritative implementation is the PHP server:
 5. **The server is the source of truth.** Clients must follow the shapes the
    server actually emits, not invent their own (see §6 divergences).
 
+6. **Server/hub coordinates are era-pinned snapshots.** Line numbers cited
+   for `phlix-server` / `phlix-hub` drift with every server commit; an
+   `@ <sha>` stamp at a cite cluster names the exact tree it was verified
+   against. **Class and method names are the durable anchors** — trust
+   those, and re-verify a bare line number against your checkout before
+   acting on it.
+
 ---
 
 ## 2. Framing
@@ -164,7 +171,7 @@ All field names are **snake_case**.
 group_name: string
 member_id?: string         (defaults to the connection id server-side)
 member_name?: string       (defaults to "Host")
-password_hash?: string     (SHA-256 hex of the password)
+password_hash?: string     (unsalted SHA-256 hex of the password)
 password?: string          (DEPRECATED legacy plaintext arm — see note below)
 ```
 
@@ -180,11 +187,13 @@ password?: string          (DEPRECATED legacy plaintext arm — see note below)
 > **DEPRECATED second accepted input — legacy plaintext `password`.** The
 > server's group gate parses a second, pre-spec field: when `password_hash`
 > is absent, a plaintext `password` is accepted and hashed **server-side**
-> (`phlix-server/src/Session/SyncPlay/SyncPlayManager.php:2035-2071`,
-> `groupPasswordGate()` — called for create at `:1695` and join at `:1748`).
+> (`phlix-server/src/Session/SyncPlay/SyncPlayManager.php:2157-2178`,
+> `groupPasswordGate()` — called for create at `:1779` and join at `:1832`;
+> @ `bc3b9b33`).
 > `password_hash` wins when both are present; a present-but-malformed
 > `password_hash` is refused, never coerced. The plain-HTTP REST boundary
-> (`SyncPlayController::createGroup` `:127`/`:133` and `joinGroup` `:204`/`:214`)
+> (`SyncPlayController::createGroup` `:158`/`:164` and `joinGroup` `:252`/`:262`,
+> `src/Server/Http/Controllers/` @ `bc3b9b33`)
 > still accepts **only** plaintext `password` in its body, which is why the
 > arm survives. **New clients MUST NOT send `password` on the WebSocket** —
 > send `password_hash` (unsalted SHA-256 hex) exclusively; the plaintext arm
@@ -453,7 +462,7 @@ request (the server registers a handler for it; the hub `:8804` refuses it —
 §8.4), and what that request buys is exactly the frame documented here — a
 **unicast reply** on the connection that sent it
 (`phlix-server` `SyncPlayManager::handleTimeSync()`, emit at
-`src/Session/SyncPlay/SyncPlayManager.php:1653-1659`) — NOT a group broadcast
+`src/Session/SyncPlay/SyncPlayManager.php:1650-1658` @ `bc3b9b33`) — NOT a group broadcast
 (the old one-line stub here predated the field audit). Units are mixed per
 field — this is the §4 unit law's named exception in its `time_sync` arm:
 `server_time` is UNIX **seconds** on `:8097`, the `_ms` fields are
@@ -504,7 +513,7 @@ Constants:
 | `PROTOCOL_VERSION`      | `1`    |
 | `OFFSET_SAMPLE_COUNT`   | `5`    |
 | `MAX_ACCEPTABLE_RTT`    | `1000` ms |
-| stability variance      | `< 50` |
+| stability variance      | `< 50` ms² |
 | drift smoothing factor  | `0.1`  |
 
 Per ping/pong round, with:
@@ -544,8 +553,12 @@ do not inject a seconds clock.
   local estimator awaits its lockstep fix, which is safe because this
   aggregation never crosses the wire. Result rounded to whole ms.
 - **Latency** = mean of `rtt / 2` over recent samples.
-- **Stable** when `samples ≥ OFFSET_SAMPLE_COUNT` AND variance of recent
-  offsets `< 50`.
+- **Stable** when `samples ≥ OFFSET_SAMPLE_COUNT` AND the **population**
+  variance of the recent offsets (integer-ms samples; `sum((o - mean)²) / n`)
+  is `< 50` — the threshold's unit is **ms²** (variance of ms), mirroring the
+  server's unit-less `50`. The server docblock's "50ms" (`TimeSync.php:39`
+  @ `bc3b9b33`) labels the root's unit onto the variance — a mislabel owed
+  to the server vein, not a different threshold.
 - **Drift** (EMA): over the recent window,
   `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`, where `timeDelta`
   is in seconds (see the clock contract above). `1.0` = no drift. (Windows +

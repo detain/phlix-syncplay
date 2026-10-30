@@ -235,7 +235,15 @@ export interface SyncPlayClientOptions {
     message: string,
     _timestampMs?: number,
   ) => void;
-  /** The group host transferred to another member (TYPE_HOST_TRANSFER / syncplay_host_transfer). */
+  /**
+   * The group host transferred to another member (TYPE_HOST_TRANSFER /
+   * syncplay_host_transfer). DEFENSIVE-ONLY arm: §3 types the frame
+   * client → server, and no live producer emits it inbound — the server's
+   * `handleHostTransfer` answers with a broadcast `syncplay_group_state` and
+   * the hub announces via `syncplay_host_elect` + state. The handler is kept
+   * in case a producer ever appears; build transfer UX on `onState` /
+   * `onHostChanged` instead (SPEC §3/§4).
+   */
   onHostTransfer?: (_currentHostId: string, _newHostId: string) => void;
   /**
    * Periodic playback position sync from a group member (TYPE_PLAYBACK_SYNC /
@@ -268,7 +276,7 @@ export interface SyncPlayClientOptions {
    * the server's UNICAST reply to a `syncplay_time_sync` request. Units are
    * named per-field — `serverTimeSec` is UNIX seconds (the `:8097` seconds
    * quirk), `offsetMs`/`latencyMs` are ms. Server wire truth:
-   * `SyncPlayManager.php:1653-1659`. The pre-fix `(serverTime, clientTime)`
+   * `SyncPlayManager.php:1650-1658`. The pre-fix `(serverTime, clientTime)`
    * signature modeled a fabricated frame: the live wire carries no
    * `client_time`, so consumers silently received a defaulted `0`.
    */
@@ -1206,7 +1214,7 @@ export class SyncPlayClient {
   }
 
   private handleTimeSync(msg: RawMessage): void {
-    // Server wire truth: SyncPlayManager.php:1653-1659 — seven fields, mixed
+    // Server wire truth: SyncPlayManager.php:1650-1658 — seven fields, mixed
     // units, NO `client_time`. Parse-at-the-boundary: an advisory snapshot is
     // only meaningful whole, so a frame failing the real shape is DROPPED
     // (handleGroupList precedent). The pre-fix code read the fabricated

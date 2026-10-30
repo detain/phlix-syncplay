@@ -4,6 +4,47 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **W-min120 minors cluster (syncplay minors vein; review IDs
+  `M-SYNCPLAY-05/-25/-28/-33`).**
+  - **M-SYNCPLAY-05 (`syncplay__gameux`, docs):** `onHostTransfer` is now
+    announced WITH its defensive-only law on both surfaces (`src/client.ts`
+    option docblock + README event row): §3 types `syncplay_host_transfer`
+    client → server and no live producer emits it inbound (the server's
+    `handleHostTransfer` answers with a broadcast `syncplay_group_state`,
+    the hub with `syncplay_host_elect` + state) — consumers build transfer
+    UX on `onState`/`onHostChanged`; the handler survives only for a future
+    producer.
+  - **M-SYNCPLAY-25 (`syncplay__writer` MIN-6, docs):** the stability
+    threshold carries honest units everywhere this repo states it —
+    SPEC §5 table row and rule now say `< 50` **ms²** (variance of ms) and
+    name the statistic (population variance of the recent integer-ms
+    samples); README and the `time-sync.ts` docblocks stop writing "50ms".
+    The server's own "50ms" label (`TimeSync.php:39` @ `bc3b9b33`) is the
+    same mislabel on the root's unit — owed to the server vein, named in
+    the SPEC sentence so nobody reads it as a different threshold.
+  - **M-SYNCPLAY-28 (`syncplay__writer` MIN-9, docs):** SPEC §1 gains item
+    6 — server/hub coordinates are era-pinned snapshots, an `@ <sha>` stamp
+    names the verified tree, class/method names are the durable anchors
+    (the server moves daily; un-stamped cites were silently rotting). The
+    §4 password-gate cluster is re-anchored to `bc3b9b33`
+    (`groupPasswordGate` `:2157-2178`, create/join `:1779`/`:1832`; REST
+    boundary `SyncPlayController::createGroup :158/:164`,
+    `joinGroup :252/:262` under `src/Server/Http/Controllers/`), and the
+    drifted `handleTimeSync` emit cite `:1653-1659` is rotated to
+    `:1650-1658` on every live surface (SPEC, client, messages, both test
+    headers; the CHANGELOG history keeps its era's cite verbatim per
+    immutability).
+  - **M-SYNCPLAY-33 (`syncplay__secnet`, docs):** the §4 `group_create`
+    field line reads `(unsalted SHA-256 hex of the password)` at first
+    definition — the algorithm's weakness class is stated where clients
+    choose it, matching the gate note's existing "unsalted" prose.
+  - **Verified-STALE: M-SYNCPLAY-17** (`memberId` sourced from the auth
+    session, README identity contract + client.ts ctor law +
+    `test/memberIdentity.test.ts` all landed via `b6efd82`/`a09506f`,
+    ancestry-proven at this head — nothing left to cure).
+  - Docs/test tripwires only beyond M-15's behavior; `test/specDocLaw.test.ts`
+    grows 8 pins (red 8/8 at the W-min119 head, green here). dist
+    re-emitted deterministic x2 at this commit.
 - **W-min119 minors cluster (syncplay minors vein; review IDs
   `M-SYNCPLAY-15/-11/-24/-26/-27`).**
   - **M-SYNCPLAY-15 (behavior; `syncplay__gameux` m4):** `handleHostElect` /

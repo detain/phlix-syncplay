@@ -42,8 +42,9 @@
  * weighted mean (`weight = 1 / max(1, rtt)`, favouring low-RTT samples;
  * mean = `sum(w * offset) / sum(w)`) over the most recent
  * `OFFSET_SAMPLE_COUNT` samples. Sync is "stable" once at least
- * `OFFSET_SAMPLE_COUNT` samples exist AND the variance of recent offsets is
- * < 50ms. Drift is an EMA: `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`.
+ * `OFFSET_SAMPLE_COUNT` samples exist AND the population variance of recent
+ * offsets is < 50 (unit ms² — variance of the integer-ms offsets; the server's
+ * threshold is the same unit-less `50`). Drift is an EMA: `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`.
  *
  * The clock is INJECTED (`now`) so this class is pure and deterministic — it
  * never calls `Date.now()` itself.
@@ -65,7 +66,7 @@ export const OFFSET_SAMPLE_COUNT = 5;
 /** Samples with a round-trip time above this (ms) are discarded as unreliable. */
 export const MAX_ACCEPTABLE_RTT = 1000;
 
-/** Offset-variance threshold (ms^2-ish, per the server) below which sync is stable. */
+/** Offset-variance threshold (ms² — variance of ms; the server's constant is the unit-less 50) below which sync is stable. */
 export const STABILITY_VARIANCE_THRESHOLD = 50;
 
 /** Drift EMA smoothing factor (lower = smoother, slower to adapt). */
@@ -279,8 +280,8 @@ export class TimeSync {
   }
 
   /**
-   * True once at least OFFSET_SAMPLE_COUNT samples exist AND the variance of
-   * the recent offsets is below the stability threshold.
+   * True once at least OFFSET_SAMPLE_COUNT samples exist AND the population
+   * variance of the recent offsets is below the stability threshold (ms²).
    *
    * Memoized: returns the cached value unless the sample window has changed.
    */

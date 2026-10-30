@@ -140,7 +140,7 @@ const client = new SyncPlayClient({
   onMemberTyping: (memberId, isTyping) => {},
   onChat: (memberId, memberName, message, timestampMs) => { /* every accepted message, INCLUDING your own echo (fan-out includes the sender) — render chat from here only */ },
   onQueueChanged: (queue) => { /* wholesale queue replacement; also folded into getGroup().queue; [] = cleared */ },
-  onHostTransfer: (currentHostId, newHostId) => {},
+  onHostTransfer: (currentHostId, newHostId) => {}, /* defensive-only arm: zero live inbound producers — SPEC §3 types the frame client → server and the server/hub announce transfers via group_state/host_elect; build transfer UX on onState/onHostChanged */
   onPlaybackSync: (memberId, position, isPlaying, serverTime, nudge) => { /* `nudge` = server-directed S446 soft correction ({drift_ms, direction, suggested_rate, tolerance_ms, cooldown_ms}); undefined unless the `:8097` server unicasted it to THIS member — apply suggested_rate, never seek (SPEC §4) */ },
   onTimeSync: (state) => { /* { memberId, groupId, serverTimeSec, offsetMs, latencyMs, driftRate, isStable } */ },
   onGroupList: (groups) => { /* [{ id, name, member_count, has_password, current_media, is_playing }] — live producer row, SPEC §4 */ },
@@ -353,7 +353,8 @@ offset = t2 - t1 + rtt/2          // add to local time to get server time
 ```
 
 Offset is a low-RTT-weighted mean over the last 5 samples; sync is "stable" when
-≥5 samples and offset variance < 50ms; drift is an EMA with factor 0.1.
+≥5 samples and the population variance of recent offsets is < 50 (unit ms² —
+variance of ms; mirrors the server's unit-less 50); drift is an EMA with factor 0.1.
 
 ## Develop
 

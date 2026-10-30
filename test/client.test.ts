@@ -635,7 +635,7 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
     });
 
     // Server wire truth — copied field-for-field from
-    // phlix-server src/Session/SyncPlay/SyncPlayManager.php:1653-1659
+    // phlix-server src/Session/SyncPlay/SyncPlayManager.php:1650-1658
     // (handleTimeSync → Messages::frame). Seven fields, NO `client_time`;
     // `server_time` is UNIX seconds, `offset_ms`/`latency_ms` are ms.
     const serverFrame: TimeSyncPayload = {
@@ -1502,7 +1502,7 @@ describe('SyncPlayClient — handlePlaybackSync type coercion defaults', () => {
 
 describe('SyncPlayClient — handleTimeSync drops frames that miss the server shape', () => {
   const realFrame = {
-    // Server wire truth: phlix-server SyncPlayManager.php:1653-1659.
+    // Server wire truth: phlix-server SyncPlayManager.php:1650-1658.
     member_id: 'user-1',
     group_id: 'group-1',
     server_time: 1761900000,

@@ -166,7 +166,8 @@ describe('framing — decodeMessage', () => {
 });
 
 describe('TimeSyncPayload — server wire-shape pin (M-SYNCPLAY-03)', () => {
-  // Server wire truth: phlix-server src/Session/SyncPlay/SyncPlayManager.php:1653-1659
+  // Server wire truth: phlix-server src/Session/SyncPlay/SyncPlayManager.php:1650-1658
+  // (@ bc3b9b33; SPEC §1 item 6 — era-pinned cite, names are the durable anchors).
   // (handleTimeSync). This fixture is typed AS the interface, so any drift
   // between the model and the real emit site reddens `tsc` — and its key set
   // is pinned at runtime, so the never-emitted `client_time` of the old

@@ -406,7 +406,7 @@ export interface TimePongPayload {
 }
 /**
  * TIME_SYNC as the server emits it — SERVER WIRE TRUTH,
- * `phlix-server/src/Session/SyncPlay/SyncPlayManager.php:1653-1659`
+ * `phlix-server/src/Session/SyncPlay/SyncPlayManager.php:1650-1658`
  * (`handleTimeSync`, reply sent with `Messages::frame` over the requesting
  * connection). The previous model here was FABRICATED: it promised a
  * `client_time` the server has never emitted (the handler silently defaulted
