@@ -28,7 +28,8 @@
  * ## Algorithm
  *
  *   t1 = client send time      (client_time in the ping)
- *   t2 = server receive time   (server_time in the pong)
+ *   t2 = server receive time   (server_time in the pong; the server echoes the
+ *                               client's own t1 back on the pong as client_time)
  *   t3 = server response time  (== t2 in practice: the server replies in the
  *                               same handler with no measurable processing gap)
  *   t4 = client receive time

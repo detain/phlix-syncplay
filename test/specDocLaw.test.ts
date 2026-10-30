@@ -247,3 +247,49 @@ describe('README badge inventory matches real CI uploads (W-min122 M-SYNCPLAY-29
     expect(README).toMatch(/actions\/workflows\/ci\.yml\/badge\.svg/);
   });
 });
+
+describe('time-sync Algorithm header names the pong echo arm (W-min123 M-SYNCPLAY-06, review docmaint minor-4)', () => {
+  it('the t2 line states the server echoes the client t1 back as client_time', () => {
+    // Pre-fix the quad table said only "(server_time in the pong)", so a
+    // reader could not see where t1's echo leg lives — the very field
+    // handleTimePong's straggler guard matches on.
+    expect(TIMESYNC).toMatch(/server_time in the pong; the server echoes the/);
+    expect(TIMESYNC).toMatch(/client's own t1 back on the pong as client_time/);
+  });
+});
+
+describe('SPEC §5 owns the rtt<0 honesty note (W-min123 M-SYNCPLAY-10, review docmaint minor-8)', () => {
+  it('states the negative-rtt arm is client hardening the server reject omits', () => {
+    // The library rejects on BOTH bounds; TimeSync.php bounds rtt above only.
+    // §5 previously implied shared law without saying so (the drift-clamp
+    // honesty-note idiom this vein established was missing here).
+    expect(SPEC).toMatch(/The `rtt < 0`\s+arm is client-side hardening that the server's own rejection in/);
+    expect(SPEC).toMatch(/never from an honest measurement/);
+  });
+});
+
+describe('SPEC internal anchors point at real sections (W-min123 M-SYNCPLAY-21, review writer MIN-1)', () => {
+  it('the §2 source-of-truth law cites §7 divergences, not §6', () => {
+    expect(SPEC).toContain('not invent their own (see §7 divergences)');
+    expect(SPEC).not.toMatch(/§6 divergences/);
+  });
+
+  it('the §9.1 echo-suppression caveat cites §9 item 3, not a phantom Step B6', () => {
+    expect(SPEC).not.toMatch(/Step B6/);
+    expect(SPEC).toMatch(/see also the host-recompute flow,\nwhich trusts the same server-set ids \(§9 item 3\)/);
+  });
+});
+
+describe('SPEC §10.1 + code agree on ping pacing (W-min123 M-SYNCPLAY-12/-13, reviews gameux m1/m2)', () => {
+  it('§10.1 carries the single-flight pacing paragraph', () => {
+    expect(SPEC).toMatch(/Pacing while connected is likewise client law/);
+    expect(SPEC).toMatch(/with a ping outstanding MUST be ignored/);
+  });
+
+  it('client.ts implements both cures behind named M-SYNCPLAY markers', () => {
+    expect(CLIENT).toMatch(/M-SYNCPLAY-12 \(parse-don't-validate\)/);
+    expect(CLIENT).toMatch(/M-SYNCPLAY-13 \(single-flight\)/);
+    // The slot release must precede the server_time gate (no-wedge law).
+    expect(CLIENT).toMatch(/const t1 = echoed \?\? outstanding;[\s\S]*?this\.lastPingSendTime = null;[\s\S]*?const t2 = typeof pong\.server_time/);
+  });
+});

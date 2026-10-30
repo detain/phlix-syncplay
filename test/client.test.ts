@@ -1431,7 +1431,7 @@ describe('SyncPlayClient — handleSeek self-echo suppression', () => {
 });
 
 describe('SyncPlayClient — handlePlaybackSync type coercion defaults', () => {
-  it('uses default position when not a number (line 505)', () => {
+  it('drops a playback_sync whose position is not a number (W-min123 M-SYNCPLAY-12)', () => {
     const syncs: Array<{ memberId: string; position: number; isPlaying: boolean; serverTime: number }> = [];
     const client = new SyncPlayClient({
       send: () => {},
@@ -1450,7 +1450,9 @@ describe('SyncPlayClient — handlePlaybackSync type coercion defaults', () => {
       server_time: 12345,
     });
 
-    expect(syncs[0].position).toBe(0); // default
+    // M-SYNCPLAY-12: pre-fix this defaulted to position 0 — a fabricated
+    // re-anchor to 00:00 from a frame no server emits. The boundary refuses it.
+    expect(syncs).toHaveLength(0);
   });
 
   it('uses default is_playing when not a boolean (line 506)', () => {
@@ -1497,6 +1499,170 @@ describe('SyncPlayClient — handlePlaybackSync type coercion defaults', () => {
     // Should use getSynchronizedTime() as default
     expect(typeof syncs[0].serverTime).toBe('number');
     expect(syncs[0].serverTime).toBe(5000); // synchronized time with no offset
+  });
+});
+
+describe('SyncPlayClient — malformed position drops (W-min123 M-SYNCPLAY-12, review gameux m1)', () => {
+  // Companion to the two flipped coercion tests: the parse-don't-validate
+  // boundary now refuses every malformed `position` shape across the three
+  // position-carrying frame types — missing key, NaN, numeric string, and
+  // overflowed non-finite (1e999 lands as Infinity through JSON.parse).
+  // A genuine 0 must still flow: the guard is type/presence, not truthiness.
+
+  it('drops a play frame with a missing position instead of jumping the group to 00:00', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY,
+      protocol_version: 1,
+      member_id: 'host1',
+      server_time: 123,
+    });
+    expect(h.commands).toHaveLength(0);
+  });
+
+  it('drops a pause frame whose position is NaN', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PAUSE,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: Number.NaN,
+      server_time: 123,
+    });
+    expect(h.commands).toHaveLength(0);
+  });
+
+  it('drops a seek whose to_position is a numeric string', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+      protocol_version: 1,
+      member_id: 'host1',
+      from_position: 1000,
+      to_position: '5000',
+      server_time: 123,
+    });
+    expect(h.commands).toHaveLength(0);
+  });
+
+  it('drops a non-finite seek position (1e999 → Infinity)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+      protocol_version: 1,
+      member_id: 'host1',
+      from_position: 1000,
+      to_position: Number.POSITIVE_INFINITY, // what a JSON `1e999` decodes to
+      server_time: 123,
+    });
+    expect(h.commands).toHaveLength(0);
+  });
+
+  it('drops a playback_sync whose position is NaN', () => {
+    const h = makeHarness();
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: Number.NaN,
+      is_playing: true,
+      server_time: 12345,
+    });
+    expect(h.syncs).toHaveLength(0);
+  });
+
+  it('still delivers position 0 — a genuine 00:00 is a legal value (control)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY,
+      protocol_version: 1,
+      member_id: 'host1',
+      position: 0,
+      server_time: 123,
+    });
+    expect(h.commands).toHaveLength(1);
+    expect(h.commands[0].type).toBe('play');
+    expect(h.commands[0].position).toBe(0);
+  });
+});
+
+describe('SyncPlayClient — pingTime single-flight (W-min123 M-SYNCPLAY-13, review gameux m2)', () => {
+  const pings = (sent: RawMessage[]) => sent.filter((m) => m.type === SYNCPLAY_MESSAGE_TYPES.TIME_PING);
+  function pong(echo: number | undefined, serverTime: number | undefined): RawMessage {
+    return {
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      ...(echo === undefined ? {} : { client_time: echo }),
+      ...(serverTime === undefined ? {} : { server_time: serverTime }),
+    };
+  }
+
+  it('ignores a second pingTime while one is outstanding', () => {
+    const h = makeHarness();
+    h.clock.set(1000);
+    h.client.pingTime();
+    h.clock.set(1010);
+    h.client.pingTime();
+    expect(pings(h.sent)).toHaveLength(1);
+  });
+
+  it('a matched pong releases the slot for the next round', () => {
+    const h = makeHarness();
+    h.clock.set(1000);
+    h.client.pingTime();
+    h.clock.set(1001);
+    h.client.handleIncoming(pong(1000, 1100));
+    h.clock.set(1050);
+    h.client.pingTime();
+    const rounds = pings(h.sent);
+    expect(rounds).toHaveLength(2);
+    expect(rounds[1].client_time).toBe(1050);
+  });
+
+  it('a consumed pong that omits server_time still releases the slot', () => {
+    const h = makeHarness();
+    h.clock.set(1000);
+    h.client.pingTime();
+    h.clock.set(1001);
+    h.client.handleIncoming(pong(1000, undefined)); // the round completed; no sample possible
+    expect(h.syncs).toHaveLength(0);
+    h.clock.set(1050);
+    h.client.pingTime();
+    expect(pings(h.sent)).toHaveLength(2);
+  });
+
+  it('a mismatched straggler does not release the outstanding slot', () => {
+    const h = makeHarness();
+    h.clock.set(1000);
+    h.client.pingTime();
+    h.clock.set(1001);
+    h.client.handleIncoming(pong(999, 1100)); // belongs to a different round — refused, slot kept
+    h.clock.set(1050);
+    h.client.pingTime();
+    expect(pings(h.sent)).toHaveLength(1);
+    h.clock.set(1051);
+    h.client.handleIncoming(pong(1000, 1100));
+    expect(h.syncs).toHaveLength(1);
+    h.clock.set(1052);
+    h.client.pingTime(); // freed by the matched pong
+    expect(pings(h.sent)).toHaveLength(2);
+  });
+
+  it('an unanswered ping ages out at MAX_ACCEPTABLE_RTT and the next call re-pings', () => {
+    const h = makeHarness();
+    h.clock.set(1000);
+    h.client.pingTime();
+    h.clock.set(2000); // exactly MAX_ACCEPTABLE_RTT (1000) old — still in flight
+    h.client.pingTime();
+    expect(pings(h.sent)).toHaveLength(1);
+    h.clock.set(2001); // one ms past: its pong could only be rtt-rejected → re-ping
+    h.client.pingTime();
+    expect(pings(h.sent)).toHaveLength(2);
   });
 });
 
@@ -1748,8 +1914,8 @@ describe('SyncPlayClient — handleHostTransfer branches', () => {
   });
 });
 
-describe('SyncPlayClient — handleSeek type coercion defaults', () => {
-  it('uses default position and server_time when types are wrong (lines 447-449)', () => {
+describe('SyncPlayClient — handleSeek refuses a malformed to_position (W-min123 M-SYNCPLAY-12)', () => {
+  it('drops the seek instead of defaulting position to 0', () => {
     const h = makeHarness();
     h.client.handleIncoming(groupStateMessage('host1', 'me'));
 
@@ -1762,10 +1928,9 @@ describe('SyncPlayClient — handleSeek type coercion defaults', () => {
       server_time: { value: 123 }, // wrong type
     });
 
-    expect(h.commands).toHaveLength(1);
-    expect(h.commands[0].type).toBe('seek');
-    expect(h.commands[0].position).toBe(0); // default
-    expect(typeof h.commands[0].serverTime).toBe('number'); // synchronized time default
+    // Pre-fix this emitted { type: 'seek', position: 0, ... } — rewinding the
+    // group to 00:00 on a frame with no honest producer.
+    expect(h.commands).toHaveLength(0);
   });
 });
 

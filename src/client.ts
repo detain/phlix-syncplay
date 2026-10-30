@@ -55,7 +55,7 @@ import {
   type TypingPayload,
   type UnknownFrame,
 } from './messages';
-import { TimeSync } from './time-sync';
+import { MAX_ACCEPTABLE_RTT, TimeSync } from './time-sync';
 
 /** A play/pause/seek command surfaced to the consumer for local application. */
 export interface PlaybackCommand {
@@ -692,9 +692,26 @@ export class SyncPlayClient {
 
   // --- Time sync -----------------------------------------------------------
 
-  /** Send a time_ping. Call periodically (e.g. every 10–30s). */
+  /**
+   * Send a time_ping. Call periodically (e.g. every 10–30s).
+   *
+   * M-SYNCPLAY-13 (single-flight): a round is in flight exactly while
+   * `lastPingSendTime` is set, and {@link handleTimePong} can only attribute a
+   * pong to that ONE recorded send time — stacked pings from a burst would
+   * arrive as echoes that mismatch the current slot and get refused, starving
+   * the estimator. So a call with a ping outstanding is ignored, with one
+   * escape: an unanswered ping older than `MAX_ACCEPTABLE_RTT` could never
+   * seed a sample even if its pong still landed (the sample would be rejected
+   * on `rtt`), so it is treated as lost and the next call re-pings. A lost
+   * pong can therefore never wedge time sync forever; `onDisconnect()` also
+   * clears the slot immediately (SPEC §10.1 item 3).
+   */
   pingTime(): void {
     const t1 = this.now();
+    const outstanding = this.lastPingSendTime;
+    if (outstanding !== null && t1 - outstanding <= MAX_ACCEPTABLE_RTT) {
+      return;
+    }
     this.lastPingSendTime = t1;
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.TIME_PING, { client_time: t1 });
   }
@@ -846,6 +863,12 @@ export class SyncPlayClient {
     // Prefer the matched echo; otherwise fall back to our recorded send time
     // (the pre-echo shape this library's own callers may emit).
     const t1 = echoed ?? outstanding;
+    // M-SYNCPLAY-13: the round is consumed the moment its pong matched, so the
+    // single-flight slot releases HERE — before the t2 gate below. A pong that
+    // answers our ping but omits `server_time` still completes the round trip;
+    // holding the slot through that early return would stall pacing until the
+    // aging escape in {@link pingTime}.
+    this.lastPingSendTime = null;
     const t2 = typeof pong.server_time === 'number' ? pong.server_time : null;
 
     if (t2 === null) {
@@ -854,7 +877,6 @@ export class SyncPlayClient {
 
     // The server pong has no separate response timestamp: t3 == t2.
     const accepted = this.timeSync.addSample(t1, t2, t2, t4);
-    this.lastPingSendTime = null;
 
     if (accepted) {
       this.options.onSync?.({
@@ -1066,7 +1088,16 @@ export class SyncPlayClient {
     if (senderId === this.memberId) {
       return;
     }
-    const position = typeof msg.position === 'number' ? msg.position : 0;
+    // M-SYNCPLAY-12 (parse-don't-validate): a frame without a finite numeric
+    // `position` has NO honest producer — both live servers always stamp a
+    // number — so it is malformed. Pre-fix it defaulted to 0 and emitted a
+    // concrete jump-to-00:00 command the whole group obeys; the boundary now
+    // refuses the frame instead. (A real 0 is finite and passes: this is a
+    // type/presence check, not a truthiness check.)
+    if (typeof msg.position !== 'number' || !Number.isFinite(msg.position)) {
+      return;
+    }
+    const position = msg.position;
     const serverTime =
       typeof msg.server_time === 'number'
         ? SyncPlayClient.serverTimeToMs(msg.server_time)
@@ -1083,7 +1114,13 @@ export class SyncPlayClient {
     if (senderId === this.memberId) {
       return;
     }
-    const position = typeof msg.to_position === 'number' ? msg.to_position : 0;
+    // M-SYNCPLAY-12: malformed seek positions (missing / non-numeric /
+    // non-finite) drop the frame — same law as handlePlayback; defaulting to
+    // 0 rewound the group to 00:00 on a frame no server would ever emit.
+    if (typeof msg.to_position !== 'number' || !Number.isFinite(msg.to_position)) {
+      return;
+    }
+    const position = msg.to_position;
     const serverTime =
       typeof msg.server_time === 'number'
         ? SyncPlayClient.serverTimeToMs(msg.server_time)
@@ -1196,7 +1233,15 @@ export class SyncPlayClient {
     // frame is the ONLY re-anchor source. Consuming our own playback_sync is
     // therefore required. COMMAND frames keep the self-echo drop (see
     // handlePlayback/handleSeek — acting on our own commands would loop).
-    const position = typeof msg.position === 'number' ? msg.position : 0;
+    // M-SYNCPLAY-12: even a STATE REPORT needs a finite numeric position to be
+    // worth re-anchoring on — with a malformed one there is nothing to
+    // re-anchor to, and defaulting 0 would soft-seek every consumer away from
+    // where the reporter actually is. Drop the frame; the is_playing and
+    // server_time fallbacks below stay (those defaults are truthful).
+    if (typeof msg.position !== 'number' || !Number.isFinite(msg.position)) {
+      return;
+    }
+    const position = msg.position;
     const isPlaying = typeof msg.is_playing === 'boolean' ? msg.is_playing : false;
     // Carrier unit normalization (M-SYNCPLAY-04): the `:8097` echo arrives in
     // UNIX seconds, the hub echo in ms — consumers get ms either way.

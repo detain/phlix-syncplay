@@ -4,6 +4,57 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **W-min123 minors cluster (syncplay minors vein; review IDs
+  `M-SYNCPLAY-06/-10/-12/-13/-21` cured).**
+  - **M-SYNCPLAY-06 (`syncplay__docmaint` minor-4, docs):** the
+    `TimeSync` Algorithm header now names the pong's echo arm — the t2
+    line reads "(server_time in the pong; the server echoes the client's
+    own t1 back on the pong as client_time)". Pre-fix the quad table
+    documented only the pong's server stamp, hiding where t1 returns —
+    the very field `handleTimePong`'s straggler guard matches on.
+    (`framing.ts` carries no t1/t2 header; nothing to mirror there.)
+  - **M-SYNCPLAY-10 (`syncplay__docmaint` minor-8, docs):** SPEC §5's
+    reject bullet states the honesty it implied: the `rtt < 0` arm is
+    client-side hardening the server's own `TimeSync.php` rejection
+    omits (it bounds `rtt` above only), justified — a negative round
+    trip arises solely from a corrupt/forged echo or a rewound clock,
+    never an honest measurement.
+  - **M-SYNCPLAY-12 (`syncplay__gameux` m1):** malformed playback
+    positions are refused at the boundary instead of defaulted.
+    `handlePlayback`, `handleSeek` and `handlePlaybackSync` previously
+    coerced a missing/non-numeric `position` (resp. `to_position`) to 0
+    and emitted a concrete jump-to-00:00 command (or fabricated
+    re-anchor) the whole group obeys — no honest producer emits that
+    shape, both live servers always stamp a finite number. The guards
+    also refuse non-finite values (`Number.isFinite`), which the old
+    ternaries silently passed through (`typeof Infinity === 'number'`).
+    A genuine 0 still flows (type/presence check, not truthiness); the
+    truthful `server_time`/`is_playing` fallbacks are untouched. The
+    two coercion "defaults" law-tests flipped to the new drop law.
+  - **M-SYNCPLAY-13 (`syncplay__gameux` m2):** `pingTime()` is
+    single-flight. Stacked pings previously made every later echo
+    mismatch the one recorded send time, so the refused stragglers
+    starved the estimator; a call with a ping outstanding is now
+    ignored, with an aging escape at `MAX_ACCEPTABLE_RTT` (an
+    unanswered ping that old could only produce an rtt-rejected
+    sample, so it is treated as lost — a dropped pong can never wedge
+    sync forever). The slot now also releases the moment a pong
+    matches, before the `server_time` gate, so a consumed round
+    without a usable t2 cannot stall pacing. SPEC §10.1 carries the
+    pacing paragraph; `onDisconnect()` slot-clearing (§10.1 item 3)
+    unchanged.
+  - **M-SYNCPLAY-21 (`syncplay__writer` MIN-1, docs):** two dead
+    internal anchors repaired — §2's source-of-truth law cited
+    "§6 divergences" (divergences live in §7), and the §9.1
+    echo-suppression caveat cited a "Step B6 (host recompute)" that
+    exists nowhere in the document; it now cites the §9 item 3
+    server-set id law the host-recompute flow actually trusts.
+  - Docs-law pins + 17 tests added; 15 pins red-on-parent at
+    `b380481` (the three greens are post-cure behavior controls:
+    position-0 control and the two slot-release paths, trivially green
+    where no flight gate existed). vitest 263 (--no-file-parallelism,
+    12 files), typecheck/lint 0, dist rebuilt deterministic ×2
+    (aggregate md5 `bbca729e1ac84584a0b0f015a8b27a02`).
 - **W-min122 minors cluster (syncplay minors vein; review IDs
   `M-SYNCPLAY-22/-29` cured, `-09` stale-verified).**
   - **M-SYNCPLAY-22 (`syncplay__writer` MIN-2, docs):** SPEC keeps its

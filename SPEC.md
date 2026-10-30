@@ -29,7 +29,7 @@ The authoritative implementation is the PHP server:
 4. **`protocol_version` is `1`** and is included on every message.
 
 5. **The server is the source of truth.** Clients MUST follow the shapes the
-   server actually emits, not invent their own (see §6 divergences).
+   server actually emits, not invent their own (see §7 divergences).
 
 6. **Server/hub coordinates are era-pinned snapshots.** Line numbers cited
    for `phlix-server` / `phlix-hub` drift with every server commit; an
@@ -558,7 +558,12 @@ the drift `timeDelta` matches the server's per-second `microtime(true)` scale.
 That `/ 1000` is the units bridge and is correct only because `now()` is ms —
 do not inject a seconds clock.
 
-- Reject the sample if `rtt < 0` or `rtt > MAX_ACCEPTABLE_RTT`.
+- Reject the sample if `rtt < 0` or `rtt > MAX_ACCEPTABLE_RTT`. The `rtt < 0`
+  arm is client-side hardening that the server's own rejection in
+  `TimeSync.php` omits (it bounds `rtt` above only): a negative round trip
+  arises solely from a corrupt or forged echo, or a rewound local clock —
+  never from an honest measurement — and a local estimator's law is to drop
+  impossible samples, not average them in.
 - Keep a rolling buffer of up to `2 * OFFSET_SAMPLE_COUNT` samples.
 - **Offset** = weighted mean over the last `OFFSET_SAMPLE_COUNT` samples,
   weight `= 1 / max(1, rtt)` (favours low-RTT samples), i.e. exactly
@@ -826,8 +831,8 @@ If the server failed to overwrite the sender id, a malicious peer could spoof
 drop it (a denial-of-action). The client cannot defend against this on its own —
 it is acceptable **only** under the §9 contract that the server replaces the
 sender id with the authenticated one before rebroadcast. This caveat is the
-reason the suppression key is `member_id`; see also Step B6 (host recompute),
-which trusts the same server-set ids.
+reason the suppression key is `member_id`; see also the host-recompute flow,
+which trusts the same server-set ids (§9 item 3).
 
 Send **pacing** is likewise client behavior, not wire shape:
 `@phlix/syncplay` coalesces key-repeat seek bursts into at most one
@@ -889,6 +894,14 @@ become stale and MUST be discarded before reconnecting:
    `syncplay_group_state` arrives.
 3. **The outstanding ping** — a late `time_pong` from the dead connection MUST
    NOT seed a sample, so the recorded send time (`lastPingSendTime`) is dropped.
+
+Pacing while connected is likewise client law, not wire shape: `pingTime()`
+with a ping outstanding MUST be ignored — a pong can only be attributed to the
+one recorded send time, so stacked pings would return as mismatched echoes the
+estimator refuses. An unanswered ping older than `MAX_ACCEPTABLE_RTT` can never
+seed a sample (any such sample would itself be rejected on `rtt`), so it is
+treated as lost and the next call may re-ping; a matched pong frees the slot
+even when it omits `server_time`.
 
 ### 10.2 Required recovery sequence
 

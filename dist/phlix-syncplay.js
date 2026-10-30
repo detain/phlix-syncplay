@@ -294,8 +294,8 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		});
 	}
 	pingTime() {
-		let t = this.now();
-		this.lastPingSendTime = t, this.dispatch(e.TIME_PING, { client_time: t });
+		let t = this.now(), n = this.lastPingSendTime;
+		n !== null && t - n <= 1e3 || (this.lastPingSendTime = t, this.dispatch(e.TIME_PING, { client_time: t }));
 	}
 	onDisconnect() {
 		this.cancelSeekCoalescing(), this.timeSync.reset(), this.group = null, this.lastPingSendTime = null, this.options.onDisconnect?.();
@@ -356,10 +356,10 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		if (t === null) return;
 		let n = e, r = typeof n.client_time == "number" ? n.client_time : null;
 		if (r !== null && r !== t) return;
-		let i = this.now(), a = r ?? t, o = typeof n.server_time == "number" ? n.server_time : null;
-		if (o === null) return;
-		let s = this.timeSync.addSample(a, o, o, i);
-		this.lastPingSendTime = null, s && this.options.onSync?.({
+		let i = this.now(), a = r ?? t;
+		this.lastPingSendTime = null;
+		let o = typeof n.server_time == "number" ? n.server_time : null;
+		o !== null && this.timeSync.addSample(a, o, o, i) && this.options.onSync?.({
 			offset: this.timeSync.getOffset(),
 			latency: this.timeSync.getLatency(),
 			isStable: this.timeSync.isStable()
@@ -430,8 +430,8 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		}, this.options.onState?.(this.group, n.your_id);
 	}
 	handlePlayback(e, n) {
-		if ((typeof n.member_id == "string" ? n.member_id : void 0) === this.memberId) return;
-		let r = typeof n.position == "number" ? n.position : 0, i = typeof n.server_time == "number" ? t.serverTimeToMs(n.server_time) : this.getSynchronizedTime();
+		if ((typeof n.member_id == "string" ? n.member_id : void 0) === this.memberId || typeof n.position != "number" || !Number.isFinite(n.position)) return;
+		let r = n.position, i = typeof n.server_time == "number" ? t.serverTimeToMs(n.server_time) : this.getSynchronizedTime();
 		this.options.onPlaybackCommand?.({
 			type: e,
 			position: r,
@@ -439,8 +439,8 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		});
 	}
 	handleSeek(e) {
-		if ((typeof e.member_id == "string" ? e.member_id : void 0) === this.memberId) return;
-		let n = typeof e.to_position == "number" ? e.to_position : 0, r = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime();
+		if ((typeof e.member_id == "string" ? e.member_id : void 0) === this.memberId || typeof e.to_position != "number" || !Number.isFinite(e.to_position)) return;
+		let n = e.to_position, r = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime();
 		this.options.onPlaybackCommand?.({
 			type: "seek",
 			position: n,
@@ -484,7 +484,9 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		typeof n.current_host_id == "string" && typeof n.new_host_id == "string" && (this.group !== null && (this.group = t.foldHostId(this.group, n.new_host_id)), this.options.onHostTransfer?.(n.current_host_id, n.new_host_id));
 	}
 	handlePlaybackSync(e) {
-		let n = typeof e.member_id == "string" ? e.member_id : void 0, r = typeof e.position == "number" ? e.position : 0, i = typeof e.is_playing == "boolean" && e.is_playing, a = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime(), o = t.normalizeNudge(e.nudge);
+		let n = typeof e.member_id == "string" ? e.member_id : void 0;
+		if (typeof e.position != "number" || !Number.isFinite(e.position)) return;
+		let r = e.position, i = typeof e.is_playing == "boolean" && e.is_playing, a = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime(), o = t.normalizeNudge(e.nudge);
 		this.options.onPlaybackSync?.(n ?? "", r, i, a, o);
 	}
 	handleTimeSync(e) {

@@ -440,7 +440,20 @@ export declare class SyncPlayClient {
      * view).
      */
     sendTyping(isTyping: boolean): void;
-    /** Send a time_ping. Call periodically (e.g. every 10–30s). */
+    /**
+     * Send a time_ping. Call periodically (e.g. every 10–30s).
+     *
+     * M-SYNCPLAY-13 (single-flight): a round is in flight exactly while
+     * `lastPingSendTime` is set, and {@link handleTimePong} can only attribute a
+     * pong to that ONE recorded send time — stacked pings from a burst would
+     * arrive as echoes that mismatch the current slot and get refused, starving
+     * the estimator. So a call with a ping outstanding is ignored, with one
+     * escape: an unanswered ping older than `MAX_ACCEPTABLE_RTT` could never
+     * seed a sample even if its pong still landed (the sample would be rejected
+     * on `rtt`), so it is treated as lost and the next call re-pings. A lost
+     * pong can therefore never wedge time sync forever; `onDisconnect()` also
+     * clears the slot immediately (SPEC §10.1 item 3).
+     */
     pingTime(): void;
     /**
      * Reset all transient connection state. The consumer MUST call this when the
