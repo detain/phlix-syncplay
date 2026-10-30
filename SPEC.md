@@ -93,6 +93,11 @@ Every message — inbound or outbound — is a single flat JSON object:
 `decodeMessage(raw)` parses it and, for backward compatibility only, unwraps the
 deprecated `{ type, data, timestamp }` Tizen envelope into the flat form.
 
+Terminology: the wire object for a synced session is a **group** —
+`syncplay_group_*` types, `group_id`/`group_name` fields (§3, §4). The hub's
+legacy bare-room dialect on `:8804` (§8.4) calls the same object a **room**;
+this document uses *room* only where it names that hub dialect.
+
 ---
 
 ## 3. Message types (all 19)
@@ -285,12 +290,12 @@ count: number                      (integer, === groups.length on both producers
 > summary spelling (like the REST listing rows); the `group_id`/`group_name`
 > spelling belongs ONLY to the nested `group_state.group` block above.
 
-The server's `syncplay_group_list` reply is scoped per requester: rooms the
-requester is a member of, plus every room when the requester is an active
+The server's `syncplay_group_list` reply is scoped per requester: groups the
+requester is a member of, plus every group when the requester is an active
 admin (MED-2 owner ruling 2026-10-02 — visibility is members-or-admin; joining
 by known id + password is unaffected, the reply shape is unchanged). The same
 ruling gates the REST reads `GET /api/v1/syncplay/groups` and
-`GET /api/v1/syncplay/groups/{id}` (a non-member's read of a foreign room is
+`GET /api/v1/syncplay/groups/{id}` (a non-member's read of a foreign group is
 an existence-agnostic 404).
 
 ### Playback control (play/pause/seek/queue host-only on the server, non-hosts get a `NOT_HOST` error; `syncplay_playback_sync` is the member-permitted state report — §9 item 2)
@@ -813,7 +818,7 @@ true sender id on rebroadcast (§9 item 3)**.
 not a command — the server broadcasts it to EVERY member including the sender,
 stamped with the HOST id (it excludes nobody for this type, unlike play/pause/
 seek). The host MUST therefore consume its own echoed `playback_sync`: in a
-one-member room that frame is the only re-anchor source. Self-echo suppression
+one-member group that frame is the only re-anchor source. Self-echo suppression
 applies to COMMAND frames only (`syncplay_playback_play` / `_pause` / `_seek`).
 
 If the server failed to overwrite the sender id, a malicious peer could spoof

@@ -223,3 +223,27 @@ describe('typing doc-comment names a real constant (W-min121 M-SYNCPLAY-30, revi
     expect(CLIENT).not.toMatch(/\(TYPE_CHAT_TYPING \/ syncplay_typing\)/);
   });
 });
+
+describe('SPEC group/room terminology discipline (W-min122 M-SYNCPLAY-22, review writer MIN-2)', () => {
+  it('normative prose names the server object `group`; `room` survives only as hub dialect', () => {
+    // Pre-fix the doc ran three words for one object: the §4 group_list scope
+    // prose and the §9.1 S294 exception said "room" for the SERVER's group,
+    // outside the §8.4 hub bare-room dialect that legitimately owns the word.
+    expect(SPEC).not.toMatch(/one-member room/);
+    expect(SPEC).not.toMatch(/foreign room/);
+    expect(SPEC).not.toMatch(/rooms the\s+requester/);
+    expect(SPEC).toMatch(/the wire object for a synced session is a \*\*group\*\*/);
+    // The hub's legacy dialect keeps its name where it is the subject:
+    expect(SPEC).toMatch(/Room-vocabulary dialect on `:8804`/);
+  });
+});
+
+describe('README badge inventory matches real CI uploads (W-min122 M-SYNCPLAY-29, review writer MIN-10)', () => {
+  it('carries no codecov badge — coverage uploads to Codacy only', () => {
+    // ci.yml:31-41 (`.github/workflows/ci.yml`) uses
+    // codacy/codacy-coverage-reporter-action and there is no codecov step
+    // anywhere, so the graph badge pointed at a permanently-gray service.
+    expect(README).not.toMatch(/codecov\.io/);
+    expect(README).toMatch(/actions\/workflows\/ci\.yml\/badge\.svg/);
+  });
+});

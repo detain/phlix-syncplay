@@ -4,6 +4,30 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **W-min122 minors cluster (syncplay minors vein; review IDs
+  `M-SYNCPLAY-22/-29` cured, `-09` stale-verified).**
+  - **M-SYNCPLAY-22 (`syncplay__writer` MIN-2, docs):** SPEC keeps its
+    terminology split honest. Normative prose now names the server object
+    by its wire name, **`group`** — the §4 `syncplay_group_list` scope
+    sentence ("rooms the requester is a member of … a foreign room") and
+    the §9.1 S294 exception ("one-member room") read groups; *room*
+    survives only as the hub's dialect name (§8.4's
+    "room lane"/"rooms are shadow-scoped" uses untouched). §2 gained the
+    first-use definition: the wire object is a `group`, the hub's legacy
+    bare-room dialect calls it a `room`. The package.json keyword
+    `watch-party` stands — product branding, which the owner's open
+    room-vs-watch-group ruling targets; this pass only aligned
+    wire-naming prose. Docs-law pin red-on-parent.
+  - **M-SYNCPLAY-29 (`syncplay__writer` MIN-10, docs):** README dropped
+    its codecov badge — no CI step uploads to codecov (coverage ships via
+    the `codacy/codacy-coverage-reporter-action` step,
+    `.github/workflows/ci.yml:31-41`), so the badge pointed at a
+    permanently-gray service. Docs-law pin red-on-parent.
+  - **Stale-verified (no re-cure):** M-SYNCPLAY-09 — the CHANGELOG
+    `## [0.1.5] - 2026-09-14` heading landed with W-min119's surgery
+    (`6098ed2` — ancestor); post-tag commits correctly stay under
+    [Unreleased] per W-min119's forward note (the reviewer's
+    "move everything below [0.1.5]" premise was chronologically wrong).
 - **W-min121 minors cluster (syncplay minors vein; review IDs
   `M-SYNCPLAY-02/-08/-23/-30` cured, `-04/-20/-31` stale-verified).**
   - **M-SYNCPLAY-02 (`syncplay__crossfe` m2, behavior):** `decodeMessage`
