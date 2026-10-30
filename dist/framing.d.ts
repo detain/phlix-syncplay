@@ -17,7 +17,12 @@
  * DEPRECATED: the Tizen client wraps sends as `{ type, data, timestamp }`,
  * nesting all fields under `data`. The server does NOT read `data`, so those
  * messages silently fail. That wrapper is deprecated and MUST NOT be used.
- * `decodeMessage` tolerates and unwraps it for backward compatibility only.
+ * `decodeMessage` tolerates and unwraps it for backward compatibility ONLY
+ * while the envelope lacks `protocol_version`: canonical frames always stamp
+ * `protocol_version` (§1 item 4 of SPEC.md; the server's `Messages::frame`
+ * stamps it literally), so for a frame carrying it, `data` is a legitimate
+ * TOP-LEVEL payload field (e.g. `syncplay_info`, `Messages::info()`) and
+ * survives decode UNTOUCHED (M-SYNCPLAY-02).
  */
 import { type RawMessage, type SyncPlayMessageType } from './messages';
 /**
@@ -46,9 +51,15 @@ export declare function encodeMessage(type: SyncPlayMessageType, payload: Record
  * Decode an inbound message into a flat RawMessage.
  *
  * Accepts either a JSON string or an already-parsed object. Tolerates (and
- * unwraps) the deprecated Tizen `{ type, data, timestamp }` envelope: if a
- * `data` object is present alongside `type`, its fields are hoisted to the top
- * level so downstream routing always sees a flat message.
+ * unwraps) the deprecated Tizen `{ type, data, timestamp }` envelope ONLY when
+ * the frame lacks a `protocol_version`: that wrapper never carries one, whereas
+ * every canonical message does (§1 item 4), so a frame with `protocol_version`
+ * is NOT the wrapper and its `data` — if present — is a legitimate top-level
+ * payload field that must survive decode untouched. Pre-M-SYNCPLAY-02 the
+ * heuristic keyed only on "an object `data` sits beside `type`", which
+ * destructively hoisted-and-deleted `data` on canonical frames that legitimately
+ * carry it (e.g. `syncplay_info`) and broke the "no mutation" promise that
+ * `onUnknownFrame` makes to non-SyncPlay consumers.
  *
  * Returns `null` for anything that is not a JSON object carrying a string
  * `type`.

@@ -176,3 +176,50 @@ describe('README backoff recipe (W-min119 M-SYNCPLAY-11, review docmaint minor 9
     expect(README).toMatch(/load-bearing/);
   });
 });
+
+describe('framing deprecated-envelope gate (W-min121 M-SYNCPLAY-02, review crossfe m2)', () => {
+  it('framing.ts states the unwrap fires ONLY while the envelope lacks protocol_version', () => {
+    const FRAMING = readFileSync(fileURLToPath(new URL('../src/framing.ts', import.meta.url)), 'utf8');
+    expect(FRAMING).toMatch(/backward compatibility ONLY[\s\S]{0,8}?while the envelope lacks `protocol_version`/);
+    // The runtime gate itself: the unwrap arm is guarded by the protocol_version test.
+    expect(FRAMING).toMatch(/!\('protocol_version' in record\)/);
+  });
+});
+
+describe('SPEC §4 host_elect group_id annotation (W-min121 M-SYNCPLAY-08, review docmaint minor 6 / writer MIN-5)', () => {
+  it('annotates group_id as the legacy factory field the live broadcasts omit', () => {
+    expect(SPEC).toMatch(/group_id\?: string\s+\(legacy `Messages::hostElect` factory ONLY/);
+    expect(SPEC).toMatch(/the live\s*\n?\s*\*?\s*\n?.*broadcasts on BOTH carriers omit it/);
+  });
+
+  it('HostElectPayload carries the SPEC-documented optional group_id', () => {
+    expect(MESSAGES).toMatch(/export interface HostElectPayload \{\s*\n\s*\/\*\*[\s\S]*?\*\/\s*\n\s*group_id\?: string;/);
+  });
+});
+
+describe('normative keyword discipline (W-min121 M-SYNCPLAY-23, review writer MIN-3)', () => {
+  it('§1 declares an RFC 2119 keyword-discipline law', () => {
+    expect(SPEC).toMatch(/\*\*Keyword discipline\.\*\* Uppercase `MUST`/);
+    expect(SPEC).toMatch(/carry their RFC 2119 meanings/);
+  });
+
+  it('the load-bearing normative lines are uppercased (source-of-truth, RTT derivation)', () => {
+    expect(SPEC).toMatch(/Clients MUST follow the shapes/);
+    expect(SPEC).toMatch(/The client MUST derive RTT from t1 and t4 only/);
+    expect(SPEC).toMatch(/MUST NOT be added to new\s*\n?code paths/);
+  });
+
+  it('the error-field fallback is spoken in MUST voice (split emitters)', () => {
+    expect(SPEC).toMatch(/Clients MUST read `error_code` first, then fall back to `code`/);
+  });
+});
+
+describe('typing doc-comment names a real constant (W-min121 M-SYNCPLAY-30, review writer MIN-11)', () => {
+  it('client.ts references the TS `TYPING` enum member, not the phantom TYPE_CHAT_TYPING as the client name', () => {
+    // Pre-fix the option docblock read "(TYPE_CHAT_TYPING / syncplay_typing)" —
+    // TYPE_CHAT_TYPING is the PHP server constant, never a name a d.ts reader
+    // finds in this package (whose member is `TYPING`).
+    expect(CLIENT).toMatch(/`TYPING` in `SYNCPLAY_MESSAGE_TYPES`/);
+    expect(CLIENT).not.toMatch(/\(TYPE_CHAT_TYPING \/ syncplay_typing\)/);
+  });
+});

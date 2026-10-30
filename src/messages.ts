@@ -471,6 +471,19 @@ export interface GroupStatePayload {
  * (SyncPlayManager::leaveGroup → broadcastToGroup).
  */
 export interface HostElectPayload {
+  /**
+   * SPEC §4 lists it optional because the LIVE broadcasts omit it: the `:8097`
+   * host-leave broadcast carries only `elected_id`/`elected_by` (phlix-server
+   * `SyncPlayManager.php:941-945` @814369eb) and the hub relay broadcast the
+   * same two fields (phlix-hub `SyncPlayRelayWorker.php:2073-2076` @f26eecad);
+   * only the legacy `Messages::hostElect()` factory stamps `group_id`
+   * (phlix-server `Messages.php:640-649` @814369eb) and it has no production
+   * caller. `handleHostElect` therefore does NOT read it; single-group
+   * consumers treat absence as "the frame's group is the cached one".
+   * (M-SYNCPLAY-08: before this field the interface disagreed with SPEC §4's
+   * documented field roster.)
+   */
+  group_id?: string;
   elected_id: string | null;
   elected_by: string;
 }

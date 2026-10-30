@@ -12,6 +12,7 @@ import {
   isValidMessageType,
   type PlaybackState,
   type TimeSyncPayload,
+  type HostElectPayload,
 } from '../src/messages';
 import {
   encodeMessage,
@@ -153,6 +154,26 @@ describe('framing — decodeMessage', () => {
     expect(decoded).not.toHaveProperty('data');
   });
 
+  it('MUST NOT hoist-or-delete `data` on a CANONICAL frame that legitimately carries it (M-SYNCPLAY-02)', () => {
+    // `syncplay_info` has a documented top-level `data` payload field (SPEC §4;
+    // server `Messages::info()` stamps `$info['data'] = $data`). Because the
+    // frame carries `protocol_version` it is NOT the deprecated Tizen wrapper,
+    // so decodeMessage must pass it through UNTOUCHED. Pre-fix the heuristic
+    // keyed on any object `data` beside `type`, hoisting-and-deleting the
+    // legitimate field and silently mutating canonical frames on their way to
+    // `onUnknownFrame` consumers (who are promised "no mutation").
+    const canonical = {
+      type: 'syncplay_info',
+      protocol_version: 1,
+      timestamp: 1700000000000,
+      message: 'syncplay.join_success',
+      data: { group_id: 'g1', role: 'member' },
+    };
+    const decoded = decodeMessage(canonical);
+    expect(decoded).toEqual(canonical);
+    expect(decoded).toHaveProperty('data');
+  });
+
   it('returns null for invalid JSON', () => {
     expect(decodeMessage('{not json')).toBeNull();
   });
@@ -200,5 +221,34 @@ describe('TimeSyncPayload — server wire-shape pin (M-SYNCPLAY-03)', () => {
 
   it('does not carry the fabricated client_time field', () => {
     expect(serverWireFrame).not.toHaveProperty('client_time');
+  });
+});
+
+describe('HostElectPayload — SPEC §4 field-roster pin (M-SYNCPLAY-08)', () => {
+  // SPEC §4 lists `group_id?: string` on syncplay_host_elect. Before the fix
+  // `HostElectPayload` omitted it, so the model disagreed with the documented
+  // roster and multi-group consumers had nothing to disambiguate by. This
+  // fixture is typed AS the interface WITH the optional field, so removing
+  // `group_id?: string` reddens `tsc` (excess-property on a fresh literal).
+  // It is TYPE-ONLY — `handleHostElect` still does not read it (the live
+  // broadcasts omit it; only the legacy Messages::hostElect factory stamps it).
+  const legacyFactoryFrame: HostElectPayload = {
+    group_id: 'g1',
+    elected_id: 'm2',
+    elected_by: 'm1',
+  };
+  const liveBroadcastFrame: HostElectPayload = {
+    elected_id: 'm2',
+    elected_by: 'm1',
+  };
+
+  it('admits the SPEC-documented optional group_id', () => {
+    expect(legacyFactoryFrame.group_id).toBe('g1');
+  });
+
+  it('still parses the live two-field broadcast (group_id absent)', () => {
+    expect(liveBroadcastFrame).not.toHaveProperty('group_id');
+    expect(liveBroadcastFrame.elected_id).toBe('m2');
+    expect(liveBroadcastFrame.elected_by).toBe('m1');
   });
 });

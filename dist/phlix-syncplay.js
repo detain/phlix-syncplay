@@ -64,7 +64,7 @@ function a(e) {
 	let n = t;
 	if (typeof n.type != "string") return null;
 	let r = n.data;
-	if (typeof r == "object" && r && !Array.isArray(r)) {
+	if (!("protocol_version" in n) && typeof r == "object" && r && !Array.isArray(r)) {
 		let e = {};
 		for (let t of Object.keys(n)) t !== "data" && (e[t] = n[t]);
 		return {

@@ -4,6 +4,58 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **W-min121 minors cluster (syncplay minors vein; review IDs
+  `M-SYNCPLAY-02/-08/-23/-30` cured, `-04/-20/-31` stale-verified).**
+  - **M-SYNCPLAY-02 (`syncplay__crossfe` m2, behavior):** `decodeMessage`
+    no longer destructively collides with canonical frames carrying a
+    legitimate top-level `data` field (`syncplay_info` — the server's
+    `Messages::info` stamps `$info['data']` whenever the caller passes one).
+    The deprecated Tizen unwrap now fires ONLY on envelopes WITHOUT
+    `protocol_version` — canonical frames always stamp it (§1 item 4; the
+    server's `Messages::frame` stamps it literally), so legitimate payloads
+    survive decode untouched and the "no mutation" promise `onUnknownFrame`
+    makes holds. Legacy-Tizen tolerance preserved exactly (the wrapper never
+    carried `protocol_version`). Runtime pin red-on-parent.
+  - **M-SYNCPLAY-08 (`syncplay__docmaint` 6 + `syncplay__writer` MIN-5,
+    type + docs):** `HostElectPayload` now declares SPEC §4's optional
+    `group_id?: string` (type-only, zero behavior — `handleHostElect` still
+    reads neither it nor anything new). The §4 field line is annotated with
+    the producer truth: the `:8097` leave broadcast
+    (`SyncPlayManager.php:941-945` @814369eb) and the hub-relay broadcast
+    (`SyncPlayRelayWorker.php:2073-2076` @f26eecad) omit it, and only the
+    legacy `Messages::hostElect()` factory stamps it (no production caller).
+    Compile pin red-on-parent (interface-typed fixture).
+  - **M-SYNCPLAY-23 (`syncplay__writer` MIN-3, docs):** SPEC §1 gains item 7
+    — **keyword discipline**: uppercase `MUST`/`MUST NOT`/`SHOULD`/`MAY` are
+    RFC 2119 normative, lowercase is descriptive. Uppercased the
+    load-bearing rule positions: §1 item 5 ("Clients MUST follow the
+    shapes"), §4's RTT-derivation rule, §8.4's "`?token=` lane … MUST NOT
+    be added to new code paths", and §10.1 items 2–3 (`group` MUST become
+    `null`; a late pong MUST NOT seed). The error-field fallback got a
+    decided voice — **MUST** read `error_code` first then fall back to
+    `code`, with the split-emitter rationale inline (`Messages::error`
+    emits `error_code` only; `SyncPlayManager::sendError` emits `code`
+    only — consulting one silently drops the other's entire frames).
+    Descriptive lowercase may/must stays legitimate under the new law.
+  - **M-SYNCPLAY-30 (`syncplay__writer` MIN-11, docs):** the
+    `onMemberTyping` docblock now cites a name d.ts readers can actually
+    find in this package — `TYPING` in `SYNCPLAY_MESSAGE_TYPES` (wire
+    `syncplay_typing`) — with `TYPE_CHAT_TYPING` attributed as the
+    phlix-server constant. The review's suggested replacement
+    `Messages::TYPE_TYPING` is DISPROVED at root: the server constant is
+    `Messages::TYPE_CHAT_TYPING` (`Messages.php:111` @814369eb); the
+    actual defect was a PHP-side name sitting unlabelled on the TS surface.
+  - **Stale-verified (no re-cure):** M-SYNCPLAY-04 (inbound CHAT/
+    PLAYBACK_QUEUE orchestrated via `onChat`/`onQueueChanged` +
+    `sendChat`/`sendTyping`, `ec63a23` — ancestor; a `sendQueue` builder
+    remains deliberately absent, the README states `onQueueChanged` as
+    the only live queue signal), M-SYNCPLAY-20 (`TimeSyncPayload` models
+    the real `:8097` status frame incl. the honest UNIX-seconds
+    `server_time`, `handleTimeSync` parse-at-boundary drops the fabricated
+    shape, `0247cc4` — ancestor; units law swept again by `3672447`),
+    M-SYNCPLAY-31 (SPEC §4 group_state carries the queue delivery law and
+    `(UNIX seconds — both carriers)` labels; the model carries
+    `queue`/`created_at`/`last_activity_at` — `ec63a23` + `3672447`).
 - **W-min120 minors cluster (syncplay minors vein; review IDs
   `M-SYNCPLAY-05/-25/-28/-33`).**
   - **M-SYNCPLAY-05 (`syncplay__gameux`, docs):** `onHostTransfer` is now

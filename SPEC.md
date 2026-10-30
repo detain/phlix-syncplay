@@ -28,7 +28,7 @@ The authoritative implementation is the PHP server:
 
 4. **`protocol_version` is `1`** and is included on every message.
 
-5. **The server is the source of truth.** Clients must follow the shapes the
+5. **The server is the source of truth.** Clients MUST follow the shapes the
    server actually emits, not invent their own (see §6 divergences).
 
 6. **Server/hub coordinates are era-pinned snapshots.** Line numbers cited
@@ -37,6 +37,11 @@ The authoritative implementation is the PHP server:
    against. **Class and method names are the durable anchors** — trust
    those, and re-verify a bare line number against your checkout before
    acting on it.
+
+7. **Keyword discipline.** Uppercase `MUST`, `MUST NOT`, `SHOULD`, and `MAY`
+   carry their RFC 2119 meanings and are normative for consumers of this
+   contract; lowercase "must/should/may" is descriptive prose (server
+   behavior or a stated possibility) and imposes no client requirement.
 
 ---
 
@@ -433,7 +438,11 @@ new_host_id: string
 
 `syncplay_host_elect` (server → client, automatic when host leaves)
 ```
-group_id?: string
+group_id?: string         (legacy `Messages::hostElect` factory ONLY — the live
+                           broadcasts on BOTH carriers omit it: `:8097`
+                           `SyncPlayManager.php:941-945` @814369eb, hub relay
+                           `SyncPlayRelayWorker.php:2073-2076` @f26eecad;
+                           §1 item 6 governs the stamps)
 elected_id: string | null
 elected_by: string
 ```
@@ -453,7 +462,7 @@ server_time: number        (t2: server RECEIVE time, ms on BOTH carriers — exp
 protocol_version: number
 ```
 > There is **no** `server_receive_time` / t3 field. `server_time` IS the server
-> receive time. The client must derive RTT from t1 and t4 only (it passes
+> receive time. The client MUST derive RTT from t1 and t4 only (it passes
 > `t3 = t2` to the sample function).
 
 `syncplay_time_sync` (server → client) — advisory sync-STATE snapshot. The §3
@@ -492,7 +501,10 @@ code?: string              (SyncPlayManager::sendError uses code)
 message: string
 details?: object
 ```
-> Clients should read `error_code` first, then `code`.
+> Clients MUST read `error_code` first, then fall back to `code`: the server
+> splits its error emitters across the two fields (`Messages::error` sets
+> `error_code`, `SyncPlayManager::sendError` sets `code`), so a consumer that
+> consults only one silently drops every frame from the other.
 
 `syncplay_info` (server → client)
 ```
@@ -738,7 +750,7 @@ consumer pin cascade lands (owner-gated).
 `@phlix/syncplay` itself opens no socket, so both carriers are consumer
 transport concerns. The two-entry bearer subprotocol is now the universal
 estate carrier — it is accepted on **both** surfaces above; the `?token=`
-lane exists only on `:8097` for legacy builds and must never be added to new
+lane exists only on `:8097` for legacy builds and MUST NOT be added to new
 code paths (the hub refuses it).
 
 ---
@@ -868,10 +880,10 @@ become stale and MUST be discarded before reconnecting:
    post-reconnect sync. `TimeSync.reset()` clears samples and restores
    `driftRate = 1.0`.
 2. **Group membership** — the server-side membership is gone once the socket
-   drops; the client's `group` must become `null` until a fresh
+   drops; the client's `group` MUST become `null` until a fresh
    `syncplay_group_state` arrives.
-3. **The outstanding ping** — a late `time_pong` from the dead connection must
-   not seed a sample, so the recorded send time (`lastPingSendTime`) is dropped.
+3. **The outstanding ping** — a late `time_pong` from the dead connection MUST
+   NOT seed a sample, so the recorded send time (`lastPingSendTime`) is dropped.
 
 ### 10.2 Required recovery sequence
 

@@ -169,7 +169,9 @@ export interface SyncPlayClientOptions {
     onHostChanged?: (_newHostId: string | null) => void;
     onError?: (_code: string, _message: string) => void;
     onInfo?: (_message: string) => void;
-    /** A member started or stopped typing (TYPE_CHAT_TYPING / syncplay_typing).
+    /** A member started or stopped typing (`TYPING` in `SYNCPLAY_MESSAGE_TYPES`
+     *  — wire value `syncplay_typing`; the phlix-server constant is
+     *  `Messages::TYPE_CHAT_TYPING`).
      *  Unlike chat, this fan-out EXCLUDES the sender on both carriers (phlix-server
      *  `SyncPlayManager.php:1377-1380` passes `[$memberId]`; hub
      *  `SyncPlayRelayWorker.php:1825-1828` passes `$client->clientId`), so your own
