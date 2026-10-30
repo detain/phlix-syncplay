@@ -4,6 +4,16 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **R-W2 riders wave (R-SYNCPLAY-02): the README
+  `:8804` relay sentence is law-complete on BOTH admitted carriers.** The
+  sentence read "accepts the bearer subprotocol **only**" — true only in the
+  browser frame the paragraph opens with; the hub's
+  `SyncPlayRelayWorker.php:54-57` honors an `Authorization: Bearer` header on
+  the upgrade request too (non-browser runtimes), and SPEC §8.4's carrier
+  table — the contract authority — has stated "(or `Authorization: Bearer`
+  header)" since S237. The fixlog O1 for M-SYNCPLAY-07 prescribed exactly this
+  parenthetical for the next prose pass touching the file. Zero behavior
+  change; docs-only, SPEC untouched; `?token=` refusal law verbatim-held.
 - **M-SYNCPLAY-17 rider: the src doc-comment repeat-sites of the §9 roster
   fiction are cured to producer truth (second lane on the same item; the
   sibling cure `eff7fec` shipped SPEC/README + the tripwire and left these

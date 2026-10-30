@@ -97,8 +97,9 @@ diagnostics.
 const ws = new WebSocket(`wss://hub.example:8804/syncplay/${serverId}`, ['bearer', relayToken]);
 ```
 
-The hub relay speaks the same protocol but accepts the bearer subprotocol
-**only** — a `?token=` query is refused there by design. Each relay socket is
+The hub relay speaks the same protocol but accepts the bearer subprotocol (or
+an `Authorization: Bearer` header — non-browser runtimes; SPEC §8.4) **only** —
+a `?token=` query is refused there by design. Each relay socket is
 scoped to one server (`{server_id}` in the path) and one hub account.
 
 ## Usage
