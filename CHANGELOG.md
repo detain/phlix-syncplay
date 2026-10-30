@@ -4,6 +4,52 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **W-min119 minors cluster (syncplay minors vein; review IDs
+  `M-SYNCPLAY-15/-11/-24/-26/-27`).**
+  - **M-SYNCPLAY-15 (behavior; `syncplay__gameux` m4):** `handleHostElect` /
+    `handleHostTransfer` now fold `host_id` and recompute
+    `members[].is_host` in the SAME mutation (`SyncPlayClient.foldHostId`).
+    Spreading the old roster left the crown on the outgoing host until the
+    next `group_state` — and the `:8097` host-leave path fires `host_elect`
+    with NO following `group_state` (phlix-server
+    `SyncPlayManager::leaveGroup()`), so the stale flags were permanent for
+    the cached session and the model contradicted its own normalization law
+    ("host_id is authoritative"). This also carries the is_host half of
+    `syncplay__crossfe` m3 (minors M-SYNCPLAY-03, W-min124 — that batch's
+    lane finds it cured; the drop-the-departed-host half is NOT done here).
+    +3 tests in `test/client.test.ts` (red-first 3/3 at the pre-fold folds);
+    dist re-emitted at this commit.
+  - **M-SYNCPLAY-24 (`syncplay__writer` MIN-4, docs):** the §3 direction row
+    for `syncplay_time_sync` is `both` (the server registers an inbound
+    handler; §4 now names what the request arm buys) — the fastest-read
+    contract surface no longer under-labels the type.
+  - **M-SYNCPLAY-11 (`syncplay__docmaint` minor 9, docs):** the README
+    backoff recipe names its own tension — the `Math.random()` there is
+    consumer-side transport code outside the module-scope purity claim
+    (which binds this library's `src/`), and the ordering lines are flagged
+    load-bearing per SPEC §10.1/§10.2.
+  - **M-SYNCPLAY-26 / M-SYNCPLAY-27 (`syncplay__writer` MIN-7/MIN-8):
+    CHANGELOG structure + truth.** Heading surgery only; historical text
+    verbatim. The stray second `## [Unreleased]` that sat between `[0.1.2]`
+    and `[0.1.1]` is deleted; `[0.1.0]` is dated (`2026-06-26`); a dated
+    `## [0.1.5] - 2026-09-14` (tag `b82d4f3`'s date) section is cut at the
+    buried release bullet. The 2026-09-29 SPEC-lane entries above the bullet
+    (`a995b1a` carrier flip, `53e215a` annotation lane) stay in
+    `[Unreleased]` — they are tag descendants (`git merge-base` proof in the
+    W-min119 report), contradicting the reading that they shipped inside
+    v0.1.5; the annotation-lane entry was additionally relocated above the
+    new heading, and the SPEC cite-refresh in that pair is superseded by
+    W-min120's re-anchor. **M-SYNCPLAY-27 (the fallback re-add):** the 0.1.3
+    entry below states the `?? 0` / `?? 'stopped'` fallbacks in
+    `handleGroupState` were "genuinely dead" and removed; the S416
+    members-dict fold (`673e3d4`, v0.1.4 era) silently re-added them so the
+    tolerant dict/array fold keeps the typed model total on legacy or
+    hand-built frames. Behaviorally invisible for conformant servers; the
+    historical entry stands verbatim and this line is the honest
+    forward-dated note.
+  - New `test/specDocLaw.test.ts` tripwires the cured doc laws (§3 direction
+    row, single-`[Unreleased]` + dated-section CHANGELOG structure, README
+    purity reconciliation) — silent reverts redden there.
 - **R-W3 riders wave (R-SYNCPLAY-03): `handleGroupState` now cancels an open
   seek-coalescing window when the state replaces the group.** A
   `joinGroup(B)` landing while room A's throttle window was open let A's
@@ -586,7 +632,6 @@ adheres to [Semantic Versioning](https://semver.org/).
   tizen `9a5b24b`, mobile `bdbe1e1`, roku `07eef68`, console `04a1590` flipped
   at tip; windows `c75fdf0` still rides `?token=` via the vendored pre-flip
   `@phlix/ui#v0.99.7` bundle.
-- Release @phlix/syncplay v0.1.5 — version bump + rebuilt committed artifacts
 - **SPEC.md annotation lane (docs-only, no behavior change).** Three
   wire-truth amendments pinned against the live server/hub implementations:
   §4 documents the DEPRECATED second accepted input on group create/join —
@@ -599,6 +644,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   S237); §2 gains the units footnote pinning the one hub-relay exception —
   `:8804` stamps milliseconds except `pending_command.issued_at`, which is
   UNIX SECONDS by deliberate design.
+
+## [0.1.5] - 2026-09-14
+
+- Release @phlix/syncplay v0.1.5 — version bump + rebuilt committed artifacts
 
 ## [0.1.4] - 2026-09-01
 
@@ -893,8 +942,6 @@ from this release onward.
   consumer/transport concern (this library schedules no timers) — flagged as
   documentation-only for P2 in this repo.
 
-## [Unreleased]
-
 ## [0.1.1] - 2026-06-26
 
 ### Fixed
@@ -914,7 +961,7 @@ from this release onward.
 - Documented that `SyncPlayGroup.has_password` is a `listGroups()`-only summary
   field and is never present on a `group_state` message.
 
-## [0.1.0]
+## [0.1.0] - 2026-06-26
 
 Initial release — the single shared, canonical SyncPlay protocol + NTP
 time-sync for Phlix JS clients (mobile, windows, tizen). The PHP server is the

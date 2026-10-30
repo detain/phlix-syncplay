@@ -1854,3 +1854,71 @@ describe('SyncPlayClient — onUnknownFrame (S298 phantom-hook decision)', () =>
     expect(h.unknown).toHaveLength(0);
   });
 });
+
+// W-min119 M-SYNCPLAY-15 (review `syncplay__gameux` m4): the elect/transfer
+// folds MUST recompute the cached members[].is_host flags from the new
+// host_id — the cached model's own normalization law (client.ts
+// normalizeMembers: "host_id is authoritative") must not be allowed to lie
+// between group_state deliveries.
+describe('SyncPlayClient — host changes recompute cached is_host flags (M-SYNCPLAY-15)', () => {
+  it('host_elect demotes the outgoing host and promotes the elected member in the cached roster', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    // Pre-condition: the fold derived flags at group_state time.
+    expect(h.client.getGroup()?.members.map((m) => [m.id, m.is_host])).toEqual([
+      ['host1', true],
+      ['me', false],
+    ]);
+
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'me',
+      elected_by: 'host1',
+    });
+
+    const group = h.client.getGroup();
+    expect(group?.host_id).toBe('me');
+    // The crown MUST move in the same mutation as host_id (was: stale true
+    // on 'host1' until the next group_state).
+    expect(group?.members.map((m) => [m.id, m.is_host])).toEqual([
+      ['host1', false],
+      ['me', true],
+    ]);
+  });
+
+  it('host_transfer recomputes is_host flags in the cached roster', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_TRANSFER,
+      protocol_version: 1,
+      current_host_id: 'host1',
+      new_host_id: 'me',
+    });
+
+    const group = h.client.getGroup();
+    expect(group?.host_id).toBe('me');
+    expect(group?.members.map((m) => [m.id, m.is_host])).toEqual([
+      ['host1', false],
+      ['me', true],
+    ]);
+  });
+
+  it('host_elect with a null elected id clears every cached is_host flag', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: null,
+      elected_by: 'host1',
+    });
+
+    const group = h.client.getGroup();
+    expect(group?.host_id).toBeNull();
+    expect(group?.members.every((m) => !m.is_host)).toBe(true);
+  });
+});

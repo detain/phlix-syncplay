@@ -289,7 +289,12 @@ socket close → client.onDisconnect() → reconnect → joinGroup(...) → resu
 **Backoff is your transport's job** (this lib schedules no periodic timers —
 the one owned-timer exception is the `sendSeek` coalescing flush, see "Command
 repeat policy"). Recommended
-recipe — exponential backoff with full jitter, capped, reset on a clean open:
+recipe — exponential backoff with full jitter, capped, reset on a clean open.
+The recipe is **consumer-side** code: its `Math.random()` sits outside the
+module-scope purity claim above (which binds this library's `src/`, never your
+transport), and SPEC §10.3 defers to this snippet as the estate recipe. The
+load-bearing lines are the ordering ones — `client.onDisconnect()` before every
+reschedule and `attempt = 0` only on a clean open (SPEC §10.1/§10.2):
 
 ```ts
 const BASE_MS = 1000;   // first retry delay
@@ -299,7 +304,7 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleReconnect() {
   const expo = Math.min(MAX_MS, BASE_MS * 2 ** attempt);
-  const delay = Math.random() * expo;        // full jitter
+  const delay = Math.random() * expo;        // full jitter (consumer-side — see purity note above)
   attempt += 1;
   timer = setTimeout(connect, delay);
 }

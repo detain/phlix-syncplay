@@ -377,6 +377,16 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			joined_at: typeof e.joined_at == "number" ? e.joined_at : 0
 		}));
 	}
+	static foldHostId(e, t) {
+		return {
+			...e,
+			host_id: t,
+			members: e.members.map((e) => ({
+				...e,
+				is_host: e.id === t
+			}))
+		};
+	}
 	static serverTimeToMs(e) {
 		return e < 0xe8d4a51000 ? e * 1e3 : e;
 	}
@@ -438,11 +448,8 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		});
 	}
 	handleHostElect(e) {
-		let t = e.elected_id ?? null;
-		this.group !== null && (this.group = {
-			...this.group,
-			host_id: t
-		}), this.options.onHostChanged?.(t);
+		let n = e.elected_id ?? null;
+		this.group !== null && (this.group = t.foldHostId(this.group, n)), this.options.onHostChanged?.(n);
 	}
 	handleInfo(e) {
 		let t = e;
@@ -473,11 +480,8 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		}), this.options.onQueueChanged?.(r));
 	}
 	handleHostTransfer(e) {
-		let t = e;
-		typeof t.current_host_id == "string" && typeof t.new_host_id == "string" && (this.group !== null && (this.group = {
-			...this.group,
-			host_id: t.new_host_id
-		}), this.options.onHostTransfer?.(t.current_host_id, t.new_host_id));
+		let n = e;
+		typeof n.current_host_id == "string" && typeof n.new_host_id == "string" && (this.group !== null && (this.group = t.foldHostId(this.group, n.new_host_id)), this.options.onHostTransfer?.(n.current_host_id, n.new_host_id));
 	}
 	handlePlaybackSync(e) {
 		let n = typeof e.member_id == "string" ? e.member_id : void 0, r = typeof e.position == "number" ? e.position : 0, i = typeof e.is_playing == "boolean" && e.is_playing, a = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime(), o = t.normalizeNudge(e.nudge);

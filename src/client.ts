@@ -885,6 +885,27 @@ export class SyncPlayClient {
   }
 
   /**
+   * Patch the cached group's `host_id` **and** recompute `members[].is_host`
+   * in the same mutation (W-min119 M-SYNCPLAY-15, review `syncplay__gameux`
+   * m4). `normalizeMembers` derives `is_host` from `host_id` at fold time —
+   * a fold that spread the old roster after a host change left the crown on
+   * the outgoing host until the next `group_state`, so a consumer rendering
+   * `members[].is_host` (rather than the authoritative `host_id`) saw a
+   * model that contradicted the library's own normalization law. On the
+   * `:8097` host-leave path no `group_state` follows the `host_elect`
+   * broadcast at all (phlix-server `SyncPlayManager.php` leave path fires
+   * HOST_ELECT only), so the stale flags were otherwise permanent for the
+   * cached session.
+   */
+  private static foldHostId(group: SyncPlayGroup, newHostId: string | null): SyncPlayGroup {
+    return {
+      ...group,
+      host_id: newHostId,
+      members: group.members.map((m) => ({ ...m, is_host: m.id === newHostId })),
+    };
+  }
+
+  /**
    * Normalize a wire `server_time` stamp to MILLISECONDS (fix lane M-SYNCPLAY-04).
    *
    * The two carriers stamp the SAME field in DIFFERENT units — a per-carrier
@@ -1064,7 +1085,7 @@ export class SyncPlayClient {
     const payload = msg as Partial<HostElectPayload>;
     const newHostId = payload.elected_id ?? null;
     if (this.group !== null) {
-      this.group = { ...this.group, host_id: newHostId };
+      this.group = SyncPlayClient.foldHostId(this.group, newHostId);
     }
     this.options.onHostChanged?.(newHostId);
   }
@@ -1150,7 +1171,7 @@ export class SyncPlayClient {
       return;
     }
     if (this.group !== null) {
-      this.group = { ...this.group, host_id: payload.new_host_id };
+      this.group = SyncPlayClient.foldHostId(this.group, payload.new_host_id);
     }
     this.options.onHostTransfer?.(payload.current_host_id, payload.new_host_id);
   }

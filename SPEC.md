@@ -108,7 +108,7 @@ documented per-surface deviations.
 | HOST_ELECT      | `syncplay_host_elect`      | server → client  |
 | TIME_PING       | `syncplay_time_ping`       | client → server  |
 | TIME_PONG       | `syncplay_time_pong`       | server → client  |
-| TIME_SYNC       | `syncplay_time_sync`       | server → client  |
+| TIME_SYNC       | `syncplay_time_sync`       | both             |
 | ERROR           | `syncplay_error`           | server → client  |
 | INFO            | `syncplay_info`            | server → client  |
 
@@ -447,8 +447,11 @@ protocol_version: number
 > receive time. The client must derive RTT from t1 and t4 only (it passes
 > `t3 = t2` to the sample function).
 
-`syncplay_time_sync` (server → client) — advisory sync-STATE snapshot. It is a
-**unicast reply** on the connection that sent a `syncplay_time_sync` request
+`syncplay_time_sync` (server → client) — advisory sync-STATE snapshot. The §3
+direction column reads `both` for this type: the inbound arm is a member's
+request (the server registers a handler for it; the hub `:8804` refuses it —
+§8.4), and what that request buys is exactly the frame documented here — a
+**unicast reply** on the connection that sent it
 (`phlix-server` `SyncPlayManager::handleTimeSync()`, emit at
 `src/Session/SyncPlay/SyncPlayManager.php:1653-1659`) — NOT a group broadcast
 (the old one-line stub here predated the field audit). Units are mixed per

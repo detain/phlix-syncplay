@@ -476,6 +476,20 @@ export declare class SyncPlayClient {
      */
     private static normalizeMembers;
     /**
+     * Patch the cached group's `host_id` **and** recompute `members[].is_host`
+     * in the same mutation (W-min119 M-SYNCPLAY-15, review `syncplay__gameux`
+     * m4). `normalizeMembers` derives `is_host` from `host_id` at fold time —
+     * a fold that spread the old roster after a host change left the crown on
+     * the outgoing host until the next `group_state`, so a consumer rendering
+     * `members[].is_host` (rather than the authoritative `host_id`) saw a
+     * model that contradicted the library's own normalization law. On the
+     * `:8097` host-leave path no `group_state` follows the `host_elect`
+     * broadcast at all (phlix-server `SyncPlayManager.php` leave path fires
+     * HOST_ELECT only), so the stale flags were otherwise permanent for the
+     * cached session.
+     */
+    private static foldHostId;
+    /**
      * Normalize a wire `server_time` stamp to MILLISECONDS (fix lane M-SYNCPLAY-04).
      *
      * The two carriers stamp the SAME field in DIFFERENT units — a per-carrier
