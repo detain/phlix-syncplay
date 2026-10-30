@@ -685,3 +685,40 @@ describe('TimeSync.updateDriftRate — early return guard (line 292)', () => {
     expect(ts.getDriftRate()).toBeLessThanOrEqual(DRIFT_RATE_MAX);
   });
 });
+
+describe('TimeSync.getSampleAgeMs — sample freshness (W-min124 M-SYNCPLAY-14, review syncplay__gameux m3)', () => {
+  it('is null on an empty window (never invents an age)', () => {
+    const clock = makeClock(5000);
+    const ts = new TimeSync(clock.now);
+    expect(ts.getSampleAgeMs()).toBeNull();
+  });
+
+  it('measures the NEWEST sample against the injected clock, in ms', () => {
+    const clock = makeClock(1000);
+    const ts = new TimeSync(clock.now);
+    ts.addSample(1000, 1100, 1100, 1001); // timestamp = now()/1000 = 1s
+    expect(ts.getSampleAgeMs()).toBe(0);
+    clock.set(6000);
+    expect(ts.getSampleAgeMs()).toBe(5000);
+    ts.addSample(6000, 6100, 6100, 6001); // newest sample refreshes the age
+    expect(ts.getSampleAgeMs()).toBe(0);
+  });
+
+  it('a rejected addSample refreshes nothing (garbage earns no timestamp)', () => {
+    const clock = makeClock(1000);
+    const ts = new TimeSync(clock.now);
+    ts.addSample(1000, 1100, 1100, 1001);
+    clock.set(4000);
+    const rejected = ts.addSample(4000, 4100, 4100, 7500); // rtt 2500 > bound
+    expect(rejected).toBe(false);
+    expect(ts.getSampleAgeMs()).toBe(3000); // age still rides the GOOD sample
+  });
+
+  it('reset() clears the window back to null age', () => {
+    const clock = makeClock(1000);
+    const ts = new TimeSync(clock.now);
+    ts.addSample(1000, 1100, 1100, 1001);
+    ts.reset();
+    expect(ts.getSampleAgeMs()).toBeNull();
+  });
+});

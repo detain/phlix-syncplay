@@ -21,7 +21,7 @@
  *  2. §9.1's STATE-REPORT sentence holds (guard against curing the
  *     contradiction from the wrong side — the invariant is §9 ≡ §9.1 ≡
  *     producer).
- *  3. §4's "Playback control" heading names the member-permitted exception
+ *  3. §4's "4.2 Playback control" heading names the member-permitted exception
  *     and the retired blanket claim ("host-only on the server" as an
  *     unscoped umbrella) never returns.
  *  4. README quick-start: `reportPosition` does not sit in the Host-only
@@ -107,7 +107,9 @@ describe('SPEC §9 item 2 — the host-only command list equals the producer gat
 
 describe('SPEC §4 and README repeat-sites agree with the producer (M-SYNCPLAY-17)', () => {
   it('the §4 Playback control heading scopes the host-only claim and names the exception', () => {
-    const heading = between(SPEC, '### Playback control', '`syncplay_playback_play` / `syncplay_playback_pause`');
+    // Needle carries the `4.2` number added with the §4 subsection numbering
+    // (W-min124 M-SYNCPLAY-32; the heading law itself is unchanged).
+    const heading = between(SPEC, '### 4.2 Playback control', '`syncplay_playback_play` / `syncplay_playback_pause`');
     expect(heading).toContain('play/pause/seek/queue host-only');
     expect(heading).toContain('member-permitted state report');
     // The retired blanket (an umbrella over the whole subsection, sync block

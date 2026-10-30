@@ -42,6 +42,7 @@ import {
   type HostTransferPayload,
   type InfoPayload,
   type PlaybackQueueItem,
+  type PlaybackState,
   type PlaybackSyncNudge,
   type QueueBroadcastPayload,
   type RawMessage,
@@ -191,8 +192,36 @@ export interface SyncPlayClientOptions {
    */
   onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
   onSync?: (_status: TimeSyncStatus) => void;
+  /**
+   * A matched pong completed its round trip but the sample was REJECTED by the
+   * NTP window (`rtt < 0 || rtt > MAX_ACCEPTABLE_RTT`, SPEC §5). Pre-fix every
+   * rejection was silent: a distant member (cellular / intercontinental RTT
+   * against a home server, realistic at `MAX_ACCEPTABLE_RTT = 1000`) watched
+   * `isStable()` sit `false` forever with no signal to explain it
+   * (W-min124 M-SYNCPLAY-14, review `syncplay__gameux` m3). Fires per
+   * rejection with the CURRENT consecutive-rejection streak; any accepted
+   * sample resets the streak to 0 and fires nothing. The library deliberately
+   * picks no "degraded" threshold — after N rejections is consumer policy
+   * (spinner copy, retry pacing, transport hint). Observes what was already
+   * true at the boundary; changes no sync math.
+   */
+  onSyncDegraded?: (_consecutiveRejections: number) => void;
   onPlaybackCommand?: (_command: PlaybackCommand) => void;
   onMemberJoined?: (_member: { id: string; name: string }) => void;
+  /**
+   * A member that was in the cached roster of the SAME room is absent from the
+   * `group_state` roster just folded (W-min124 M-SYNCPLAY-16, review
+   * `syncplay__gameux` m5). Symmetric counterpart of {@link onMemberJoined},
+   * closing the "Sam left the party" gap embedders previously hand-rolled with
+   * their own set diffs on four platforms. SPEC §6 wire law: a plain leave
+   * emits no dedicated frame — membership changes ride the next
+   * `syncplay_group_state` — so this diff IS the leave signal, and the
+   * join half is deliberately NOT diffed here (joins already arrive as INFO
+   * frames; diffing them too would double-announce the same member).
+   * Room switches fire nothing: the old roster belonged to the room being
+   * left, not to this one.
+   */
+  onMemberLeft?: (_member: { id: string; name: string }) => void;
   onHostChanged?: (_newHostId: string | null) => void;
   onError?: (_code: string, _message: string) => void;
   onInfo?: (_message: string) => void;
@@ -367,6 +396,12 @@ export class SyncPlayClient {
   private group: SyncPlayGroup | null = null;
   /** Local t1 of the most recent outstanding ping, ms. */
   private lastPingSendTime: number | null = null;
+  /**
+   * M-SYNCPLAY-14: consecutive REJECTED (but matched-consumed) time-sync
+   * samples; reset by any accepted sample. Feeds `onSyncDegraded` so silence
+   * at the sync boundary becomes observable.
+   */
+  private consecutiveSyncRejections = 0;
 
   constructor(options: SyncPlayClientOptions) {
     this.options = options;
@@ -845,7 +880,14 @@ export class SyncPlayClient {
     }
 
     const pong = msg as Partial<TimePongPayload>;
-    const echoed = typeof pong.client_time === 'number' ? pong.client_time : null;
+    // M-SYNCPLAY-19: a JSON `1e999` echo decodes to Infinity and passes a bare
+    // `typeof === 'number'` check. A corrupt echo is treated as an ABSENT one
+    // (fall back to the recorded send time) — same honest path as the
+    // pre-echo frame shape this library's own callers emit.
+    const echoed =
+      typeof pong.client_time === 'number' && Number.isFinite(pong.client_time)
+        ? pong.client_time
+        : null;
 
     // Fast-reconnect regime: a fresh ping may already be outstanding on the NEW
     // connection when a straggler pong from the torn-down one lands, so the
@@ -869,7 +911,12 @@ export class SyncPlayClient {
     // holding the slot through that early return would stall pacing until the
     // aging escape in {@link pingTime}.
     this.lastPingSendTime = null;
-    const t2 = typeof pong.server_time === 'number' ? pong.server_time : null;
+    // M-SYNCPLAY-19: non-finite t2 would poison the offset average forever —
+    // same drop-to-null treatment as a missing one (round stays consumed).
+    const t2 =
+      typeof pong.server_time === 'number' && Number.isFinite(pong.server_time)
+        ? pong.server_time
+        : null;
 
     if (t2 === null) {
       return;
@@ -879,11 +926,19 @@ export class SyncPlayClient {
     const accepted = this.timeSync.addSample(t1, t2, t2, t4);
 
     if (accepted) {
+      this.consecutiveSyncRejections = 0;
       this.options.onSync?.({
         offset: this.timeSync.getOffset(),
         latency: this.timeSync.getLatency(),
         isStable: this.timeSync.isStable(),
       });
+    } else {
+      // M-SYNCPLAY-14: the rejection used to vanish here — `onSync` fires only
+      // on acceptance, so a member whose every round trips the RTT bound got
+      // no event at all and no way to tell "measuring" from "silently
+      // failing". Surface the streak; the consumer owns the threshold.
+      this.consecutiveSyncRejections += 1;
+      this.options.onSyncDegraded?.(this.consecutiveSyncRejections);
     }
   }
 
@@ -912,7 +967,8 @@ export class SyncPlayClient {
       name: typeof m.name === 'string' ? m.name : '',
       // is_host is derived from host_id (server also sets is_host, but host_id is authoritative).
       is_host: m.id === hostId,
-      joined_at: typeof m.joined_at === 'number' ? m.joined_at : 0,
+      // M-SYNCPLAY-19: non-finite timestamps are garbage, not a join time.
+      joined_at: typeof m.joined_at === 'number' && Number.isFinite(m.joined_at) ? m.joined_at : 0,
     }));
   }
 
@@ -969,6 +1025,19 @@ export class SyncPlayClient {
   }
 
   /**
+   * The one `server_time` acceptance law shared by the three consumers
+   * (playback / seek / playback_sync, M-SYNCPLAY-12 set): a FINITE number is
+   * unit-normalized via {@link serverTimeToMs}; anything else (absent,
+   * non-numeric, `1e999` → `Infinity`) yields the caller's honest
+   * clock-estimate fallback (M-SYNCPLAY-19).
+   */
+  private static serverTimeOrNow(raw: unknown, fallback: () => number): number {
+    return typeof raw === 'number' && Number.isFinite(raw)
+      ? SyncPlayClient.serverTimeToMs(raw)
+      : fallback();
+  }
+
+  /**
    * Normalize the `group.queue` array a `group_state` frame carries
    * (M-SYNCPLAY-06: this handler used to drop the field entirely). Producer
    * coordinates and per-carrier item fields are documented on
@@ -990,7 +1059,11 @@ export class SyncPlayClient {
         typeof item.media_info === 'object' && item.media_info !== null
           ? (item.media_info as Record<string, unknown>)
           : undefined,
-      added_at: typeof item.added_at === 'number' ? item.added_at : undefined,
+      // M-SYNCPLAY-19: finite-only numerics through the queue normalizer too.
+      added_at:
+        typeof item.added_at === 'number' && Number.isFinite(item.added_at)
+          ? item.added_at
+          : undefined,
       added_by:
         typeof item.added_by === 'string' || item.added_by === null ? item.added_by : undefined,
     }));
@@ -1016,19 +1089,65 @@ export class SyncPlayClient {
       return undefined;
     }
     const raw = nudge as Partial<PlaybackSyncNudge>;
+    // M-SYNCPLAY-19: every numeric here feeds rate/drift math — finite-only.
     return {
-      drift_ms: typeof raw.drift_ms === 'number' ? raw.drift_ms : undefined,
+      drift_ms: SyncPlayClient.finiteOrUndefined(raw.drift_ms),
       direction:
         raw.direction === 'behind' || raw.direction === 'ahead'
           ? raw.direction
           : undefined,
-      suggested_rate:
-        typeof raw.suggested_rate === 'number' ? raw.suggested_rate : undefined,
-      tolerance_ms:
-        typeof raw.tolerance_ms === 'number' ? raw.tolerance_ms : undefined,
-      cooldown_ms:
-        typeof raw.cooldown_ms === 'number' ? raw.cooldown_ms : undefined,
+      suggested_rate: SyncPlayClient.finiteOrUndefined(raw.suggested_rate),
+      tolerance_ms: SyncPlayClient.finiteOrUndefined(raw.tolerance_ms),
+      cooldown_ms: SyncPlayClient.finiteOrUndefined(raw.cooldown_ms),
     };
+  }
+
+  /**
+   * Boundary coercion for wire strings (W-min124 M-SYNCPLAY-19, review
+   * `syncplay__secnet` MINOR-3): `?? fallback` only catches null/undefined, so
+   * a hub-relay bug or hostile relay could flow a NUMBER or OBJECT into fields
+   * typed `string`/`string | null` — the model then lies and every
+   * `=== hostId`-style derivation silently breaks. Non-strings fall back
+   * exactly like an absent field did before.
+   */
+  private static strOr(value: unknown, fallback: string): string {
+    return typeof value === 'string' ? value : fallback;
+  }
+
+  private static strOrNull(value: unknown): string | null {
+    return typeof value === 'string' ? value : null;
+  }
+
+  /**
+   * Numeric counterpart of {@link strOr} (M-SYNCPLAY-19): `JSON.parse` happily
+   * yields `Infinity` for `1e999` and it passes a bare `typeof === 'number'`
+   * check, then flows into player sinks (`currentTime = Infinity` throws in
+   * browsers) and poisons the TimeSync offset average. Only FINITE numbers
+   * are accepted; anything else takes the documented fallback.
+   */
+  private static finiteOr(value: unknown, fallback: number): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  }
+
+  private static finiteOrNull(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
+
+  private static finiteOrUndefined(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  }
+
+  /**
+   * Membership-check `playback_state` against the canonical four (SPEC §4,
+   * `PlaybackState` in `messages.ts`); anything else degrades to `'stopped'`
+   * (M-SYNCPLAY-19). A cast through this guard is the difference between a
+   * consumer `switch` that always lands on a real case and one that matches
+   * nothing while the model claims `PlaybackState`.
+   */
+  private static playbackState(value: unknown): PlaybackState {
+    return value === 'playing' || value === 'paused' || value === 'buffering' || value === 'stopped'
+      ? value
+      : 'stopped';
   }
 
   private handleGroupState(msg: RawMessage): void {
@@ -1038,35 +1157,59 @@ export class SyncPlayClient {
       return;
     }
 
+    // M-SYNCPLAY-19: typed-coerce once, reuse below and in the room-change
+    // check so the comparison and the stored model can never disagree.
+    const groupId = SyncPlayClient.strOr(group.group_id, '');
+    const hostId = SyncPlayClient.strOrNull(group.host_id);
+
     // Room change mid-window (R-SYNCPLAY-03): joinGroup(B) while a seek
     // coalescing window from room A is still open would otherwise flush A's
     // pending target stamped with B's group_id — the same "belongs to the
     // room we are leaving" law leaveGroup/onDisconnect already enforce.
     // A SAME-group re-delivery is a state refresh, not a room change: the
     // window must survive it (pinned in seekCoalescing.test).
-    if (this.group !== null && this.group.group_id !== (group.group_id ?? '')) {
+    if (this.group !== null && this.group.group_id !== groupId) {
       this.cancelSeekCoalescing();
     }
+
+    // M-SYNCPLAY-16: the roster diff belongs to THIS fold — capture the
+    // outgoing model before replacing it (the same-stateful-fold idea the
+    // review called "one cheap" — four platforms were re-implementing it).
+    const previous = this.group;
 
     // Normalize members (dict on the live wire; array tolerated — S416) and
     // derive is_host from host_id (server includes is_host on members, but
     // host_id is authoritative).
-    const members = SyncPlayClient.normalizeMembers(group.members, group.host_id ?? null);
+    const members = SyncPlayClient.normalizeMembers(group.members, hostId);
 
     this.group = {
-      group_id: group.group_id ?? '',
-      group_name: group.group_name ?? '',
+      group_id: groupId,
+      group_name: SyncPlayClient.strOr(group.group_name, ''),
       members,
-      member_count: group.member_count,
-      host_id: group.host_id ?? null,
-      current_media_id: group.current_media_id ?? null,
-      current_media_duration: group.current_media_duration ?? null,
-      playback_position: group.playback_position ?? 0,
-      playback_state: group.playback_state ?? 'stopped',
+      member_count: SyncPlayClient.finiteOrUndefined(group.member_count),
+      host_id: hostId,
+      current_media_id: SyncPlayClient.strOrNull(group.current_media_id),
+      current_media_duration: SyncPlayClient.finiteOrNull(group.current_media_duration),
+      playback_position: SyncPlayClient.finiteOr(group.playback_position, 0),
+      playback_state: SyncPlayClient.playbackState(group.playback_state),
       queue: SyncPlayClient.normalizeQueue(group.queue),
-      created_at: group.created_at,
-      last_activity_at: group.last_activity_at,
+      created_at: SyncPlayClient.finiteOrUndefined(group.created_at),
+      last_activity_at: SyncPlayClient.finiteOrUndefined(group.last_activity_at),
     };
+
+    // M-SYNCPLAY-16: fire `onMemberLeft` for members this SAME room lost
+    // since the previous fold. A room switch (different cached group_id) is
+    // us leaving, not them leaving — no events. Joins are NOT diffed: they
+    // already arrive as INFO frames (handleInfo), and a second announcement
+    // path here would double-fire the same member (SPEC §6 event taxonomy).
+    if (previous !== null && previous.group_id === groupId) {
+      const present = new Set(members.map((m) => m.id));
+      for (const m of previous.members) {
+        if (!present.has(m.id)) {
+          this.options.onMemberLeft?.({ id: m.id, name: m.name });
+        }
+      }
+    }
 
     // `your_id` is surfaced VERBATIM and reconciled against nothing here:
     // the ctor `memberId` is immutable by design, and silently rewriting it
@@ -1098,10 +1241,10 @@ export class SyncPlayClient {
       return;
     }
     const position = msg.position;
-    const serverTime =
-      typeof msg.server_time === 'number'
-        ? SyncPlayClient.serverTimeToMs(msg.server_time)
-        : this.getSynchronizedTime();
+    const serverTime = SyncPlayClient.serverTimeOrNow(
+      msg.server_time,
+      () => this.getSynchronizedTime(),
+    );
     this.options.onPlaybackCommand?.({ type, position, serverTime });
   }
 
@@ -1121,10 +1264,10 @@ export class SyncPlayClient {
       return;
     }
     const position = msg.to_position;
-    const serverTime =
-      typeof msg.server_time === 'number'
-        ? SyncPlayClient.serverTimeToMs(msg.server_time)
-        : this.getSynchronizedTime();
+    const serverTime = SyncPlayClient.serverTimeOrNow(
+      msg.server_time,
+      () => this.getSynchronizedTime(),
+    );
     this.options.onPlaybackCommand?.({ type: 'seek', position, serverTime });
   }
 
@@ -1132,7 +1275,27 @@ export class SyncPlayClient {
     const payload = msg as Partial<HostElectPayload>;
     const newHostId = payload.elected_id ?? null;
     if (this.group !== null) {
-      this.group = SyncPlayClient.foldHostId(this.group, newHostId);
+      // M-SYNCPLAY-03 (review `syncplay__crossfe` m3, ghost half): BOTH live
+      // producers emit `host_elect` only on the host-LEAVE path, and on that
+      // path `elected_by` IS the departing member's id (the same broadcasts
+      // the {@link HostElectPayload} docblock pins: phlix-server
+      // `SyncPlayManager.php:941-944`, phlix-hub
+      // `SyncPlayRelayWorker.php:2073-2075`). The `:8097` surface broadcasts
+      // no follow-up state, so pre-fix the departed host stayed a permanent
+      // ghost in the cached roster. Drop it; the `foldHostId` below already
+      // fixed the crown (W-min119 M-SYNCPLAY-15). Self-eviction guard: a
+      // frame that removes OUR own id has no honest producer (we would be
+      // disconnected, not electing), so the cached roster keeps us no matter
+      // what garbage `elected_by` carries.
+      const departed =
+        typeof payload.elected_by === 'string' && payload.elected_by !== ''
+          ? payload.elected_by
+          : null;
+      let group = this.group;
+      if (departed !== null && departed !== this.memberId) {
+        group = { ...group, members: group.members.filter((m) => m.id !== departed) };
+      }
+      this.group = SyncPlayClient.foldHostId(group, newHostId);
     }
     this.options.onHostChanged?.(newHostId);
   }
@@ -1151,7 +1314,16 @@ export class SyncPlayClient {
 
   private handleError(msg: RawMessage): void {
     const payload = msg as Partial<ErrorPayload>;
-    const code = payload.error_code ?? payload.code ?? 'UNKNOWN';
+    // M-SYNCPLAY-19: `??` let a non-string `error_code` (a number, an object)
+    // through `onError(_code: string, …)` — consumers string-interpolating the
+    // code rendered `[object Object]`. Each candidate must BE a string or it
+    // falls through, exactly as an absent one did.
+    const code =
+      typeof payload.error_code === 'string'
+        ? payload.error_code
+        : typeof payload.code === 'string'
+          ? payload.code
+          : 'UNKNOWN';
     const message = typeof payload.message === 'string' ? payload.message : 'Unknown error';
     this.options.onError?.(code, message);
   }
@@ -1184,8 +1356,12 @@ export class SyncPlayClient {
     }
     const memberName = typeof payload.member_name === 'string' ? payload.member_name : '';
     // Envelope field — read off msg (BaseMessage.timestamp), not the payload
-    // cast; the runtime check keeps hand-built/JSON-decoded junk honest.
-    const timestampMs = typeof msg.timestamp === 'number' ? msg.timestamp : undefined;
+    // cast; the runtime check keeps hand-built/JSON-decoded junk honest
+    // (M-SYNCPLAY-19: finite-only — `1e999` is not a timestamp).
+    const timestampMs =
+      typeof msg.timestamp === 'number' && Number.isFinite(msg.timestamp)
+        ? msg.timestamp
+        : undefined;
     this.options.onChat?.(payload.member_id, memberName, payload.message, timestampMs);
   }
 
@@ -1245,10 +1421,11 @@ export class SyncPlayClient {
     const isPlaying = typeof msg.is_playing === 'boolean' ? msg.is_playing : false;
     // Carrier unit normalization (M-SYNCPLAY-04): the `:8097` echo arrives in
     // UNIX seconds, the hub echo in ms — consumers get ms either way.
-    const serverTime =
-      typeof msg.server_time === 'number'
-        ? SyncPlayClient.serverTimeToMs(msg.server_time)
-        : this.getSynchronizedTime();
+    // M-SYNCPLAY-19: non-finite stamps take the same honest fallback.
+    const serverTime = SyncPlayClient.serverTimeOrNow(
+      msg.server_time,
+      () => this.getSynchronizedTime(),
+    );
     // S446 soft-correction carry (M-SYNCPLAY-08): the `:8097` server unicasts
     // a `nudge` object on the directed out-of-sync frame
     // (`SyncPlayManager.php:1569-1585`) riding this SAME type. Before this it
@@ -1268,13 +1445,15 @@ export class SyncPlayClient {
     // `client_time` off the frame and defaulted it to 0, handing consumers a
     // timestamp that never existed on any socket.
     const payload = msg as Partial<TimeSyncPayload>;
+    // M-SYNCPLAY-19: the four numeric fields must be FINITE numbers — a
+    // `1e999` stamp would otherwise reach consumers typed as real ms.
     if (
       typeof payload.member_id !== 'string' ||
       typeof payload.group_id !== 'string' ||
-      typeof payload.server_time !== 'number' ||
-      typeof payload.offset_ms !== 'number' ||
-      typeof payload.latency_ms !== 'number' ||
-      typeof payload.drift_rate !== 'number' ||
+      !(typeof payload.server_time === 'number' && Number.isFinite(payload.server_time)) ||
+      !(typeof payload.offset_ms === 'number' && Number.isFinite(payload.offset_ms)) ||
+      !(typeof payload.latency_ms === 'number' && Number.isFinite(payload.latency_ms)) ||
+      !(typeof payload.drift_rate === 'number' && Number.isFinite(payload.drift_rate)) ||
       typeof payload.is_stable !== 'boolean'
     ) {
       return;
@@ -1306,7 +1485,7 @@ export class SyncPlayClient {
       (g): GroupListSummaryRow => ({
         id: typeof g.id === 'string' ? g.id : '',
         name: typeof g.name === 'string' ? g.name : '',
-        member_count: typeof g.member_count === 'number' ? g.member_count : 0,
+        member_count: SyncPlayClient.finiteOr(g.member_count, 0), // M-SYNCPLAY-19
         has_password: typeof g.has_password === 'boolean' ? g.has_password : false,
         current_media: typeof g.current_media === 'string' ? g.current_media : null,
         is_playing: typeof g.is_playing === 'boolean' ? g.is_playing : false,

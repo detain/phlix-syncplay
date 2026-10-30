@@ -24,6 +24,8 @@ function makeHarness(memberId = 'me') {
   const commands: PlaybackCommand[] = [];
   const errors: Array<{ code: string; message: string }> = [];
   const joined: Array<{ id: string; name: string }> = [];
+  const left: Array<{ id: string; name: string }> = [];
+  const degraded: number[] = [];
   const hostChanges: Array<string | null> = [];
   const disconnects: number[] = [];
   const unknown: UnknownFrame[] = [];
@@ -38,12 +40,14 @@ function makeHarness(memberId = 'me') {
     onPlaybackCommand: (c) => commands.push(c),
     onError: (code, message) => errors.push({ code, message }),
     onMemberJoined: (m) => joined.push(m),
+    onMemberLeft: (m) => left.push(m),
+    onSyncDegraded: (streak) => degraded.push(streak),
     onHostChanged: (h) => hostChanges.push(h),
     onDisconnect: () => disconnects.push(1),
     onUnknownFrame: (frame) => unknown.push(frame),
   });
 
-  return { client, sent, clock, states, syncs, commands, errors, joined, hostChanges, disconnects, unknown };
+  return { client, sent, clock, states, syncs, commands, errors, joined, left, degraded, hostChanges, disconnects, unknown };
 }
 
 function groupStateMessage(hostId: string, yourId: string): RawMessage {
@@ -2045,9 +2049,11 @@ describe('SyncPlayClient — host changes recompute cached is_host flags (M-SYNC
     const group = h.client.getGroup();
     expect(group?.host_id).toBe('me');
     // The crown MUST move in the same mutation as host_id (was: stale true
-    // on 'host1' until the next group_state).
+    // on 'host1' until the next group_state). From W-min124 M-SYNCPLAY-03
+    // the elected_by ghost is dropped from the cached roster entirely on
+    // this frame shape (both live producers name the departing host there),
+    // so the surviving model is the single crowned member.
     expect(group?.members.map((m) => [m.id, m.is_host])).toEqual([
-      ['host1', false],
       ['me', true],
     ]);
   });
@@ -2085,5 +2091,305 @@ describe('SyncPlayClient — host changes recompute cached is_host flags (M-SYNC
     const group = h.client.getGroup();
     expect(group?.host_id).toBeNull();
     expect(group?.members.every((m) => !m.is_host)).toBe(true);
+  });
+});
+
+// --- W-min124 clusters -------------------------------------------------------
+
+describe('SyncPlayClient — host_elect drops the departed host (W-min124 M-SYNCPLAY-03, review syncplay__crossfe m3)', () => {
+  it('removes elected_by from the cached roster and moves the crown in the same fold', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'me',
+      elected_by: 'host1',
+    });
+    const group = h.client.getGroup();
+    expect(group?.members.map((m) => m.id)).toEqual(['me']);
+    expect(group?.host_id).toBe('me');
+    expect(group?.members.every((m) => m.is_host === (m.id === 'me'))).toBe(true);
+    expect(h.hostChanges).toEqual(['me']);
+  });
+
+  it('a frame naming MY OWN id as departing never evicts me from my own roster', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'host2',
+      elected_by: 'me',
+    });
+    const group = h.client.getGroup();
+    expect(group?.members.map((m) => m.id)).toContain('me');
+    expect(h.hostChanges).toEqual(['host2']);
+  });
+
+  it('a frame WITHOUT elected_by (hand-built/legacy shape) folds the crown and keeps the roster', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'me',
+    });
+    const group = h.client.getGroup();
+    // No departing-host truth exists in the frame — the library invents none.
+    expect(group?.members.map((m) => m.id)).toEqual(['host1', 'me']);
+    expect(group?.members[0]?.is_host).toBe(false);
+    expect(group?.members[1]?.is_host).toBe(true);
+  });
+
+  it('a NON-STRING elected_by is treated as absent (M-SYNCPLAY-19 discipline at the same boundary)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'me',
+      elected_by: 42,
+    });
+    expect(h.client.getGroup()?.members.map((m) => m.id)).toEqual(['host1', 'me']);
+  });
+});
+
+describe('SyncPlayClient — degraded time-sync is observable (W-min124 M-SYNCPLAY-14, review syncplay__gameux m3)', () => {
+  it('fires onSyncDegraded per rejected round with the streak; acceptance resets it', () => {
+    const h = makeHarness();
+    // Round 1: sent at t1=1000, received at 3000 → rtt 2000 > 1000 → REJECT.
+    h.client.pingTime();
+    h.clock.set(3000);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: 2000,
+    });
+    expect(h.degraded).toEqual([1]);
+    expect(h.syncs).toHaveLength(0);
+
+    // Round 2: accepted (rtt 1) → onSync fires, streak resets, nothing
+    // "degraded" is announced for the success.
+    h.client.pingTime();
+    h.clock.set(3001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 3000,
+      server_time: 3000,
+    });
+    expect(h.syncs).toHaveLength(1);
+    expect(h.degraded).toEqual([1]);
+
+    // Round 3: rejected again → streak is 1 (NOT 2): acceptance reset it.
+    h.client.pingTime();
+    h.clock.set(6001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 3001,
+      server_time: 4001,
+    });
+    expect(h.degraded).toEqual([1, 1]);
+    expect(h.syncs).toHaveLength(1);
+  });
+
+  it('a rejected round still releases the M-SYNCPLAY-13 single-flight slot', () => {
+    const h = makeHarness();
+    h.client.pingTime();
+    h.clock.set(3000);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: 2000,
+    });
+    h.sent.length = 0;
+    h.client.pingTime();
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it('a NON-FINITE pong server_time samples nothing and degrades nothing (round consumed)', () => {
+    const h = makeHarness();
+    h.client.pingTime();
+    h.clock.set(1001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: Number.POSITIVE_INFINITY,
+    });
+    expect(h.syncs).toHaveLength(0);
+    expect(h.degraded).toHaveLength(0);
+    expect(h.client.getTimeSync().getOffset()).toBe(0);
+    h.sent.length = 0;
+    h.client.pingTime(); // slot was released before the t2 gate (M-SYNCPLAY-13 law)
+    expect(h.sent).toHaveLength(1);
+  });
+});
+
+describe('SyncPlayClient — onMemberLeft roster diff (W-min124 M-SYNCPLAY-16, review syncplay__gameux m5)', () => {
+  function rosterState(roster: Array<{ id: string; name: string }>, groupId = 'sp_abc'): RawMessage {
+    return {
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: {
+        group_id: groupId,
+        host_id: roster[0]?.id ?? null,
+        members: roster.map((m, i) => ({ ...m, is_host: i === 0, joined_at: i })),
+      },
+    };
+  }
+
+  it('a member vanishing from the SAME room fires onMemberLeft once with their last known name', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(rosterState([{ id: 'host1', name: 'Host' }, { id: 'a', name: 'Ann' }, { id: 'me', name: 'Tester' }]));
+    h.client.handleIncoming(rosterState([{ id: 'host1', name: 'Host' }, { id: 'me', name: 'Tester' }]));
+    expect(h.left).toEqual([{ id: 'a', name: 'Ann' }]);
+  });
+
+  it('a room SWITCH fires no left events — the old roster belonged to the room we left', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(rosterState([{ id: 'host1', name: 'Host' }, { id: 'a', name: 'Ann' }, { id: 'me', name: 'Tester' }], 'sp_1'));
+    h.client.handleIncoming(rosterState([{ id: 'host2', name: 'H2' }, { id: 'me', name: 'Tester' }], 'sp_2'));
+    expect(h.left).toHaveLength(0);
+  });
+
+  it('arrivals are NOT diffed here — joins ride INFO frames; double-announcing is forbidden', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(rosterState([{ id: 'host1', name: 'Host' }, { id: 'me', name: 'Tester' }]));
+    h.client.handleIncoming(rosterState([{ id: 'host1', name: 'Host' }, { id: 'me', name: 'Tester' }, { id: 'a', name: 'Ann' }]));
+    expect(h.left).toHaveLength(0);
+    expect(h.joined).toHaveLength(0);
+  });
+
+  it('an unchanged re-broadcast fires nothing (refresh, not churn)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(rosterState([{ id: 'host1', name: 'Host' }, { id: 'me', name: 'Tester' }]));
+    h.client.handleIncoming(rosterState([{ id: 'host1', name: 'Host' }, { id: 'me', name: 'Tester' }]));
+    expect(h.left).toHaveLength(0);
+  });
+});
+
+describe('SyncPlayClient — typed boundary guards (W-min124 M-SYNCPLAY-19, review syncplay__secnet MINOR-3)', () => {
+  it('group_state fields that are not their declared type fall back like absent ones', () => {
+    const h = makeHarness();
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: {
+        group_id: { nested: true },
+        group_name: 7,
+        host_id: 123,
+        current_media_id: [],
+        current_media_duration: Number.POSITIVE_INFINITY,
+        playback_position: Number.POSITIVE_INFINITY,
+        playback_state: 'zzz',
+        member_count: 'two',
+        created_at: Number.NaN,
+        members: [{ id: 'me', name: 'Tester' }],
+      },
+    });
+    const group = h.states[0]?.group;
+    expect(group?.group_id).toBe('');
+    expect(group?.group_name).toBe('');
+    expect(group?.host_id).toBeNull();
+    expect(group?.current_media_id).toBeNull();
+    expect(group?.current_media_duration).toBeNull();
+    expect(group?.playback_position).toBe(0);
+    expect(group?.playback_state).toBe('stopped');
+    expect(group?.member_count).toBeUndefined();
+    expect(group?.created_at).toBeUndefined();
+  });
+
+  it('every canonical playback_state passes the membership guard untouched', () => {
+    const h = makeHarness();
+    for (const st of ['playing', 'paused', 'buffering', 'stopped'] as const) {
+      h.client.handleIncoming({
+        type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+        protocol_version: 1,
+        your_id: 'me',
+        group: { group_id: 'sp_abc', host_id: 'host1', playback_state: st, members: [] },
+      });
+    }
+    expect(h.states.map((s) => s.group.playback_state)).toEqual(['playing', 'paused', 'buffering', 'stopped']);
+  });
+
+  it('handleError only forwards STRING codes (first string candidate wins, else UNKNOWN)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming({ type: SYNCPLAY_MESSAGE_TYPES.ERROR, protocol_version: 1, code: 42, message: 'm' });
+    h.client.handleIncoming({ type: SYNCPLAY_MESSAGE_TYPES.ERROR, protocol_version: 1, error_code: {}, code: 'OK_CODE' });
+    h.client.handleIncoming({ type: SYNCPLAY_MESSAGE_TYPES.ERROR, protocol_version: 1, error_code: 'ERR_X', code: 'Y' });
+    expect(h.errors).toEqual([
+      { code: 'UNKNOWN', message: 'm' },
+      { code: 'OK_CODE', message: 'Unknown error' },
+      { code: 'ERR_X', message: 'Unknown error' },
+    ]);
+  });
+
+  it('playback commands with non-finite server_time take the clock-estimate fallback', () => {
+    const h = makeHarness();
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY,
+      protocol_version: 1,
+      member_id: 'other',
+      position: 5,
+      server_time: Number.POSITIVE_INFINITY,
+    });
+    expect(h.commands).toHaveLength(1);
+    expect(Number.isFinite(h.commands[0]?.serverTime)).toBe(true);
+  });
+
+  it('time_sync advisory frames with non-finite numerics are dropped whole', () => {
+    const states: TimeSyncState[] = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onTimeSync: (s) => states.push(s),
+    });
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_SYNC,
+      protocol_version: 1,
+      member_id: 'm1',
+      group_id: 'sp_abc',
+      server_time: 1700000000,
+      offset_ms: Number.POSITIVE_INFINITY,
+      latency_ms: 5,
+      drift_rate: 1,
+      is_stable: true,
+    });
+    expect(states).toHaveLength(0);
+  });
+
+  it('queue-broadcast nudge numerics non-finite degrade to undefined, never Infinity', () => {
+    const syncs: Array<{ position: number; nudge: unknown }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onPlaybackSync: (_m, position, _p, _s, nudge) => syncs.push({ position, nudge }),
+    });
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
+      protocol_version: 1,
+      member_id: 'other',
+      position: 10,
+      is_playing: true,
+      server_time: 1000,
+      nudge: { drift_ms: Number.POSITIVE_INFINITY, direction: 'behind', suggested_rate: Number.POSITIVE_INFINITY },
+    });
+    expect(syncs).toHaveLength(1);
+    expect(syncs[0]?.nudge).toEqual({
+      drift_ms: undefined,
+      direction: 'behind',
+      suggested_rate: undefined,
+      tolerance_ms: undefined,
+      cooldown_ms: undefined,
+    });
   });
 });

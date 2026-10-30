@@ -4,6 +4,51 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **W-min124 minors cluster (syncplay minors vein TAIL; review IDs
+  `M-SYNCPLAY-03/-14/-16/-19/-32` cured).**
+  - **M-SYNCPLAY-03 (`syncplay__crossfe` m3, ghost half):**
+    `handleHostElect` now drops the departing member named by
+    `elected_by` from the cached roster before the `foldHostId` crown
+    recompute (is_host half was W-min119 M-SYNCPLAY-15). Both live
+    producers emit `host_elect` ONLY on the host-leave path where
+    `elected_by` IS the departed host (phlix-server
+    `SyncPlayManager.php:941-944`; phlix-hub
+    `SyncPlayRelayWorker.php:2073-2075`), and `:8097` follows the
+    broadcast with no `group_state` — pre-fix the departed host was a
+    permanent ghost in the model. Frames lacking a string `elected_by`
+    keep the roster (no invented truth); a frame naming OUR OWN id can
+    never self-evict.
+  - **M-SYNCPLAY-14 (`syncplay__gameux` m3):** silent sync failures
+    are observable. `TimeSync.getSampleAgeMs()` reports the newest
+    sample's age against the injected clock (`null` when empty) —
+    sleep/frozen-tab windows no longer serve "stable" unmeasurably;
+    `onSyncDegraded(consecutiveRejections)` fires per matched-but-
+    rejected round (rtt outside SPEC §5's window, realistic for high-
+    RTT members) and resets on acceptance. The library deliberately
+    invents no freshness threshold or degraded count — the server's
+    `TimeSync.php` has neither; the consumer owns the policy.
+  - **M-SYNCPLAY-16 (`syncplay__gameux` m5):** `onMemberLeft` —
+    `handleGroupState` diffs the same room's outgoing roster against
+    the incoming one and announces vanished members with their last
+    known names (SPEC §6: a plain leave rides the next `group_state`,
+    so the diff IS the signal). Joins are NOT diffed (they arrive as
+    INFO frames; double-announcing is forbidden); room switches fire
+    nothing.
+  - **M-SYNCPLAY-19 (`syncplay__secnet` MINOR-3):** typed boundary
+    guards across `handleGroupState` (strings / nullable-finite
+    numerics / `playback_state` membership against the canonical four
+    with `'stopped'` fallback), `handleError` (only STRING codes are
+    forwarded), the pong numerics, the three `server_time` sites
+    (shared `serverTimeOrNow` helper), `handleTimeSync`,
+    `handleGroupList`, `normalizeMembers` / `normalizeQueue` /
+    `normalizeNudge` and the chat timestamp: `JSON.parse`'s `1e999`
+    → `Infinity` and a relay's `host_id: 123` can no longer flow into
+    fields the model types `string` / `number` / `PlaybackState`.
+  - **M-SYNCPLAY-32 (`syncplay__writer` MIN-13):** SPEC.md gains a
+    `## Contents` anchor list and §4's six anonymous payload
+    subsections are numbered `4.1`–`4.6` (§-refs no longer need
+    names). Three existing heading-needle pins re-anchored to the
+    numbered spellings (law unchanged).
 - **W-min123 minors cluster (syncplay minors vein; review IDs
   `M-SYNCPLAY-06/-10/-12/-13/-21` cured).**
   - **M-SYNCPLAY-06 (`syncplay__docmaint` minor-4, docs):** the

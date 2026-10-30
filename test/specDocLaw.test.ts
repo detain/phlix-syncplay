@@ -290,6 +290,48 @@ describe('SPEC §10.1 + code agree on ping pacing (W-min123 M-SYNCPLAY-12/-13, r
     expect(CLIENT).toMatch(/M-SYNCPLAY-12 \(parse-don't-validate\)/);
     expect(CLIENT).toMatch(/M-SYNCPLAY-13 \(single-flight\)/);
     // The slot release must precede the server_time gate (no-wedge law).
-    expect(CLIENT).toMatch(/const t1 = echoed \?\? outstanding;[\s\S]*?this\.lastPingSendTime = null;[\s\S]*?const t2 = typeof pong\.server_time/);
+    // Needle carries the W-min124 M-SYNCPLAY-19 finite-guard re-shape of the
+    // t2 line; the ORDER law itself is unchanged.
+    expect(CLIENT).toMatch(/const t1 = echoed \?\? outstanding;[\s\S]*?this\.lastPingSendTime = null;[\s\S]*?const t2 =\s*\n\s*typeof pong\.server_time === 'number' && Number\.isFinite/);
+  });
+});
+
+describe('SPEC TOC + §4 subsection numbering (W-min124 M-SYNCPLAY-32, review writer MIN-13)', () => {
+  it('a Contents list anchors the ten normative sections', () => {
+    expect(SPEC).toMatch(/^## Contents$/m);
+    expect(SPEC).toMatch(/\[Canonical decisions \(read these first\)\]\(#1-canonical-decisions-read-these-first\)/);
+    expect(SPEC).toMatch(/\[Reconnect & resume recovery\]\(#10-reconnect--resume-recovery\)/);
+  });
+
+  it('§4 numbers its six payload subsections 4.1–4.6', () => {
+    for (let i = 1; i <= 6; i++) {
+      expect(SPEC.split('\n').some((l) => l.startsWith(`### 4.${i} `))).toBe(true);
+    }
+    // The old bare H3 spellings must not return unnumbered (the §-refs the
+    // review complained about needed NAMES because these were anonymous).
+    expect(SPEC).not.toMatch(/^### Group management$/m);
+    expect(SPEC).not.toMatch(/^### Informational$/m);
+  });
+});
+
+describe('W-min124 observability + hygiene markers are named where consumers can find them', () => {
+  it('§5 carries the freshness/degradation client-observability law', () => {
+    expect(SPEC).toMatch(/\*\*Freshness and degradation \(client observability\)\.\*\*/);
+    expect(SPEC).toMatch(/getSampleAgeMs\(\)/);
+    expect(SPEC).toMatch(/onSyncDegraded\(consecutiveRejections\)/);
+  });
+
+  it('time-sync.ts implements the accessor behind its named marker', () => {
+    expect(TIMESYNC).toMatch(/M-SYNCPLAY-14/);
+    expect(TIMESYNC).toMatch(/getSampleAgeMs\(\): number \| null/);
+  });
+
+  it('client.ts carries the W-min124 markers and README advertises both new hooks', () => {
+    expect(CLIENT).toMatch(/M-SYNCPLAY-03/);
+    expect(CLIENT).toMatch(/M-SYNCPLAY-14/);
+    expect(CLIENT).toMatch(/M-SYNCPLAY-16/);
+    expect(CLIENT).toMatch(/M-SYNCPLAY-19/);
+    expect(README).toMatch(/onMemberLeft: \(\{ id, name \}\)/);
+    expect(README).toMatch(/onSyncDegraded: \(consecutiveRejections\)/);
   });
 });

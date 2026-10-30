@@ -161,6 +161,10 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	reset() {
 		this.samples = [], this.driftRate = 1, this.samplesVersion++;
 	}
+	getSampleAgeMs() {
+		let e = this.samples[this.samples.length - 1];
+		return e === void 0 ? null : this.now() - e.timestamp * 1e3;
+	}
 	getStatus() {
 		return {
 			offset: this.getOffset(),
@@ -183,6 +187,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	seekFlushTimer = null;
 	group = null;
 	lastPingSendTime = null;
+	consecutiveSyncRejections = 0;
 	constructor(e) {
 		this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = e.memberName ?? "User", this.timeSync = new m(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
 	}
@@ -354,16 +359,16 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	handleTimePong(e) {
 		let t = this.lastPingSendTime;
 		if (t === null) return;
-		let n = e, r = typeof n.client_time == "number" ? n.client_time : null;
+		let n = e, r = typeof n.client_time == "number" && Number.isFinite(n.client_time) ? n.client_time : null;
 		if (r !== null && r !== t) return;
 		let i = this.now(), a = r ?? t;
 		this.lastPingSendTime = null;
-		let o = typeof n.server_time == "number" ? n.server_time : null;
-		o !== null && this.timeSync.addSample(a, o, o, i) && this.options.onSync?.({
+		let o = typeof n.server_time == "number" && Number.isFinite(n.server_time) ? n.server_time : null;
+		o !== null && (this.timeSync.addSample(a, o, o, i) ? (this.consecutiveSyncRejections = 0, this.options.onSync?.({
 			offset: this.timeSync.getOffset(),
 			latency: this.timeSync.getLatency(),
 			isStable: this.timeSync.isStable()
-		});
+		})) : (this.consecutiveSyncRejections += 1, this.options.onSyncDegraded?.(this.consecutiveSyncRejections)));
 	}
 	static normalizeMembers(e, t) {
 		let n;
@@ -374,7 +379,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			id: typeof e.id == "string" ? e.id : "",
 			name: typeof e.name == "string" ? e.name : "",
 			is_host: e.id === t,
-			joined_at: typeof e.joined_at == "number" ? e.joined_at : 0
+			joined_at: typeof e.joined_at == "number" && Number.isFinite(e.joined_at) ? e.joined_at : 0
 		}));
 	}
 	static foldHostId(e, t) {
@@ -390,48 +395,77 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	static serverTimeToMs(e) {
 		return e < 0xe8d4a51000 ? e * 1e3 : e;
 	}
+	static serverTimeOrNow(e, n) {
+		return typeof e == "number" && Number.isFinite(e) ? t.serverTimeToMs(e) : n();
+	}
 	static normalizeQueue(e) {
 		if (Array.isArray(e)) return e.map((e) => ({
 			media_id: typeof e.media_id == "string" ? e.media_id : "",
 			media_info: typeof e.media_info == "object" && e.media_info !== null ? e.media_info : void 0,
-			added_at: typeof e.added_at == "number" ? e.added_at : void 0,
+			added_at: typeof e.added_at == "number" && Number.isFinite(e.added_at) ? e.added_at : void 0,
 			added_by: typeof e.added_by == "string" || e.added_by === null ? e.added_by : void 0
 		}));
 	}
 	static normalizeNudge(e) {
 		if (typeof e != "object" || !e) return;
-		let t = e;
+		let n = e;
 		return {
-			drift_ms: typeof t.drift_ms == "number" ? t.drift_ms : void 0,
-			direction: t.direction === "behind" || t.direction === "ahead" ? t.direction : void 0,
-			suggested_rate: typeof t.suggested_rate == "number" ? t.suggested_rate : void 0,
-			tolerance_ms: typeof t.tolerance_ms == "number" ? t.tolerance_ms : void 0,
-			cooldown_ms: typeof t.cooldown_ms == "number" ? t.cooldown_ms : void 0
+			drift_ms: t.finiteOrUndefined(n.drift_ms),
+			direction: n.direction === "behind" || n.direction === "ahead" ? n.direction : void 0,
+			suggested_rate: t.finiteOrUndefined(n.suggested_rate),
+			tolerance_ms: t.finiteOrUndefined(n.tolerance_ms),
+			cooldown_ms: t.finiteOrUndefined(n.cooldown_ms)
 		};
+	}
+	static strOr(e, t) {
+		return typeof e == "string" ? e : t;
+	}
+	static strOrNull(e) {
+		return typeof e == "string" ? e : null;
+	}
+	static finiteOr(e, t) {
+		return typeof e == "number" && Number.isFinite(e) ? e : t;
+	}
+	static finiteOrNull(e) {
+		return typeof e == "number" && Number.isFinite(e) ? e : null;
+	}
+	static finiteOrUndefined(e) {
+		return typeof e == "number" && Number.isFinite(e) ? e : void 0;
+	}
+	static playbackState(e) {
+		return e === "playing" || e === "paused" || e === "buffering" || e === "stopped" ? e : "stopped";
 	}
 	handleGroupState(e) {
 		let n = e, r = n.group;
 		if (typeof r != "object" || !r) return;
-		this.group !== null && this.group.group_id !== (r.group_id ?? "") && this.cancelSeekCoalescing();
-		let i = t.normalizeMembers(r.members, r.host_id ?? null);
-		this.group = {
-			group_id: r.group_id ?? "",
-			group_name: r.group_name ?? "",
-			members: i,
-			member_count: r.member_count,
-			host_id: r.host_id ?? null,
-			current_media_id: r.current_media_id ?? null,
-			current_media_duration: r.current_media_duration ?? null,
-			playback_position: r.playback_position ?? 0,
-			playback_state: r.playback_state ?? "stopped",
+		let i = t.strOr(r.group_id, ""), a = t.strOrNull(r.host_id);
+		this.group !== null && this.group.group_id !== i && this.cancelSeekCoalescing();
+		let o = this.group, s = t.normalizeMembers(r.members, a);
+		if (this.group = {
+			group_id: i,
+			group_name: t.strOr(r.group_name, ""),
+			members: s,
+			member_count: t.finiteOrUndefined(r.member_count),
+			host_id: a,
+			current_media_id: t.strOrNull(r.current_media_id),
+			current_media_duration: t.finiteOrNull(r.current_media_duration),
+			playback_position: t.finiteOr(r.playback_position, 0),
+			playback_state: t.playbackState(r.playback_state),
 			queue: t.normalizeQueue(r.queue),
-			created_at: r.created_at,
-			last_activity_at: r.last_activity_at
-		}, this.options.onState?.(this.group, n.your_id);
+			created_at: t.finiteOrUndefined(r.created_at),
+			last_activity_at: t.finiteOrUndefined(r.last_activity_at)
+		}, o !== null && o.group_id === i) {
+			let e = new Set(s.map((e) => e.id));
+			for (let t of o.members) e.has(t.id) || this.options.onMemberLeft?.({
+				id: t.id,
+				name: t.name
+			});
+		}
+		this.options.onState?.(this.group, n.your_id);
 	}
 	handlePlayback(e, n) {
 		if ((typeof n.member_id == "string" ? n.member_id : void 0) === this.memberId || typeof n.position != "number" || !Number.isFinite(n.position)) return;
-		let r = n.position, i = typeof n.server_time == "number" ? t.serverTimeToMs(n.server_time) : this.getSynchronizedTime();
+		let r = n.position, i = t.serverTimeOrNow(n.server_time, () => this.getSynchronizedTime());
 		this.options.onPlaybackCommand?.({
 			type: e,
 			position: r,
@@ -440,7 +474,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	}
 	handleSeek(e) {
 		if ((typeof e.member_id == "string" ? e.member_id : void 0) === this.memberId || typeof e.to_position != "number" || !Number.isFinite(e.to_position)) return;
-		let n = e.to_position, r = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime();
+		let n = e.to_position, r = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime());
 		this.options.onPlaybackCommand?.({
 			type: "seek",
 			position: n,
@@ -448,8 +482,15 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		});
 	}
 	handleHostElect(e) {
-		let n = e.elected_id ?? null;
-		this.group !== null && (this.group = t.foldHostId(this.group, n)), this.options.onHostChanged?.(n);
+		let n = e, r = n.elected_id ?? null;
+		if (this.group !== null) {
+			let e = typeof n.elected_by == "string" && n.elected_by !== "" ? n.elected_by : null, i = this.group;
+			e !== null && e !== this.memberId && (i = {
+				...i,
+				members: i.members.filter((t) => t.id !== e)
+			}), this.group = t.foldHostId(i, r);
+		}
+		this.options.onHostChanged?.(r);
 	}
 	handleInfo(e) {
 		let t = e;
@@ -459,7 +500,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		}), typeof t.message == "string" && this.options.onInfo?.(t.message);
 	}
 	handleError(e) {
-		let t = e, n = t.error_code ?? t.code ?? "UNKNOWN", r = typeof t.message == "string" ? t.message : "Unknown error";
+		let t = e, n = typeof t.error_code == "string" ? t.error_code : typeof t.code == "string" ? t.code : "UNKNOWN", r = typeof t.message == "string" ? t.message : "Unknown error";
 		this.options.onError?.(n, r);
 	}
 	handleTyping(e) {
@@ -469,7 +510,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	handleChat(e) {
 		let t = e;
 		if (typeof t.member_id != "string" || typeof t.message != "string") return;
-		let n = typeof t.member_name == "string" ? t.member_name : "", r = typeof e.timestamp == "number" ? e.timestamp : void 0;
+		let n = typeof t.member_name == "string" ? t.member_name : "", r = typeof e.timestamp == "number" && Number.isFinite(e.timestamp) ? e.timestamp : void 0;
 		this.options.onChat?.(t.member_id, n, t.message, r);
 	}
 	handlePlaybackQueueBroadcast(e) {
@@ -486,12 +527,12 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 	handlePlaybackSync(e) {
 		let n = typeof e.member_id == "string" ? e.member_id : void 0;
 		if (typeof e.position != "number" || !Number.isFinite(e.position)) return;
-		let r = e.position, i = typeof e.is_playing == "boolean" && e.is_playing, a = typeof e.server_time == "number" ? t.serverTimeToMs(e.server_time) : this.getSynchronizedTime(), o = t.normalizeNudge(e.nudge);
+		let r = e.position, i = typeof e.is_playing == "boolean" && e.is_playing, a = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime()), o = t.normalizeNudge(e.nudge);
 		this.options.onPlaybackSync?.(n ?? "", r, i, a, o);
 	}
 	handleTimeSync(e) {
 		let t = e;
-		typeof t.member_id == "string" && typeof t.group_id == "string" && typeof t.server_time == "number" && typeof t.offset_ms == "number" && typeof t.latency_ms == "number" && typeof t.drift_rate == "number" && typeof t.is_stable == "boolean" && this.options.onTimeSync?.({
+		typeof t.member_id == "string" && typeof t.group_id == "string" && typeof t.server_time == "number" && Number.isFinite(t.server_time) && typeof t.offset_ms == "number" && Number.isFinite(t.offset_ms) && typeof t.latency_ms == "number" && Number.isFinite(t.latency_ms) && typeof t.drift_rate == "number" && Number.isFinite(t.drift_rate) && typeof t.is_stable == "boolean" && this.options.onTimeSync?.({
 			memberId: t.member_id,
 			groupId: t.group_id,
 			serverTimeSec: t.server_time,
@@ -502,17 +543,17 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		});
 	}
 	handleGroupList(e) {
-		let t = e.groups;
-		if (!Array.isArray(t)) return;
-		let n = t.map((e) => ({
+		let n = e.groups;
+		if (!Array.isArray(n)) return;
+		let r = n.map((e) => ({
 			id: typeof e.id == "string" ? e.id : "",
 			name: typeof e.name == "string" ? e.name : "",
-			member_count: typeof e.member_count == "number" ? e.member_count : 0,
+			member_count: t.finiteOr(e.member_count, 0),
 			has_password: typeof e.has_password == "boolean" && e.has_password,
 			current_media: typeof e.current_media == "string" ? e.current_media : null,
 			is_playing: typeof e.is_playing == "boolean" && e.is_playing
 		}));
-		this.options.onGroupList?.(n);
+		this.options.onGroupList?.(r);
 	}
 	dispatch(e, t) {
 		this.send(i(e, t, this.now));

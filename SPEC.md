@@ -14,6 +14,21 @@ The authoritative implementation is the PHP server:
 
 ---
 
+## Contents
+
+1. [Canonical decisions (read these first)](#1-canonical-decisions-read-these-first)
+2. [Framing](#2-framing)
+3. [Message types (all 19)](#3-message-types-all-19)
+4. [Message payloads (exact wire fields)](#4-message-payloads-exact-wire-fields) — subsections `4.1`–`4.6`
+5. [NTP time synchronization (mirrors `TimeSync.php`)](#5-ntp-time-synchronization-mirrors-timesyncphp)
+6. [Member-event handling (what the server ACTUALLY does)](#6-member-event-handling-what-the-server-actually-does)
+7. [Normalized client divergences](#7-normalized-client-divergences)
+8. [Security model](#8-security-model) — subsections `8.1`–`8.4`
+9. [Server-derived identity contract](#9-server-derived-identity-contract-member_id--host_id) — subsections `9.1`–`9.2`
+10. [Reconnect & resume recovery](#10-reconnect--resume-recovery) — subsections `10.1`–`10.3`
+
+---
+
 ## 1. Canonical decisions (read these first)
 
 1. **Message-type prefix is `syncplay_` with an UNDERSCORE.**
@@ -174,7 +189,7 @@ All field names are **snake_case**.
 > (see the §4 `time_sync` block below). A consumer that needs ms there
 > multiplies by 1000 itself.
 
-### Group management
+### 4.1 Group management
 
 `syncplay_group_create` (client → server)
 ```
@@ -298,7 +313,7 @@ ruling gates the REST reads `GET /api/v1/syncplay/groups` and
 `GET /api/v1/syncplay/groups/{id}` (a non-member's read of a foreign group is
 an existence-agnostic 404).
 
-### Playback control (play/pause/seek/queue host-only on the server, non-hosts get a `NOT_HOST` error; `syncplay_playback_sync` is the member-permitted state report — §9 item 2)
+### 4.2 Playback control (play/pause/seek/queue host-only on the server, non-hosts get a `NOT_HOST` error; `syncplay_playback_sync` is the member-permitted state report — §9 item 2)
 
 `syncplay_playback_play` / `syncplay_playback_pause`
 ```
@@ -384,7 +399,7 @@ nudge?: {                  (S446 soft-desync correction — directed frames ONLY
 > frame that carried none — echo and hub alike — the argument is `undefined`,
 > never a fabricated zero object.
 
-### Chat
+### 4.3 Chat
 
 `syncplay_chat` (both directions — the shapes DIFFER; M-SYNCPLAY-11 cure of the
 single-shape drift)
@@ -432,7 +447,7 @@ is_typing: boolean
 > outbound is `sendTyping(isTyping)` since M-SYNCPLAY-11 (the inbound arm was
 > already wired — the missing sender half made the indicator one-way).
 
-### Host management
+### 4.4 Host management
 
 `syncplay_host_transfer` (client → server, voluntary)
 ```
@@ -452,7 +467,7 @@ elected_id: string | null
 elected_by: string
 ```
 
-### Time sync (see §5)
+### 4.5 Time sync (see §5)
 
 `syncplay_time_ping` (client → server)
 ```
@@ -497,7 +512,7 @@ is_stable: boolean         (server TimeSync::isSyncStable())
 > belongs to `time_ping`/`time_pong` only). On `:8804` the hub has no producer
 > and refuses inbound use (see §8.4).
 
-### Informational
+### 4.6 Informational
 
 `syncplay_error` (server → client)
 ```
@@ -591,6 +606,16 @@ do not inject a seconds clock.
   is client-side hardening and changes nothing on the wire.
 - **Adjusted position**:
   `position + (synchronizedNow - serverTime) * driftRate`.
+- **Freshness and degradation (client observability).** The window above has
+  no expiry: after a sleep or a frozen timer tab the aggregates serve a hours-
+  old window with full confidence. The library therefore exposes the inputs
+  to that judgement without inventing a policy — `TimeSync.getSampleAgeMs()`
+  (age of the newest sample against the injected clock; `null` when empty)
+  and an `onSyncDegraded(consecutiveRejections)` event fired per REJECTED
+  round that still matched its ping (a realistic outcome for high-RTT
+  members against `MAX_ACCEPTABLE_RTT = 1000`), reset by any acceptance. The
+  server's `TimeSync.php` has neither a freshness bound nor a reject
+  counter, so this is client-side observability only — no wire meaning.
 
 ---
 

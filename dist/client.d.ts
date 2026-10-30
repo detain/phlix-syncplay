@@ -161,8 +161,39 @@ export interface SyncPlayClientOptions {
      */
     onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
     onSync?: (_status: TimeSyncStatus) => void;
+    /**
+     * A matched pong completed its round trip but the sample was REJECTED by the
+     * NTP window (`rtt < 0 || rtt > MAX_ACCEPTABLE_RTT`, SPEC §5). Pre-fix every
+     * rejection was silent: a distant member (cellular / intercontinental RTT
+     * against a home server, realistic at `MAX_ACCEPTABLE_RTT = 1000`) watched
+     * `isStable()` sit `false` forever with no signal to explain it
+     * (W-min124 M-SYNCPLAY-14, review `syncplay__gameux` m3). Fires per
+     * rejection with the CURRENT consecutive-rejection streak; any accepted
+     * sample resets the streak to 0 and fires nothing. The library deliberately
+     * picks no "degraded" threshold — after N rejections is consumer policy
+     * (spinner copy, retry pacing, transport hint). Observes what was already
+     * true at the boundary; changes no sync math.
+     */
+    onSyncDegraded?: (_consecutiveRejections: number) => void;
     onPlaybackCommand?: (_command: PlaybackCommand) => void;
     onMemberJoined?: (_member: {
+        id: string;
+        name: string;
+    }) => void;
+    /**
+     * A member that was in the cached roster of the SAME room is absent from the
+     * `group_state` roster just folded (W-min124 M-SYNCPLAY-16, review
+     * `syncplay__gameux` m5). Symmetric counterpart of {@link onMemberJoined},
+     * closing the "Sam left the party" gap embedders previously hand-rolled with
+     * their own set diffs on four platforms. SPEC §6 wire law: a plain leave
+     * emits no dedicated frame — membership changes ride the next
+     * `syncplay_group_state` — so this diff IS the leave signal, and the
+     * join half is deliberately NOT diffed here (joins already arrive as INFO
+     * frames; diffing them too would double-announce the same member).
+     * Room switches fire nothing: the old roster belonged to the room being
+     * left, not to this one.
+     */
+    onMemberLeft?: (_member: {
         id: string;
         name: string;
     }) => void;
@@ -319,6 +350,12 @@ export declare class SyncPlayClient {
     private group;
     /** Local t1 of the most recent outstanding ping, ms. */
     private lastPingSendTime;
+    /**
+     * M-SYNCPLAY-14: consecutive REJECTED (but matched-consumed) time-sync
+     * samples; reset by any accepted sample. Feeds `onSyncDegraded` so silence
+     * at the sync boundary becomes observable.
+     */
+    private consecutiveSyncRejections;
     constructor(options: SyncPlayClientOptions);
     /**
      * Parse the seek-throttle window at the constructor boundary: accepted
@@ -541,6 +578,14 @@ export declare class SyncPlayClient {
      */
     static serverTimeToMs(raw: number): number;
     /**
+     * The one `server_time` acceptance law shared by the three consumers
+     * (playback / seek / playback_sync, M-SYNCPLAY-12 set): a FINITE number is
+     * unit-normalized via {@link serverTimeToMs}; anything else (absent,
+     * non-numeric, `1e999` → `Infinity`) yields the caller's honest
+     * clock-estimate fallback (M-SYNCPLAY-19).
+     */
+    private static serverTimeOrNow;
+    /**
      * Normalize the `group.queue` array a `group_state` frame carries
      * (M-SYNCPLAY-06: this handler used to drop the field entirely). Producer
      * coordinates and per-carrier item fields are documented on
@@ -565,6 +610,34 @@ export declare class SyncPlayClient {
      * `undefined` too (drop-the-garbage, keep-the-state).
      */
     private static normalizeNudge;
+    /**
+     * Boundary coercion for wire strings (W-min124 M-SYNCPLAY-19, review
+     * `syncplay__secnet` MINOR-3): `?? fallback` only catches null/undefined, so
+     * a hub-relay bug or hostile relay could flow a NUMBER or OBJECT into fields
+     * typed `string`/`string | null` — the model then lies and every
+     * `=== hostId`-style derivation silently breaks. Non-strings fall back
+     * exactly like an absent field did before.
+     */
+    private static strOr;
+    private static strOrNull;
+    /**
+     * Numeric counterpart of {@link strOr} (M-SYNCPLAY-19): `JSON.parse` happily
+     * yields `Infinity` for `1e999` and it passes a bare `typeof === 'number'`
+     * check, then flows into player sinks (`currentTime = Infinity` throws in
+     * browsers) and poisons the TimeSync offset average. Only FINITE numbers
+     * are accepted; anything else takes the documented fallback.
+     */
+    private static finiteOr;
+    private static finiteOrNull;
+    private static finiteOrUndefined;
+    /**
+     * Membership-check `playback_state` against the canonical four (SPEC §4,
+     * `PlaybackState` in `messages.ts`); anything else degrades to `'stopped'`
+     * (M-SYNCPLAY-19). A cast through this guard is the difference between a
+     * consumer `switch` that always lands on a real case and one that matches
+     * nothing while the model claims `PlaybackState`.
+     */
+    private static playbackState;
     private handleGroupState;
     private handlePlayback;
     private handleSeek;

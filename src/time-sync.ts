@@ -388,6 +388,34 @@ export class TimeSync {
     this.samplesVersion++;
   }
 
+  /**
+   * Age of the NEWEST accepted sample, in **milliseconds**, measured against
+   * this class's own injected clock (W-min124 M-SYNCPLAY-14, review
+   * `syncplay__gameux` m3). `null` when the window is empty.
+   *
+   * The window carries no expiry of its own: after a laptop sleep or a
+   * frozen timer tab the aggregates keep serving a window recorded hours ago
+   * with full confidence — `isStable()` says "stable" about time that is
+   * merely STALE. This accessor exists because that gap is only observable
+   * with a clock, and the clock was already injected here; consumers decide
+   * their own freshness bound (and whether to `reset()` and re-ping when it
+   * is exceeded). The library deliberately invents no default threshold —
+   * the server's `TimeSync.php` has no freshness bound either, so a
+   * built-in one would make the library stricter than the wire law it
+   * mirrors.
+   *
+   * Scale note: `OffsetSample.timestamp` stores SECONDS (the `now() / 1000`
+   * drift bridge, see {@link addSample}); this accessor converts back, so
+   * its output is ms like every other public number here.
+   */
+  getSampleAgeMs(): number | null {
+    const last = this.samples[this.samples.length - 1];
+    if (last === undefined) {
+      return null;
+    }
+    return this.now() - last.timestamp * 1000;
+  }
+
   /** Snapshot of current sync state (parallels TimeSync::getStatus). */
   getStatus(): {
     offset: number;

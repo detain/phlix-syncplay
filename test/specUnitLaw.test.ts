@@ -132,7 +132,10 @@ describe('SPEC §4 — the single time-unit law with the named :8097 exception',
     // latency_ms / drift_rate (`float` ≈1.0) / is_stable (`bool`) — nothing
     // else; envelope keys belong to §2.
     const start = SEC4.indexOf('`syncplay_time_sync` (server → client)');
-    const end = SEC4.indexOf('### Informational');
+    // Needle carries the W-min124 M-SYNCPLAY-32 subsection number; the
+    // block-slice law (time_sync field roster ends at the Informational H3)
+    // is unchanged.
+    const end = SEC4.indexOf('### 4.6 Informational');
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const block = SEC4.slice(start, end);
