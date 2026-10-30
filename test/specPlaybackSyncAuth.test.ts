@@ -5,40 +5,47 @@
  * `syncplay_playback_sync` a host-only COMMAND while §9.1 three lines later
  * called it a STATE REPORT the server broadcasts to EVERY member. The live
  * producers settle it: the `NOT_HOST` gates sit on play / pause / seek /
- * QUEUE / host_transfer (phlix-server `SyncPlayManager.php:1071, :1123,
- * :1169, :1219, :1413` @ 3cfd26c2; hub `SyncPlayRelayWorker.php:1605,
- * :1707, :1873` @ 34ae8e3e) and NOT on `handlePlaybackSync` (:1483, whose own
- * docblock states "Any member can request a playback sync"). The old list was
+ * QUEUE / host_transfer (phlix-server `SyncPlayManager.php:1069, :1121,
+ * :1167, :1217, :1411` @ 0b318623; hub `SyncPlayRelayWorker.php:2116,
+ * :2218, :2387` @ 4578711f) and NOT on `handlePlaybackSync` (:1481, whose
+ * own docblock states "Any member can request a playback sync"). These are
+ * era-stamped cites with no verify-cites machinery in this repo (estate
+ * pattern; the dev-only tool lives in phlix-contracts) — hand-re-verified
+ * against origin/master tips at the 2026-10-30 rider probe; re-read before
+ * trusting. The old list was
  * doubly wrong: it gated `_sync` AND omitted `_queue`. A server team
  * implementing the old §9 MUST-language would 4xx every non-host member's
  * position report, breaking the S294 re-anchor design and starving the S446
  * per-member drift policy — both of which exist ONLY because non-hosts report.
  *
- * Legs:
+ * Legs (numbering mirrors the file's 7 its, in order — one per `it`):
  *  1. §9 item 2's gated list names the producer set exactly — includes
- *     `_queue`, excludes the sync type — and carries the affirmative
- *     member-permitted clause with a "not a server gap" ruling sentence.
- *  2. §9.1's STATE-REPORT sentence holds (guard against curing the
+ *     `_queue`, excludes the sync type.
+ *  2. §9 item 2 carries the affirmative member-permitted clause with the
+ *     "not a server gap" ruling sentence.
+ *  3. §9.1's STATE-REPORT sentence holds (guard against curing the
  *     contradiction from the wrong side — the invariant is §9 ≡ §9.1 ≡
  *     producer).
- *  3. §4's "4.2 Playback control" heading names the member-permitted exception
+ *  4. §4's "4.2 Playback control" heading names the member-permitted exception
  *     and the retired blanket claim ("host-only on the server" as an
  *     unscoped umbrella) never returns.
- *  4. README quick-start: `reportPosition` does not sit in the Host-only
+ *  5. README quick-start: `reportPosition` does not sit in the Host-only
  *     controls block (it moved in the cure; the pre-cure example — the exact
  *     copy-paste a client team follows — listed it there).
- *  5. (M17 rider, this-lane src cure) `src/client.ts` doc-comments carry the
- *     same truth: the playback section banner no longer over-claims "host
- *     only" across `reportPosition`, and the `reportPosition` docblock states
- *     member-permission instead of the "typically host-driven" hedge — the
- *     docblock ships verbatim in `dist/client.d.ts`, so the wrong side
- *     reached every JS consumer's IDE, not just this repo's readers.
+ *  6. (M17 rider, this-lane src cure) the `src/client.ts` playback section
+ *     banner names the real gate set and exempts the report — it no longer
+ *     over-claims "host only" across `reportPosition`; the docblock ships
+ *     verbatim in `dist/client.d.ts`, so the wrong side reached every JS
+ *     consumer's IDE, not just this repo's readers.
+ *  7. (M17 rider) the `reportPosition` docblock states member-permission
+ *     instead of the "typically host-driven" hedge.
  *
- * Red-on-parent: at 72e8aac leg 1 trips on `_sync` in the item-2 list (and
- * the absent `_queue`/ruling clauses), leg 3 on the blanket heading, leg 4 on
- * `reportPosition` inside the Host-only block. Legs 2 is the held-side pin,
- * green on both sides by design. Leg 5 is red at the cure head `eff7fec`
- * (that lane left the src fiction as a named rider) and green only where the
+ * Red-on-parent: at 72e8aac legs 1-2 trip on the item-2 list (`_sync`
+ * branded host-only, `_queue` and the ruling clauses absent), leg 4 on the
+ * blanket heading, leg 5 on `reportPosition` inside the Host-only block —
+ * the disclosed 4-of-5-cure-legs red. Leg 3 is the held-side pin, green on
+ * both sides by design. Legs 6-7 are red at the cure head `eff7fec` (that
+ * lane left the src fiction as a named rider) and green only where the
  * banner/docblock cure coexists.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>

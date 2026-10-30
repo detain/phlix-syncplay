@@ -4,6 +4,20 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **R-SYNCPLAY-07 rider (review riders W6/W7).** Comment currency in
+  `test/specPlaybackSyncAuth.test.ts`: the header leg roster now mirrors the
+  file's actual 7 `it`s (it still said "legs 1-5" after the M17 rider
+  describe contributed legs 6-7), and its producer coordinate cites re-pin
+  to the probe-day `origin/master` tips — server `SyncPlayManager.php`
+  `NOT_HOST` `:1069/:1121/:1167/:1217/:1411` and `handlePlaybackSync`
+  `:1481` @ 0b318623; hub `SyncPlayRelayWorker.php` `NOT_HOST`
+  `:2116/:2218/:2387` @ 4578711f — now carrying an explicit era-stamp and
+  hand-re-verify disclosure (the repo deliberately has no verify-cites
+  machinery; the dev-only tool lives in phlix-contracts). SPEC §9's own
+  correction prose keeps its truthful `@ 3cfd26c2`-era coords (venue law:
+  the contract spec is untouched by this rider). Comments only — zero
+  executable delta; suite held at 12 files / 289 tests, dist rebuild
+  aggregate md5 unchanged.
 - **W-min124 minors cluster (syncplay minors vein TAIL; review IDs
   `M-SYNCPLAY-03/-14/-16/-19/-32` cured).**
   - **M-SYNCPLAY-03 (`syncplay__crossfe` m3, ghost half):**
