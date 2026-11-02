@@ -4,6 +4,24 @@ All notable changes to `@phlix/syncplay` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.1.6] - 2026-11-02
+
+The feature release the estate's consumers re-pin against (tag wave v0.1.6).
+Additive client surface — watch-party chat/queue frames (`onChat` /
+`onQueueChanged`, `sendChat` / `sendTyping`) typed to producer bytes, the seek
+command-repeat coalescing throttle, the `host_elect` ghost-roster cure, ms
+unit discipline, and `server_time` normalization across playback-sync
+carriers — plus SPEC-correct NTP time-sync (`pingTime` single-flight,
+`getSampleAgeMs`, `onSyncDegraded`) and typed boundary guards through the
+frame handlers. Lands riders R-SYNCPLAY-02/-03/-04/-07 and the W-min119..124
+minors vein; SPEC.md carries the corresponding wire truths. `dist/` is
+committed build output, deterministic across rebuilds — dual-recipe pins,
+all-files `0ee4e8d333cdc169edec1eef9e2c278c`, non-map
+`2af88ce675702a037ae64856e9eaff79`. Consumers pinning `#v0.1.5` (tizen,
+mobile, ui-internal) re-pin to `#v0.1.6` in the wave's consumer step, not by
+this tag.
+
 - **R-SYNCPLAY-07 rider (review riders W6/W7).** Comment currency in
   `test/specPlaybackSyncAuth.test.ts`: the header leg roster now mirrors the
   file's actual 7 `it`s (it still said "legs 1-5" after the M17 rider
