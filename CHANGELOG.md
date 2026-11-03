@@ -5,6 +5,26 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-03
+
+The review→fix campaign vein atop v0.1.6: the lib guard wave (boundary
+frame law — malformed/garbage frames DROP at the decoder instead of
+folding fabricated defaults into typed state; `onFrameDropped` /
+`destroy()` seams, host-eviction `onMemberLeft`), the tooling wave
+(true-UMD dual-format dist, ES2017 build target, types-first exports +
+`sideEffects: false`, CI node 22/24 matrix with the committed-dist
+freshness gate, two-tier audit, and the RELEASE.md runbook), three
+SPEC/README prose-currency waves (clarify-only), and the deferred-lane
+normalization wave recorded below. `src/` moved since v0.1.6 — unlike
+that line's byte-ident dist — so the committed `dist/` here is rebuilt
+output, deterministic ×2 at this release line; dual-recipe pins all-files
+`6fc60aa93b505e7515c537407a7c5e62`, non-map
+`b38b2b940cf8984cbd28c608f6c81be6`. The wire surface toward server/hub is
+unchanged (no frame-type or error-code deltas; SPEC's wire-era stamp
+correctly stays v0.1.6); the library's public surface grew additively.
+Consumers pinning `#v0.1.6` (tizen, mobile, ui-internal) re-pin to
+`#v0.1.7` in the wave's consumer step, not by this tag.
+
 - **Deferred-lane normalization wave (`sp-def`, 2026-11-04) — SPEC + test only.**
   Owner opened the six deferred wire-semantics items (`.reviews/FIXLOG/syncplay.md`
   Deferred §: M1/M3/M5/M8/M12 + m10) under the "do what you can" triage. Each
