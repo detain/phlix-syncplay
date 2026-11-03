@@ -8,17 +8,25 @@ import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
 
 // Framework-agnostic lib build — NO framework plugins, NO runtime externals.
-// Emits ES + CJS so the package is consumable from RN/Metro, Electron renderer,
-// Tizen webpack, and Node/CJS alike. There is no WebSocket or DOM dependency:
-// the transport and clock are injected by the consumer.
+// Emits ES + UMD so the package is consumable from RN/Metro, Electron renderer,
+// the Tizen widget (Vite), plain <script> tags (window.PhlixSyncPlay), and
+// Node/CJS (the UMD wrapper's CommonJS branch) alike. There is no WebSocket or
+// DOM dependency: the transport and clock are injected by the consumer.
 export default defineConfig({
   build: {
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'PhlixSyncPlay',
-      formats: ['es', 'cjs'],
+      // 'umd' (not 'cjs'): the published file is named .umd.cjs and a true UMD
+      // wrapper delivers on that name — require(), import, AND a browser global.
+      formats: ['es', 'umd'],
       fileName: (format) => `phlix-syncplay.${format === 'es' ? 'js' : 'umd.cjs'}`,
     },
+    // Transpile down to ES2017: the estate runtimes that cannot be assumed to
+    // parse modern syntax (older Tizen/WebOS WebViews, stock RN Hermes, Electron
+    // renderers pinned to legacy Chromium) are all ES2017-capable, and the
+    // bundle has no optional-chaining/nullish/class-field constructs leaking.
+    target: 'es2017',
     sourcemap: true,
   },
   resolve: {

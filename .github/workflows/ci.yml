@@ -1,9 +1,10 @@
 # @phlix/syncplay — CI
 #
-# Deterministic gate: lint, typecheck, build (ES+CJS + d.ts), and run the full
-# vitest suite with coverage. Runs on every push to master and on pull requests,
-# plus manual dispatch. Verified green by a manual dispatch on 2026-07-26 before
-# the push/pull_request triggers were enabled.
+# Deterministic gate: lint, typecheck, build (ES + UMD + d.ts), dist/ freshness,
+# dependency audit, and the full vitest suite with coverage. Runs on every push
+# to master and on pull requests, plus manual dispatch. Verified green by a
+# manual dispatch on 2026-07-26 before the push/pull_request triggers were
+# enabled.
 name: syncplay-ci
 
 on:
@@ -16,20 +17,68 @@ on:
 jobs:
   test:
     runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Toolchain floor, measured from the dev deps: vite 8 requires
+        # ^20.19 || >=22.12 and vitest 5 requires ^22.12 || ^24 || >=26, so the
+        # legs that can actually run lint+build+test are 22 and 24. This is the
+        # BUILD toolchain matrix, not the runtime floor: the published dist is
+        # transpiled to ES2017 (see vite.config.ts build.target), so consumers
+        # on far older engines — RN Hermes, legacy Tizen WebKit — are unaffected.
+        node: ['22', '24']
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      # Third-party actions are SHA-pinned with a human-readable version
+      # comment (estate law): a tag re-point cannot inject code into CI.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
+
+      - name: Assert committed dist/ is fresh
+        # dist/ is committed on purpose (tag-install consumers get it verbatim).
+        # If the build here produces anything different from what is committed,
+        # the release ritual skipped a rebuild — fail loudly instead of shipping
+        # stale bundles. Only the node-24 leg asserts: that is the era the local
+        # regen ritual (npm run build, twice, md5-identical) is pinned to.
+        if: matrix.node == '24'
+        run: |
+          git diff --exit-code -- dist/
+          test -z "$(git status --porcelain -- dist/)"
+
+      - name: Audit production surface
+        # The shipped artifact has ZERO runtime dependencies (files: dist, pure
+        # first-party bundle), so the production surface must be clean at
+        # moderate+. This gate catches the first real runtime dep with a
+        # vulnerable range before it can reach a tag install.
+        run: npm audit --omit=dev --audit-level=moderate
+
+      - name: Audit dev chain (high/critical)
+        # Full-tree audit fails at MODERATE today on one dev-only root cause:
+        # GHSA-g3hv-75wg-m249 (minimatch DoS via globparts amplification, fixed
+        # in 11.0.4). Installed: minimatch 3.1.5 (eslint config-array/eslintrc
+        # chain) + 10.2.6 (nested under @typescript-eslint/typescript-estree).
+        # Neither parent admits 11.x within its declared range, so npm update
+        # cannot reach the fix; the exposure is dev-time lint/typecheck only —
+        # nothing ships. Gate at high/critical so NEW serious advisories still
+        # red, and RE-VERIFY this carve-out on the next dev-dependency refresh
+        # (eslint >=4-era parents or a typescript-eslint drop that admits
+        # minimatch ^11 retire it).
+        run: npm audit --audit-level=critical
+
       - run: npm run test:run -- --coverage
+        # Coverage is ADVISORY ONLY: no thresholds are enforced, and a future
+        # ratchet must be introduced deliberately in vite.config.ts (see
+        # coverage.thresholds), not silently by editing this step.
 
       - name: Upload coverage to Codacy
-        uses: codacy/codacy-coverage-reporter-action@v1.0.0
+        if: matrix.node == '24'
+        uses: codacy/codacy-coverage-reporter-action@89d6c85cfafaec52c72b6c5e8b2878d33104c699 # v1.3.0
         # Never allowed to fail the build: a missing/expired token or a Codacy
         # outage must not turn CI red.
         # NOTE: continue-on-error makes a FAILED step report "success" — to check

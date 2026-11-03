@@ -8,12 +8,14 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/phlix-syncplay.js",
       "require": "./dist/phlix-syncplay.umd.cjs",
-      "types": "./dist/index.d.ts"
+      "default": "./dist/phlix-syncplay.js"
     },
     "./package.json": "./package.json"
   },
+  "sideEffects": false,
   "files": [
     "dist"
   ],
@@ -39,7 +41,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "github:detain/phlix-syncplay"
+    "url": "https://github.com/detain/phlix-syncplay.git"
   },
   "author": "detain",
   "keywords": [

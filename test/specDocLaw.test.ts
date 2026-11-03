@@ -335,3 +335,16 @@ describe('W-min124 observability + hygiene markers are named where consumers can
     expect(README).toMatch(/onSyncDegraded: \(consecutiveRejections\)/);
   });
 });
+
+describe('release hygiene: the README install example pins a released tag (CONSOLIDATED M17)', () => {
+  it('README github: pin equals the package version — mobile S181-era tag-form law', () => {
+    const pkgVersion: string = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+    ).version;
+    const pins = [...README.matchAll(/github:detain\/phlix-syncplay#v([\d.]+)/g)].map((m) => m[1]);
+    expect(pins.length).toBeGreaterThan(0);
+    for (const pin of pins) {
+      expect(pin).toBe(pkgVersion);
+    }
+  });
+});

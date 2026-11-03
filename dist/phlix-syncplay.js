@@ -44,20 +44,80 @@ function r(e) {
 	return n.includes(e);
 }
 //#endregion
+//#region \0@oxc-project+runtime@0.154.0/helpers/esm/typeof.js
+function i(e) {
+	"@babel/helpers - typeof";
+	return i = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
+		return typeof e;
+	} : function(e) {
+		return e && typeof Symbol == "function" && e.constructor === Symbol && e !== Symbol.prototype ? "symbol" : typeof e;
+	}, i(e);
+}
+//#endregion
+//#region \0@oxc-project+runtime@0.154.0/helpers/esm/toPrimitive.js
+function a(e, t) {
+	if (i(e) != "object" || !e) return e;
+	var n = e[Symbol.toPrimitive];
+	if (n !== void 0) {
+		var r = n.call(e, t || "default");
+		if (i(r) != "object") return r;
+		throw TypeError("@@toPrimitive must return a primitive value.");
+	}
+	return (t === "string" ? String : Number)(e);
+}
+//#endregion
+//#region \0@oxc-project+runtime@0.154.0/helpers/esm/toPropertyKey.js
+function o(e) {
+	var t = a(e, "string");
+	return i(t) == "symbol" ? t : t + "";
+}
+//#endregion
+//#region \0@oxc-project+runtime@0.154.0/helpers/esm/defineProperty.js
+function s(e, t, n) {
+	return (t = o(t)) in e ? Object.defineProperty(e, t, {
+		value: n,
+		enumerable: !0,
+		configurable: !0,
+		writable: !0
+	}) : e[t] = n, e;
+}
+//#endregion
+//#region \0@oxc-project+runtime@0.154.0/helpers/esm/objectSpread2.js
+function c(e, t) {
+	var n = Object.keys(e);
+	if (Object.getOwnPropertySymbols) {
+		var r = Object.getOwnPropertySymbols(e);
+		t && (r = r.filter(function(t) {
+			return Object.getOwnPropertyDescriptor(e, t).enumerable;
+		})), n.push.apply(n, r);
+	}
+	return n;
+}
+function l(e) {
+	for (var t = 1; t < arguments.length; t++) {
+		var n = arguments[t] == null ? {} : arguments[t];
+		t % 2 ? c(Object(n), !0).forEach(function(t) {
+			s(e, t, n[t]);
+		}) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(n)) : c(Object(n)).forEach(function(t) {
+			Object.defineProperty(e, t, Object.getOwnPropertyDescriptor(n, t));
+		});
+	}
+	return e;
+}
+//#endregion
 //#region src/framing.ts
-function i(e, t, n) {
-	return {
-		...t,
+function u(e, t, n) {
+	return l(l({}, t), {}, {
 		type: e,
 		protocol_version: 1,
 		timestamp: n()
-	};
+	});
 }
-function a(e) {
+function d(e) {
 	let t = e;
 	if (typeof e == "string") try {
 		t = JSON.parse(e);
-	} catch {
+	} catch (e) {
 		return null;
 	}
 	if (typeof t != "object" || !t || Array.isArray(t)) return null;
@@ -66,29 +126,18 @@ function a(e) {
 	let i = n.data, a = !("protocol_version" in n) && typeof i == "object" && i && !Array.isArray(i) ? (() => {
 		let e = {};
 		for (let t of Object.keys(n)) t !== "data" && (e[t] = n[t]);
-		return {
-			...i,
-			...e
-		};
+		return l(l({}, i), e);
 	})() : n;
 	return r(n.type), a;
 }
-function o(e) {
+function f(e) {
 	return JSON.stringify(e);
 }
 //#endregion
 //#region src/time-sync.ts
-var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
-	samples = [];
-	driftRate = 1;
-	now;
-	samplesVersion = 0;
-	cacheVersion = -1;
-	cachedOffset = 0;
-	cachedLatency = 0;
-	cachedIsStable = !1;
+var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	constructor(e) {
-		this.now = e;
+		s(this, "samples", []), s(this, "driftRate", 1), s(this, "now", void 0), s(this, "samplesVersion", 0), s(this, "cacheVersion", -1), s(this, "cachedOffset", 0), s(this, "cachedLatency", 0), s(this, "cachedIsStable", !1), this.now = e;
 	}
 	addSample(e, t, n, r) {
 		let i = r - e - (n - t);
@@ -143,7 +192,7 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		let t = e[0], n = e[e.length - 1], r = n.timestamp - t.timestamp;
 		if (r <= 0) return;
 		let i = (n.offset - t.offset) / r;
-		this.driftRate = 1 + u * i / 1e3, this.driftRate = Math.min(f, Math.max(d, this.driftRate));
+		this.driftRate = 1 + g * i / 1e3, this.driftRate = Math.min(v, Math.max(_, this.driftRate));
 	}
 	getDriftRate() {
 		return this.driftRate;
@@ -173,25 +222,13 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			sampleCount: this.samples.length
 		};
 	}
-}, h = 250, g = class t {
-	send;
-	now;
-	memberId;
-	memberName;
-	options;
-	timeSync;
-	seekThrottleMs;
-	seekWindowOpen = !1;
-	pendingSeek = null;
-	seekFlushTimer = null;
-	group = null;
-	lastPingSendTime = null;
-	consecutiveSyncRejections = 0;
+}, x = 250, S = class t {
 	constructor(e) {
-		this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = e.memberName ?? "User", this.timeSync = new m(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
+		var n;
+		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "lastPingSendTime", null), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "User" : n, this.timeSync = new b(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
 	}
 	static parseSeekThrottleMs(e) {
-		if (e === void 0) return h;
+		if (e === void 0) return x;
 		if (typeof e != "number" || !Number.isFinite(e) || e < 0) throw TypeError(`SyncPlayClient: seekThrottleMs must be a finite number >= 0 (0 disables the seek coalescing throttle), got ${String(e)}`);
 		return e;
 	}
@@ -267,8 +304,9 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		this.seekWindowOpen = !0, this.seekFlushTimer = setTimeout(() => {
 			try {
 				this.closeSeekWindow();
-			} catch {
-				this.options.onFrameDropped?.("send-failed", null);
+			} catch (n) {
+				var e, t;
+				(e = (t = this.options).onFrameDropped) == null || e.call(t, "send-failed", null);
 			}
 		}, this.seekThrottleMs);
 	}
@@ -312,69 +350,74 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		this.lastPingSendTime = t, this.dispatch(e.TIME_PING, { client_time: t });
 	}
 	onDisconnect() {
-		this.cancelSeekCoalescing(), this.timeSync.reset(), this.group = null, this.lastPingSendTime = null, this.options.onDisconnect?.();
+		var e, t;
+		this.cancelSeekCoalescing(), this.timeSync.reset(), this.group = null, this.lastPingSendTime = null, (e = (t = this.options).onDisconnect) == null || e.call(t);
 	}
 	destroy() {
 		this.cancelSeekCoalescing(), this.timeSync.reset(), this.group = null, this.lastPingSendTime = null;
 	}
 	handleIncoming(t) {
-		let n = a(t);
+		let n = d(t);
 		if (n === null) {
-			this.options.onFrameDropped?.("undecodable", t);
+			var i, a;
+			(i = (a = this.options).onFrameDropped) == null || i.call(a, "undecodable", t);
 			return;
 		}
 		if (!r(n.type)) {
-			this.options.onUnknownFrame?.(n);
+			var o, s;
+			(o = (s = this.options).onUnknownFrame) == null || o.call(s, n);
 			return;
 		}
-		let i = n;
-		switch (i.type) {
+		let c = n;
+		switch (c.type) {
 			case e.TIME_PONG:
-				this.handleTimePong(i);
+				this.handleTimePong(c);
 				break;
 			case e.GROUP_STATE:
-				this.handleGroupState(i);
+				this.handleGroupState(c);
 				break;
 			case e.PLAYBACK_PLAY:
-				this.handlePlayback("play", i);
+				this.handlePlayback("play", c);
 				break;
 			case e.PLAYBACK_PAUSE:
-				this.handlePlayback("pause", i);
+				this.handlePlayback("pause", c);
 				break;
 			case e.PLAYBACK_SEEK:
-				this.handleSeek(i);
+				this.handleSeek(c);
 				break;
 			case e.HOST_ELECT:
-				this.handleHostElect(i);
+				this.handleHostElect(c);
 				break;
 			case e.INFO:
-				this.handleInfo(i);
+				this.handleInfo(c);
 				break;
 			case e.ERROR:
-				this.handleError(i);
+				this.handleError(c);
 				break;
 			case e.TYPING:
-				this.handleTyping(i);
+				this.handleTyping(c);
 				break;
 			case e.HOST_TRANSFER:
-				this.handleHostTransfer(i);
+				this.handleHostTransfer(c);
 				break;
 			case e.PLAYBACK_SYNC:
-				this.handlePlaybackSync(i);
+				this.handlePlaybackSync(c);
 				break;
 			case e.TIME_SYNC:
-				this.handleTimeSync(i);
+				this.handleTimeSync(c);
 				break;
 			case e.GROUP_LIST:
-				this.handleGroupList(i);
+				this.handleGroupList(c);
 				break;
 			case e.CHAT:
-				this.handleChat(i);
+				this.handleChat(c);
 				break;
 			case e.PLAYBACK_QUEUE:
-				this.handlePlaybackQueueBroadcast(i);
+				this.handlePlaybackQueueBroadcast(c);
 				break;
-			default: this.options.onUnknownFrame?.(i);
+			default:
+				var l, u;
+				(l = (u = this.options).onUnknownFrame) == null || l.call(u, c);
 		}
 	}
 	handleTimePong(e) {
@@ -382,21 +425,26 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		if (t === null) return;
 		let n = e, r = typeof n.client_time == "number" && Number.isFinite(n.client_time) ? n.client_time : null;
 		if (r !== null && r !== t) return;
-		let i = this.now(), a = r ?? t;
+		let i = this.now(), a = r == null ? t : r;
 		this.lastPingSendTime = null;
 		let o = typeof n.server_time == "number" && Number.isFinite(n.server_time) ? n.server_time : null;
-		o !== null && (this.timeSync.addSample(a, o, o, i) ? (this.consecutiveSyncRejections = 0, this.options.onSync?.({
-			offset: this.timeSync.getOffset(),
-			latency: this.timeSync.getLatency(),
-			isStable: this.timeSync.isStable()
-		})) : (this.consecutiveSyncRejections += 1, this.options.onSyncDegraded?.(this.consecutiveSyncRejections)));
+		if (o !== null) {
+			if (this.timeSync.addSample(a, o, o, i)) {
+				var s, c;
+				this.consecutiveSyncRejections = 0, (s = (c = this.options).onSync) == null || s.call(c, {
+					offset: this.timeSync.getOffset(),
+					latency: this.timeSync.getLatency(),
+					isStable: this.timeSync.isStable()
+				});
+			} else {
+				var l, u;
+				this.consecutiveSyncRejections += 1, (l = (u = this.options).onSyncDegraded) == null || l.call(u, this.consecutiveSyncRejections);
+			}
+		}
 	}
 	static normalizeMembers(e, t) {
 		let n;
-		return n = Array.isArray(e) ? e.filter((e) => typeof e == "object" && !!e) : e && typeof e == "object" ? Object.entries(e).filter(([, e]) => typeof e == "object" && !!e).map(([e, t]) => ({
-			...t,
-			id: e
-		})) : [], n.map((e) => ({
+		return n = Array.isArray(e) ? e.filter((e) => typeof e == "object" && !!e) : e && typeof e == "object" ? Object.entries(e).filter(([, e]) => typeof e == "object" && !!e).map(([e, t]) => l(l({}, t), {}, { id: e })) : [], n.map((e) => ({
 			id: typeof e.id == "string" ? e.id : "",
 			name: typeof e.name == "string" ? e.name : "",
 			is_host: e.id === t,
@@ -404,14 +452,10 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		}));
 	}
 	static foldHostId(e, t) {
-		return {
-			...e,
+		return l(l({}, e), {}, {
 			host_id: t,
-			members: e.members.map((e) => ({
-				...e,
-				is_host: e.id === t
-			}))
-		};
+			members: e.members.map((e) => l(l({}, e), {}, { is_host: e.id === t }))
+		});
 	}
 	static serverTimeToMs(e) {
 		return e < 0xe8d4a51000 ? e * 1e3 : e;
@@ -460,160 +504,198 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 		if (!(typeof e != "number" || !Number.isFinite(e) || e < 0)) return e;
 	}
 	positionOrDrop(e) {
+		var t;
 		if (typeof e != "number" || !Number.isFinite(e) || e < 0) return null;
-		let t = this.group?.current_media_duration;
-		return typeof t == "number" && Number.isFinite(t) && t > 0 && e > t ? t : e;
+		let n = (t = this.group) == null ? void 0 : t.current_media_duration;
+		return typeof n == "number" && Number.isFinite(n) && n > 0 && e > n ? n : e;
 	}
 	static playbackState(e) {
 		return e === "playing" || e === "paused" || e === "buffering" || e === "stopped" ? e : "stopped";
 	}
 	handleGroupState(e) {
-		let n = e, r = n.group;
-		if (typeof r != "object" || !r) {
-			this.options.onFrameDropped?.("malformed", e);
+		var n, r;
+		let i = e, a = i.group;
+		if (typeof a != "object" || !a) {
+			var o, s;
+			(o = (s = this.options).onFrameDropped) == null || o.call(s, "malformed", e);
 			return;
 		}
-		let i = t.strOr(r.group_id, ""), a = t.strOrNull(r.host_id);
-		this.group !== null && this.group.group_id !== i && this.cancelSeekCoalescing();
-		let o = this.group, s = t.normalizeMembers(r.members, a);
+		let c = t.strOr(a.group_id, ""), l = t.strOrNull(a.host_id);
+		this.group !== null && this.group.group_id !== c && this.cancelSeekCoalescing();
+		let u = this.group, d = t.normalizeMembers(a.members, l);
 		if (this.group = {
-			group_id: i,
-			group_name: t.strOr(r.group_name, ""),
-			members: s,
-			member_count: t.finiteOrUndefined(r.member_count),
-			host_id: a,
-			current_media_id: t.strOrNull(r.current_media_id),
-			current_media_duration: t.finiteOrNull(r.current_media_duration),
-			playback_position: t.finiteOr(r.playback_position, 0),
-			playback_state: t.playbackState(r.playback_state),
-			queue: t.normalizeQueue(r.queue),
-			created_at: t.finiteOrUndefined(r.created_at),
-			last_activity_at: t.finiteOrUndefined(r.last_activity_at)
-		}, o !== null && o.group_id === i) {
-			let e = new Set(s.map((e) => e.id));
-			for (let t of o.members) e.has(t.id) || this.options.onMemberLeft?.({
-				id: t.id,
-				name: t.name
-			});
+			group_id: c,
+			group_name: t.strOr(a.group_name, ""),
+			members: d,
+			member_count: t.finiteOrUndefined(a.member_count),
+			host_id: l,
+			current_media_id: t.strOrNull(a.current_media_id),
+			current_media_duration: t.finiteOrNull(a.current_media_duration),
+			playback_position: t.finiteOr(a.playback_position, 0),
+			playback_state: t.playbackState(a.playback_state),
+			queue: t.normalizeQueue(a.queue),
+			created_at: t.finiteOrUndefined(a.created_at),
+			last_activity_at: t.finiteOrUndefined(a.last_activity_at)
+		}, u !== null && u.group_id === c) {
+			let e = new Set(d.map((e) => e.id));
+			for (let t of u.members) if (!e.has(t.id)) {
+				var f, p;
+				(f = (p = this.options).onMemberLeft) == null || f.call(p, {
+					id: t.id,
+					name: t.name
+				});
+			}
 		}
-		this.options.onState?.(this.group, n.your_id);
+		(n = (r = this.options).onState) == null || n.call(r, this.group, i.your_id);
 	}
 	handlePlayback(e, n) {
+		var r, i;
 		if ((typeof n.member_id == "string" ? n.member_id : void 0) === this.memberId) return;
-		let r = this.positionOrDrop(n.position);
-		if (r === null) {
-			this.options.onFrameDropped?.("malformed", n);
+		let a = this.positionOrDrop(n.position);
+		if (a === null) {
+			var o, s;
+			(o = (s = this.options).onFrameDropped) == null || o.call(s, "malformed", n);
 			return;
 		}
-		let i = t.serverTimeOrNow(n.server_time, () => this.getSynchronizedTime());
-		this.options.onPlaybackCommand?.({
+		let c = t.serverTimeOrNow(n.server_time, () => this.getSynchronizedTime());
+		(r = (i = this.options).onPlaybackCommand) == null || r.call(i, {
 			type: e,
-			position: r,
-			serverTime: i
+			position: a,
+			serverTime: c
 		});
 	}
 	handleSeek(e) {
+		var n, r;
 		if ((typeof e.member_id == "string" ? e.member_id : void 0) === this.memberId) return;
-		let n = this.positionOrDrop(e.to_position);
-		if (n === null) {
-			this.options.onFrameDropped?.("malformed", e);
+		let i = this.positionOrDrop(e.to_position);
+		if (i === null) {
+			var a, o;
+			(a = (o = this.options).onFrameDropped) == null || a.call(o, "malformed", e);
 			return;
 		}
-		let r = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime());
-		this.options.onPlaybackCommand?.({
+		let s = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime());
+		(n = (r = this.options).onPlaybackCommand) == null || n.call(r, {
 			type: "seek",
-			position: n,
-			serverTime: r
+			position: i,
+			serverTime: s
 		});
 	}
 	handleHostElect(e) {
-		let n = e, r = t.strOrNull(n.elected_id);
+		var n, r;
+		let i = e, a = t.strOrNull(i.elected_id);
 		if (this.group !== null) {
-			let e = typeof n.elected_by == "string" && n.elected_by !== "" ? n.elected_by : null, i = this.group, a = e !== null && e !== this.memberId ? i.members.filter((t) => t.id !== e) : i.members;
-			if (a.length !== i.members.length) {
-				let n = i.members.find((t) => t.id === e);
-				i = {
-					...i,
-					members: a
-				}, this.group = t.foldHostId(i, r), n !== void 0 && this.options.onMemberLeft?.({
-					id: n.id,
-					name: n.name
-				}), this.options.onHostChanged?.(r);
+			let e = typeof i.elected_by == "string" && i.elected_by !== "" ? i.elected_by : null, n = this.group, r = e !== null && e !== this.memberId ? n.members.filter((t) => t.id !== e) : n.members;
+			if (r.length !== n.members.length) {
+				var o, s;
+				let i = n.members.find((t) => t.id === e);
+				if (n = l(l({}, n), {}, { members: r }), this.group = t.foldHostId(n, a), i !== void 0) {
+					var c, u;
+					(c = (u = this.options).onMemberLeft) == null || c.call(u, {
+						id: i.id,
+						name: i.name
+					});
+				}
+				(o = (s = this.options).onHostChanged) == null || o.call(s, a);
 				return;
 			}
-			this.group = t.foldHostId(i, r);
+			this.group = t.foldHostId(n, a);
 		}
-		this.options.onHostChanged?.(r);
+		(n = (r = this.options).onHostChanged) == null || n.call(r, a);
 	}
 	handleInfo(e) {
 		let t = e;
-		typeof t.member_id == "string" && typeof t.member_name == "string" && this.options.onMemberJoined?.({
-			id: t.member_id,
-			name: t.member_name
-		}), typeof t.message == "string" && this.options.onInfo?.(t.message);
+		if (typeof t.member_id == "string" && typeof t.member_name == "string") {
+			var n, r;
+			(n = (r = this.options).onMemberJoined) == null || n.call(r, {
+				id: t.member_id,
+				name: t.member_name
+			});
+		}
+		if (typeof t.message == "string") {
+			var i, a;
+			(i = (a = this.options).onInfo) == null || i.call(a, t.message);
+		}
 	}
 	handleError(e) {
-		let t = e, n = typeof t.error_code == "string" ? t.error_code : typeof t.code == "string" ? t.code : "UNKNOWN", r = typeof t.message == "string" ? t.message : "Unknown error", i = typeof t.details == "object" && t.details !== null && !Array.isArray(t.details) ? t.details : void 0;
-		this.options.onError?.(n, r, i);
+		var t, n;
+		let r = e, i = typeof r.error_code == "string" ? r.error_code : typeof r.code == "string" ? r.code : "UNKNOWN", a = typeof r.message == "string" ? r.message : "Unknown error", o = typeof r.details == "object" && r.details !== null && !Array.isArray(r.details) ? r.details : void 0;
+		(t = (n = this.options).onError) == null || t.call(n, i, a, o);
 	}
 	handleTyping(e) {
-		let t = e;
-		if (typeof t.member_id != "string") {
-			this.options.onFrameDropped?.("malformed", e);
+		var t, n;
+		let r = e;
+		if (typeof r.member_id != "string") {
+			var i, a;
+			(i = (a = this.options).onFrameDropped) == null || i.call(a, "malformed", e);
 			return;
 		}
-		let n = typeof t.is_typing == "boolean" && t.is_typing;
-		this.options.onMemberTyping?.(t.member_id, n);
+		let o = typeof r.is_typing == "boolean" && r.is_typing;
+		(t = (n = this.options).onMemberTyping) == null || t.call(n, r.member_id, o);
 	}
 	handleChat(e) {
-		let t = e;
-		if (typeof t.member_id != "string" || typeof t.message != "string") {
-			this.options.onFrameDropped?.("malformed", e);
+		var t, n;
+		let r = e;
+		if (typeof r.member_id != "string" || typeof r.message != "string") {
+			var i, a;
+			(i = (a = this.options).onFrameDropped) == null || i.call(a, "malformed", e);
 			return;
 		}
-		let n = typeof t.member_name == "string" ? t.member_name : "", r = typeof e.timestamp == "number" && Number.isFinite(e.timestamp) ? e.timestamp : void 0;
-		this.options.onChat?.(t.member_id, n, t.message, r);
+		let o = typeof r.member_name == "string" ? r.member_name : "", s = typeof e.timestamp == "number" && Number.isFinite(e.timestamp) ? e.timestamp : void 0;
+		(t = (n = this.options).onChat) == null || t.call(n, r.member_id, o, r.message, s);
 	}
 	handlePlaybackQueueBroadcast(e) {
-		let n = e, r = t.normalizeQueue(n.queue);
-		r === void 0 ? this.options.onFrameDropped?.("malformed", e) : (this.group !== null && (this.group = {
-			...this.group,
-			queue: r
-		}), this.options.onQueueChanged?.(r));
+		var n, r;
+		let i = e, a = t.normalizeQueue(i.queue);
+		if (a === void 0) {
+			var o, s;
+			(o = (s = this.options).onFrameDropped) == null || o.call(s, "malformed", e);
+		} else this.group !== null && (this.group = l(l({}, this.group), {}, { queue: a })), (n = (r = this.options).onQueueChanged) == null || n.call(r, a);
 	}
 	handleHostTransfer(e) {
-		let n = e;
-		typeof n.current_host_id != "string" || typeof n.new_host_id != "string" ? this.options.onFrameDropped?.("malformed", e) : (this.group !== null && (this.group = t.foldHostId(this.group, n.new_host_id)), this.options.onHostTransfer?.(n.current_host_id, n.new_host_id));
+		var n, r;
+		let i = e;
+		if (typeof i.current_host_id != "string" || typeof i.new_host_id != "string") {
+			var a, o;
+			(a = (o = this.options).onFrameDropped) == null || a.call(o, "malformed", e);
+		} else this.group !== null && (this.group = t.foldHostId(this.group, i.new_host_id)), (n = (r = this.options).onHostTransfer) == null || n.call(r, i.current_host_id, i.new_host_id);
 	}
 	handlePlaybackSync(e) {
-		let n = typeof e.member_id == "string" ? e.member_id : void 0, r = this.positionOrDrop(e.position);
-		if (r === null) {
-			this.options.onFrameDropped?.("malformed", e);
+		var n, r;
+		let i = typeof e.member_id == "string" ? e.member_id : void 0, a = this.positionOrDrop(e.position);
+		if (a === null) {
+			var o, s;
+			(o = (s = this.options).onFrameDropped) == null || o.call(s, "malformed", e);
 			return;
 		}
-		let i = typeof e.is_playing == "boolean" && e.is_playing, a = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime()), o = t.normalizeNudge(e.nudge);
-		this.options.onPlaybackSync?.(n ?? "", r, i, a, o);
+		let c = typeof e.is_playing == "boolean" && e.is_playing, l = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime()), u = t.normalizeNudge(e.nudge);
+		(n = (r = this.options).onPlaybackSync) == null || n.call(r, i == null ? "" : i, a, c, l, u);
 	}
 	handleTimeSync(e) {
-		let t = e;
-		typeof t.member_id != "string" || typeof t.group_id != "string" || !(typeof t.server_time == "number" && Number.isFinite(t.server_time)) || !(typeof t.offset_ms == "number" && Number.isFinite(t.offset_ms)) || !(typeof t.latency_ms == "number" && Number.isFinite(t.latency_ms)) || !(typeof t.drift_rate == "number" && Number.isFinite(t.drift_rate)) || typeof t.is_stable != "boolean" ? this.options.onFrameDropped?.("malformed", e) : this.options.onTimeSync?.({
-			memberId: t.member_id,
-			groupId: t.group_id,
-			serverTimeSec: t.server_time,
-			offsetMs: t.offset_ms,
-			latencyMs: t.latency_ms,
-			driftRate: t.drift_rate,
-			isStable: t.is_stable
+		var t, n;
+		let r = e;
+		if (typeof r.member_id != "string" || typeof r.group_id != "string" || !(typeof r.server_time == "number" && Number.isFinite(r.server_time)) || !(typeof r.offset_ms == "number" && Number.isFinite(r.offset_ms)) || !(typeof r.latency_ms == "number" && Number.isFinite(r.latency_ms)) || !(typeof r.drift_rate == "number" && Number.isFinite(r.drift_rate)) || typeof r.is_stable != "boolean") {
+			var i, a;
+			(i = (a = this.options).onFrameDropped) == null || i.call(a, "malformed", e);
+		} else (t = (n = this.options).onTimeSync) == null || t.call(n, {
+			memberId: r.member_id,
+			groupId: r.group_id,
+			serverTimeSec: r.server_time,
+			offsetMs: r.offset_ms,
+			latencyMs: r.latency_ms,
+			driftRate: r.drift_rate,
+			isStable: r.is_stable
 		});
 	}
 	handleGroupList(e) {
-		let n = e.groups;
-		if (!Array.isArray(n)) {
-			this.options.onFrameDropped?.("malformed", e);
+		var n, r;
+		let i = e.groups;
+		if (!Array.isArray(i)) {
+			var a, o;
+			(a = (o = this.options).onFrameDropped) == null || a.call(o, "malformed", e);
 			return;
 		}
-		n.some((e) => typeof e != "object" || !e);
-		let r = n.filter((e) => typeof e == "object" && !!e).map((e) => ({
+		i.some((e) => typeof e != "object" || !e);
+		let s = i.filter((e) => typeof e == "object" && !!e).map((e) => ({
 			id: typeof e.id == "string" ? e.id : "",
 			name: typeof e.name == "string" ? e.name : "",
 			member_count: t.finiteOr(e.member_count, 0),
@@ -621,13 +703,13 @@ var s = 5, c = 1e3, l = 50, u = .1, d = .99, f = 1.01, p = 1, m = class {
 			current_media: typeof e.current_media == "string" ? e.current_media : null,
 			is_playing: typeof e.is_playing == "boolean" && e.is_playing
 		}));
-		this.options.onGroupList?.(r);
+		(n = (r = this.options).onGroupList) == null || n.call(r, s);
 	}
 	dispatch(e, t) {
-		this.send(i(e, t, this.now));
+		this.send(u(e, t, this.now));
 	}
 };
 //#endregion
-export { n as ALL_MESSAGE_TYPES, u as DRIFT_CORRECTION_FACTOR, f as DRIFT_RATE_MAX, d as DRIFT_RATE_MIN, c as MAX_ACCEPTABLE_RTT, s as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, l as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, g as SyncPlayClient, p as TIME_SYNC_PROTOCOL_VERSION, m as TimeSync, a as decodeMessage, i as encodeMessage, r as isValidMessageType, o as serializeMessage };
+export { n as ALL_MESSAGE_TYPES, g as DRIFT_CORRECTION_FACTOR, v as DRIFT_RATE_MAX, _ as DRIFT_RATE_MIN, m as MAX_ACCEPTABLE_RTT, p as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, h as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, S as SyncPlayClient, y as TIME_SYNC_PROTOCOL_VERSION, b as TimeSync, d as decodeMessage, u as encodeMessage, r as isValidMessageType, f as serializeMessage };
 
 //# sourceMappingURL=phlix-syncplay.js.map
