@@ -348,3 +348,52 @@ describe('release hygiene: the README install example pins a released tag (CONSO
     }
   });
 });
+
+describe('CONSOLIDATED batch-3 SPEC laws (C1 M2 M4 M6 M9 M13 M14 M15 m6 m21 m31 m37)', () => {
+  it('§3 table rules syncplay_group_list bidirectional (M14 — §4.1 documents the server reply)', () => {
+    const row = SPEC.split('\n').find((l) => l.includes('`syncplay_group_list`') && l.startsWith('|'));
+    expect(row).toBeDefined();
+    expect(row).toContain('| both');
+  });
+  it('§10.2 carries the join catch-up clause: adoption truth + OPEN decision marker (C1)', () => {
+    expect(SPEC).toContain('Joiner position catch-up — observed law, OPEN decision');
+    expect(SPEC).toContain('neither requires nor forbids it');
+  });
+  it('§4 delivery policy carries the clamp law naming positionOrDrop (M6)', () => {
+    expect(SPEC).toContain('**Clamping law.**');
+    expect(SPEC).toContain('positionOrDrop');
+  });
+  it('§4.6 rules the registry SSOT + two code families + localize-by-code (M2)', () => {
+    expect(SPEC).toContain('Code vocabulary — registry SSOT, two families on the wire');
+    expect(SPEC).toContain('MUST localize BY');
+    expect(SPEC).toContain('CODE, never by the English');
+  });
+  it('§8.4 is normative for dial paths + credential hygiene (m21/m37)', () => {
+    expect(SPEC).toContain('/api/v1/syncplay/ws');
+    expect(SPEC).toContain('syncplay/{server_id}');
+    expect(SPEC).toContain('MUST scrub');
+    expect(SPEC).toContain('MUST NOT log a dial URL');
+  });
+  it('§6 rules the per-carrier leave truth and names the open server duty (M4)', () => {
+    expect(SPEC).toContain('The hub relay `:8804` differs: membership churn');
+    expect(SPEC).toContain('server behavior decision (wire-visible;');
+    expect(SPEC).toContain('tracked for the cascade) — not ruled here');
+  });
+  it('§4.4 states the moderation catalog truth (M9) and the full elected_id null law (m6)', () => {
+    expect(SPEC).toContain('machine-enforced');
+    expect(SPEC).toContain('moderation is out of v1 scope');
+    expect(SPEC).toContain('never as a roster mutation on its own');
+    expect(SPEC).toContain('today that frequency is zero');
+  });
+  it('§8.2 states the group-id provenance facts (M13)', () => {
+    expect(SPEC).toContain('`sp_` plus a 64-bit CSPRNG hex');
+    expect(SPEC).toContain('JoinPasswordThrottle');
+  });
+  it('§8.4 fleet paragraph is era-restamped, not stale law (M15)', () => {
+    expect(SPEC).toContain('`v0.99.13` cascade (disk-verified 2026-11-03)');
+  });
+  it('§9 item 1 promotes the self-reference permission to a MAY cap (m31)', () => {
+    expect(SPEC).toContain('the client-supplied');
+    expect(SPEC).toContain('MAY be used only for obvious self-reference detection');
+  });
+});

@@ -128,7 +128,7 @@ documented per-surface deviations.
 | GROUP_JOIN      | `syncplay_group_join`      | client → server  |
 | GROUP_LEAVE     | `syncplay_group_leave`     | client → server  |
 | GROUP_STATE     | `syncplay_group_state`     | server → client  |
-| GROUP_LIST      | `syncplay_group_list`      | client → server  |
+| GROUP_LIST      | `syncplay_group_list`      | both             |
 | PLAYBACK_PLAY   | `syncplay_playback_play`   | both             |
 | PLAYBACK_PAUSE  | `syncplay_playback_pause`  | both             |
 | PLAYBACK_SEEK   | `syncplay_playback_seek`   | both             |
@@ -188,6 +188,14 @@ All field names are **snake_case**.
 > because that snapshot's siblings are `_ms`-named and it is read per-field
 > (see the §4 `time_sync` block below). A consumer that needs ms there
 > multiplies by 1000 itself.
+>
+> **Clamping law.** Playhead numbers this library hands consumers are bounded
+> when a cached duration exists: `SyncPlayClient.positionOrDrop`
+> (`src/client.ts`) drops non-finite or negative positions and clamps
+> beyond-duration ones to the cached `group.current_media_duration` (the
+> field's "useful for clamping" note in §4.1 is now enforced, not advisory).
+> The as-of reference for a `group_state` position remains unstamped — that
+> half is §10.2's join catch-up clause, an OPEN decision.
 
 ### 4.1 Group management
 
@@ -274,7 +282,9 @@ your_id?: string           (the recipient's own member id)
 > delivers the array under `SyncPlayGroup.queue` exactly as the frame
 > carried it (M-SYNCPLAY-06: `handleGroupState` used to drop the field).
 > `has_password` is NOT emitted here — it appears only in the `listGroups()`
-> summary, never on a `group_state` message.
+> summary, never on a `group_state` message. `playback_position` is what a
+> joiner adopts as its starting point; it carries no as-of stamp — see §10.2's
+> join catch-up clause.
 
 `syncplay_group_list` (client → server) — bare request, no fields.
 
@@ -467,6 +477,25 @@ elected_id: string | null
 elected_by: string
 ```
 
+> Moderation scope (catalog truth): the 19-type catalog carries NO kick, mute,
+> password-rotate, or forced-rename frame. A host's remedies against a
+> disruptive member are social (they leave) or destructive (the group empties).
+> There is no server-side kick primitive to build against; machine-enforced
+> moderation is out of v1 scope.
+
+The `string | null` domain of `elected_id` has exactly three cases: a leave
+that EMPTIES the group broadcasts nothing at all (the cleanup branch destroys
+the group silently — phlix-server `SyncPlayManager.php:947-951`); when members
+remain, `GroupState::removeMember()` re-elects the oldest surviving member
+before the broadcast reads `getHostId()`, so a LIVE election frame always
+carries a non-null successor (`:953-960`, `GroupState.php` `removeMember()` →
+`electNewHost()` @ `6437e318`; the hub's leave path mirrors the oldest-present
+rule); and the null arm itself survives only because the legacy
+`Messages::hostElect` factory permits it — no current producer emits it on
+either carrier. Consumers MUST treat `elected_id: null` as "no host — await
+the next `group_state`", never as a roster mutation on its own, and MUST NOT
+build UI on its expected frequency: today that frequency is zero.
+
 ### 4.5 Time sync (see §5)
 
 `syncplay_time_ping` (client → server)
@@ -525,6 +554,25 @@ details?: object
 > splits its error emitters across the two fields (`Messages::error` sets
 > `error_code`, `SyncPlayManager::sendError` sets `code`), so a consumer that
 > consults only one silently drops every frame from the other.
+>
+> **Code vocabulary — registry SSOT, two families on the wire.** The dotted
+> codes (`syncplay.*`, `hub.*`) are registry members: their values have exactly
+> one source of truth, the `@phlix/contracts` error-codes registry — no repo
+> mints a dotted code locally; additions cascade through contracts. On `:8097`
+> the join/create/leave/queue refusals already ride their registry twins —
+> `syncplay.invalid_password`, `syncplay.group_full`,
+> `syncplay.group_limit_reached`, `syncplay.group_not_found`,
+> `syncplay.create_failed`, `syncplay.join_failed`, `syncplay.leave_failed`,
+> `syncplay.queue_limit_exceeded` (`SyncPlayManager.php` R17-04/W2 twin-flip
+> path, which retired the legacy SCREAMING join aliases, @ `6437e318`). The
+> SCREAMING_SNAKE values still sent on that WS (`NOT_HOST`, `NOT_IN_GROUP`,
+> `NOT_AUTHENTICATED`, `UNKNOWN_MESSAGE`) are the per-handler codes that
+> predate the registry. Consumers that localize error UI MUST localize BY
+> CODE, never by the English `message` string — §8.3's display-string law
+> covers `message` verbatim. **Known gap (documented, not mints):** the REST
+> carriers answer join/create refusals with a bare `{error: string}` — no code
+> at all — so a REST-side refusal has no machine-readable key today. This note
+> documents the two-family shape; it mints no values.
 
 `syncplay_info` (server → client)
 ```
@@ -629,8 +677,16 @@ types. Instead:
   detect a join by the presence of those fields on an INFO message.
 - **Member LEAVE / host change**: when the host leaves, the server broadcasts
   `syncplay_host_elect` with the newly-elected `elected_id`. A plain leave by a
-  non-host produces no dedicated event; the next `syncplay_group_state` reflects
-  the updated membership.
+  non-host produces no dedicated event — and on the `:8097` carrier NO
+  follow-up `syncplay_group_state` either: the server's WS `group_state`
+  producers are the join/create acks (to the joiner) and the host-transfer
+  path, so PEERS see a plain-leave roster change only when the next such frame
+  happens to arrive. The hub relay `:8804` differs: membership churn
+  rebroadcasts state on that carrier. The library diffs rosters between
+  `group_state` frames to fire `onMemberLeft`/join detection, so on `:8097`
+  that diff lags a plain leave. Whether `:8097` SHOULD broadcast a refreshed
+  `group_state` on every leave is a server behavior decision (wire-visible;
+  tracked for the cascade) — not ruled here.
 
 Tizen's `syncplay_member_joined` / `syncplay_member_left` types are
 **inventions** and are not part of the protocol.
@@ -700,6 +756,15 @@ The server MUST treat `password_hash` purely as an optional group-entry gate and
 MUST derive member/host identity from the authenticated connection (§9), never
 from possession of a `password_hash`.
 
+Two provenance facts about the gate's other half. The group id itself is minted
+by the live server as `sp_` plus a 64-bit CSPRNG hex (`SyncPlayManager.php:2067-
+2070`, `generateGroupId()`, @ `6437e318`), so for a group created WITHOUT a
+password the id — unguessable but trivially shareable — IS the only gate; join
+attempts against password-protected groups are additionally guarded server-side
+by the `JoinPasswordThrottle`. What entropy group ids MUST carry, and whether
+id-gated groups require a password by law, are policy questions for the server
+owners — noted here, not ruled.
+
 ### 8.3 Consumer-side display-string responsibility
 
 (Cross-reference for the later XSS contract step.) Peer-influenceable display
@@ -713,6 +778,24 @@ The pre-authentication bearer token travels **in the WebSocket handshake**,
 and the accepted carrier differs per endpoint. Both endpoints reject the
 handshake **before the 101 upgrade** when the credential is missing or
 invalid — no frame is ever read on an unauthenticated connection (§8.1).
+
+**Dial paths (normative here; the README mirrors them for quick reference).**
+Direct server surface: `wss://<host>:8097/api/v1/syncplay/ws`. Hub relay
+surface: `wss://<hub>:8804/syncplay/{server_id}`. Both take the bearer
+subprotocol form shown in §8.1. The two paths differ in load-bearingness:
+the `:8097` listener gates on the handshake credential and does NOT route on
+the path — `/api/v1/syncplay/ws` is the estate convention every current dialer
+uses, and new clients SHOULD send it, but nothing on that port dispatches by
+it; the hub `:8804` path IS routing — `{server_id}` selects the shadow scope,
+and a path without the segment never reaches auth: `parseServerId()` fails and
+the socket is answered a real close frame, code 1011 do-not-retry, before any
+frame is read (`phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php`
+`onWebSocketConnect()` @ `20d0e785`, method names durable per §1 item 6).
+
+**Credential hygiene on the transitional `?token=` lane.** Operators MUST scrub
+or redact `?token=` from access logs, proxy configurations, and any error page
+that echoes the request URI. Clients MUST NOT log a dial URL that carries a
+credential — log the endpoint without its query.
 
 | Endpoint | CURRENT law | Notes |
 |----------|-------------|-------|
@@ -775,12 +858,14 @@ empty-token subprotocol bail at `6707ed3` in
 (`source/lib/SyncPlayProtocol.brs`) and phlix-console-client `2f0ecf5` (native
 `websocketClientProtocol` seam in `src/Api/SyncPlay/SyncPlayService.php` since
 `04a1590`; this tip commit adds the `WebSocketDialer` `wss://` TLS-dial fix).
-The LAST estate `?token=` producers are the vendored ui bundle chunks:
-phlix-windows-client `c75fdf0` and phlix-tizen-client both pin pre-flip
-`@phlix/ui#v0.99.7` (the tag predates both flip commits), so the ui-sourced
-SyncPlay widgets those apps boot still ride the query carrier — the concrete
-reason `?token=` stays accepted on `:8097`. It closes when the ui re-tag +
-consumer pin cascade lands (owner-gated).
+This fleet paragraph is era-pinned, and the era moved: at the
+`@phlix/ui#v0.99.7` pins the LAST estate `?token=` producers were the vendored
+ui bundle chunks booted by phlix-windows-client and phlix-tizen-client (the tag
+predated both flip commits). Both clients have since re-pinned through the
+`v0.99.13` cascade (disk-verified 2026-11-03), so current estate dials ride the
+bearer subprotocol. `?token=` stays accepted on `:8097` for third-party and
+pre-cascade builds; its retirement remains the owner fleet-update call named in
+the table above — never an assumed date.
 
 `@phlix/syncplay` itself opens no socket, so both carriers are consumer
 transport concerns. The two-entry bearer subprotocol is now the universal
@@ -803,8 +888,9 @@ A correct server MUST:
 
 1. **Derive the effective `member_id` from the authenticated connection** (§8.1)
    and use that derived id for all authorization decisions. It MUST IGNORE the
-   client-supplied `member_id` for any access-control purpose (it may use it only
-   to detect obvious self-references / for logging).
+   client-supplied `member_id` for any access-control purpose; the client-supplied
+   value MAY be used only for obvious self-reference detection and for logging,
+   never for anything else.
 
 2. **Authorize host-only actions by connection identity, not by claimed id.**
    The host-only COMMANDS are `syncplay_playback_play` / `_pause` / `_seek` /
@@ -949,6 +1035,24 @@ resume periodic client.pingTime()   // rebuild the time-sync window
 `SyncPlayClient.onDisconnect()` performs steps 1–3 of §10.1 and then invokes the
 optional `onDisconnect` consumer callback (a UI hook, e.g. a "reconnecting…"
 banner). It does **not** reconnect, re-join, or schedule any timer.
+
+**Joiner position catch-up — observed law, OPEN decision.** When a (re)joiner
+receives its first `syncplay_group_state`, the position law in effect today is
+ADOPTION: playback starts at `group.playback_position` verbatim. That field
+carries no as-of `server_time` stamp on either carrier, so no wire-delay
+compensation exists to read, and neither this spec nor the library mandates a
+seek-to-adjusted-now on join. Convergence after adoption runs through the
+machinery already on the wire: later playhead-bearing frames are interpreted
+via §5's adjusted-position law, and out-of-tolerance members are trimmed by the
+§4.2 rate-limited nudge ("a rate-limited NUDGE — never a seek"). A joiner that
+adopts 30 s behind therefore sits ~30 s off for minutes while fully
+conformant. Whether the contract should instead REQUIRE a join-time seek to a
+§5-adjusted position — and/or stamp `group_state` with an as-of reference and
+define a "synced" moment — is an OPEN decision: both halves change wire
+meaning and need the server + hub + client cascade plus an owner ruling. Until
+that lands, a consumer MAY seek once to its §5-adjusted position after the
+first `group_state` and before revealing the player; the current wire permits
+that choice and this spec neither requires nor forbids it.
 
 ### 10.3 Backoff is a transport (consumer) concern
 
