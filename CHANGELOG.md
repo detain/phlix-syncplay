@@ -5,6 +5,53 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Deferred-lane normalization wave (`sp-def`, 2026-11-04) — SPEC + test only.**
+  Owner opened the six deferred wire-semantics items (`.reviews/FIXLOG/syncplay.md`
+  Deferred §: M1/M3/M5/M8/M12 + m10) under the "do what you can" triage. Each
+  item's cure was split into (a) normalizing ALREADY-SHIPPED wire truth into
+  SPEC prose, (b) genuinely-NEW wire behavior deferred to the contracts wave,
+  and (c) owner/product calls. This entry ships only the (a) half; the (b)
+  designs were appended to `.reviews/CONTRACTS-WAVE-BRIEF.md` as `R-SP-W2-01`
+  …`R-SP-W2-05`, and the (c) items (M12 `wss://` transport MUST, M8
+  degrade-to-last-known lib redesign) are on the owner reel. No `src/*.ts`
+  changed, so `dist/` is untouched and there is no rebuild; the wire era stays
+  v0.1.6 (a normative-surface stamp rotation only — see below).
+  - **§2 (was M5):** new "`protocol_version` receive law" recording that the
+    server `:8097` already refuses an inbound value it cannot serve with the
+    registry `legacy` code `PROTOCOL_VERSION_MISMATCH` (drops one frame, socket
+    survives — `MessageHandler.php:187-197`, server-pinned), that the hub
+    `:8804` does NOT value-validate inbound (`hub.protocol_unsupported` is the
+    time-sync status arm, not a version gate), and that the library decoder keys
+    on PRESENCE only. Negotiation/"update required" → `R-SP-W2-01`.
+  - **§4.2 (was M3):** new "Nudge exit-side law" — no rate-reset frame exists
+    (server emits only `1 ± 0.1`, and nothing when in tolerance), the reporter's
+    own `is_playing` is never consulted (a paused member still gets nudged), and
+    the four convergence sub-laws are OPEN → `R-SP-W2-04`.
+  - **§8.5 (was M1):** new observed-enforced-bounds subsection (handshake 30/60s,
+    join-password throttle, `MAX_MEMBERS` 50, `MAX_QUEUE_SIZE` 1000 with
+    `syncplay.queue_limit_exceeded`, nudge cooldown 1000ms) + the explicit gap
+    (no command-rate / frame-size / field-length / close-code matrix today) →
+    `R-SP-W2-03`.
+  - **§8.4 (was M12):** a descriptive note that `:8097` binds plaintext
+    `websocket://` and `wss://` is external termination; the "transport MUST be
+    TLS" law is an OPEN owner+deployment call, no MUST minted.
+  - **§9.3 (was m10):** new concurrent-connection law — `:8097` is
+    one-seat-per-identity, last-wins (S289 re-home, server-test-pinned), the
+    re-homed-out socket's close never evicts the survivor, and the hub is the
+    opposite (per-connection uuid); true multi-device fan-out → `R-SP-W2-02`.
+  - **§4.1 (was M8):** new `playback_state` emitter matrix — only `playing`/
+    `paused` have command producers, `stopped` arrives via media-change/init
+    (no media-end producer), `buffering` has NO producer; media-end + disband
+    frames → `R-SP-W2-05`, lib degrade-to-last-known redesign → OWNER.
+  - Document-revision stamp rotated `2026-11-03` → `2026-11-04` (normative text
+    added in §2); Contents TOC updated for the new `§8.5` / `§9.3`.
+  - **Gates:** `test/specDocLaw.test.ts` gains 18 pins (one describe per item +
+    an era-cite/TOC/stamp-currency block) and one existing m36 pin is relaxed
+    from a hard-coded stamp date to a date-shaped regex — the literal defeated
+    its own "rotatable" title and had to move when the stamp legitimately
+    rotated. `vitest` 13 files / 362 tests (baseline 344, +18 disclosed), `tsc`
+    0 errors, `eslint` 0.
+
 ## [0.1.6] - 2026-11-02
 
 The feature release the estate's consumers re-pin against (tag wave v0.1.6).

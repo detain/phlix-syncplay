@@ -12,7 +12,7 @@ The authoritative implementation is the PHP server:
 
 `@phlix/syncplay` is the canonical JS port of that protocol.
 
-> **Document revision:** 2026-11-03 — wire era `@phlix/syncplay` v0.1.6. This
+> **Document revision:** 2026-11-04 — wire era `@phlix/syncplay` v0.1.6. This
 > stamp is rotated with every normative edit to this document (per §1 item 6's
 > era-pin discipline), so a consumer can answer "which spec revision does my
 > build conform to?" without git archaeology.
@@ -28,8 +28,8 @@ The authoritative implementation is the PHP server:
 5. [NTP time synchronization (mirrors `TimeSync.php`)](#5-ntp-time-synchronization-mirrors-timesyncphp)
 6. [Member-event handling (what the server ACTUALLY does)](#6-member-event-handling-what-the-server-actually-does)
 7. [Normalized client divergences](#7-normalized-client-divergences)
-8. [Security model](#8-security-model) — subsections `8.1`–`8.4`
-9. [Server-derived identity contract](#9-server-derived-identity-contract-member_id--host_id) — subsections `9.1`–`9.2`
+8. [Security model](#8-security-model) — subsections `8.1`–`8.5`
+9. [Server-derived identity contract](#9-server-derived-identity-contract-member_id--host_id) — subsections `9.1`–`9.3`
 10. [Reconnect & resume recovery](#10-reconnect--resume-recovery) — subsections `10.1`–`10.3`
 
 ---
@@ -79,10 +79,44 @@ Every message — inbound or outbound — is a single flat JSON object:
 ```
 
 - `type` — one of the 19 types in §3.
-- `protocol_version` — always `1`.
+- `protocol_version` — always `1`. A sender stamps it on every frame it writes
+  (the `@phlix/syncplay` encoder and both live producers do); what a RECEIVER
+  does with a value other than `1` is carrier-specific — see the version law
+  below.
 - `timestamp` — sender wall-clock at send time, in **milliseconds**. Optional
   on inbound; always present on outbound from `@phlix/syncplay`.
 - All payload fields are spread at the **top level** (NOT nested under `data`).
+
+> **`protocol_version` receive law (observed; era `phlix-server` @ `98d7f691`).**
+> A receiver MUST NOT act on a frame whose `protocol_version` it does not
+> understand, and MUST say so where the carrier has an error channel. The two
+> live carriers do this differently today, and both behaviors are shipped truth:
+>
+> - **Server `:8097`.** An inbound FLAT-canonical frame that carries a
+>   `protocol_version` the server cannot serve — a value that is not an integer,
+>   or an integer greater than `Messages::PROTOCOL_VERSION` (`1`) — is answered
+>   a `syncplay_error` with `error_code` `PROTOCOL_VERSION_MISMATCH` and is
+>   NEVER dispatched (`MessageHandler.php:187-197`, `is_int` + `> PROTOCOL_VERSION`
+>   guard; the refusal code is a `legacy` member of the frozen contracts
+>   registry, so this lane mints nothing). A lower integer (`0`, a stale pre-1
+>   build) and an ABSENT `protocol_version` both fall through to the deprecated
+>   / no-version lane and are accepted. The socket SURVIVES the refusal — only
+>   that one frame is dropped, so a mixed-version peer keeps its other traffic.
+> - **Hub relay `:8804`.** The relay's canonical dispatch keys on `type` alone
+>   (`SyncPlayRelayWorker.php:1235-1296`); it stamps `CANONICAL_PROTOCOL_VERSION`
+>   (`1`) on every OUTBOUND frame (`:254`, applied `:1687`) but does NOT
+>   value-validate an inbound `protocol_version` — there is no version gate on
+>   that carrier today. The hub's `hub.protocol_unsupported` error (`:1269`) is
+>   the `syncplay_time_sync` STATUS-QUERY refusal (the relay holds no server
+>   clock), NOT a protocol-version arm; do not read it as one.
+>
+> `@phlix/syncplay`'s own `decodeMessage` keys on `protocol_version` PRESENCE
+> only — it is the deprecated-envelope unwrap heuristic (`framing.ts:115-123`,
+> `!('protocol_version' in record)`) — and inspects the value not at all; the
+> value check is a receiver/server behavior, not a codec behavior. A
+> version-NEGOTIATION or "update required" handshake path is NOT part of the
+> current wire on either carrier: it needs new producers across the stack and
+> is deferred to the contracts wave (`R-SP-W2-01`), not ruled here.
 
 > **Units footnote — the §4 unit law, hub-relay detail site.** There is no
 > hub-wide "everything is milliseconds" rule on `:8804`, and this footnote
@@ -291,6 +325,36 @@ your_id?: string           (the recipient's own member id)
 > joiner adopts as its starting point; it carries no as-of stamp — see §10.2's
 > join catch-up clause.
 
+> **`playback_state` emitter matrix (observed; era `phlix-server` @ `98d7f691`).**
+> The union has four names, but the live producers only reach it through a few
+> doors — worth recording so a consumer knows which states can actually appear
+> and which are latent vocabulary. The only state MUTATOR a command reaches is
+> `GroupState::updatePlayback()` (`GroupState.php:714-722`), and its two callers
+> pass exactly two values: `handlePlaybackPlay` → `STATE_PLAYING`,
+> `handlePlaybackPause` → `STATE_PAUSED`.
+>
+> | State | Has a live producer? | How it reaches the wire |
+> |-------|----------------------|-------------------------|
+> | `playing` | **yes** | `playback_play` command → `updatePlayback(STATE_PLAYING)` |
+> | `paused` | **yes** | `playback_pause` command → `updatePlayback(STATE_PAUSED)` |
+> | `stopped` | **only via media change / init** | the initial value (`:227`), `setCurrentMedia()` sets it on every media switch or clear (`:702`), and snapshot restore defaults to it (`:1197`); NO command emits `stopped` and there is **no "media ended" producer** — at end-of-media `getAdvancedPlaybackPosition()` merely clamps position to the duration (`:661-665`) and holds, it does not transition the group to `stopped` or auto-advance the queue |
+> | `buffering` | **no producer** | a declared constant (`:108`) and legal `updatePlayback` argument, but nothing on either carrier ever calls it — `buffering` cannot appear on a real frame today |
+>
+> Two lifecycle events the review named are therefore ABSENT from the wire, not
+> merely undocumented: there is no media-end-of-item signal (auto-advance is not
+> a server behavior — the next item plays only when a host sends a fresh
+> `playback_play`/`playback_queue`), and there is no `group_disbanded` /
+> "party closed" frame among §3's 19 types — a group going empty simply stops
+> appearing in `syncplay_group_list` and its members' next frame gets
+> `NOT_IN_GROUP`. Minting media-end and disband frames is NEW wire (new types +
+> producers on server and hub and a tolerance story for every client) and is
+> deferred to the contracts wave (`R-SP-W2-05`), not ruled here. Separately, the
+> library's inbound-normalizer currently folds any unknown `playback_state` to
+> `'stopped'` (`client.ts:1346-1349`, M-SYNCPLAY-19); whether it SHOULD instead
+> hold last-known or surface a loud "unknown" is a consumer-facing value change
+> (it changes what every consumer's `onState` sees) and is an OWNER design call,
+> not a wire edit — it is left untouched by this document.
+
 `syncplay_group_list` (client → server) — bare request, no fields.
 
 `syncplay_group_list` (server → client reply) — **live-producer truth, both
@@ -439,6 +503,37 @@ nudge?: {                  (S446 soft-desync correction — directed frames ONLY
 > delivers it as the optional 5th argument of `onPlaybackSync`; on every
 > frame that carried none — echo and hub alike — the argument is `undefined`,
 > never a fabricated zero object.
+
+> **Nudge exit-side law (observed; era `phlix-server` @ `98d7f691`).** The
+> `nudge` object is the ENTIRE drift story on this wire today, and its
+> absence is load-bearing in a way a consumer must understand:
+>
+> - **There is no rate RESET frame.** The server emits `suggested_rate` only as
+>   `1 ± NUDGE_RATE_STEP` (`sendOutOfSyncNudge()` :1607-1609, `GroupState.php:179`);
+>   a value of exactly `1.0` has no producer. When a drifting member comes back
+>   within tolerance, the server says NOTHING on the directed channel — the
+>   out-of-sync guard (`handlePlaybackSync()` :1552, `!isMemberInSync`) simply
+>   stops firing, and the member keeps receiving only the group echo, which
+>   never carries `nudge` (§4.2 above). So "return to `1.0×`" is not a signal a
+>   consumer is sent; the only observable is the *absence* of `nudge` on a
+>   `playback_sync` it still receives. Whether that absence MUST reset the
+>   applied rate is an OPEN consumer-convergence decision (`R-SP-W2-04`), not
+>   ruled here.
+> - **The reporter's own `is_playing` is never consulted.** The gate judges the
+>   REPORTED POSITION against the group (`isMemberInSync`), nothing more; the
+>   `is_playing` a member sends on its request is not part of the decision, and
+>   the `is_playing` carried on the nudge frame is the GROUP's (`$group->isPlaying()`
+>   :1602), not the recipient's. A member that is locally PAUSED but keeps
+>   reporting an out-of-tolerance position IS therefore still nudged. A
+>   "paused-exempt from drift correction" law does not exist on the wire and
+>   would be a new rule (`R-SP-W2-04`).
+> - **The suggested rate is guidance, never a command the wire enforces.** The
+>   library clamps what it hands the consumer into the honest producer band
+>   `[0.9, 1.1]` and drops anything outside it as fabricated
+>   (`client.ts:1299-1304`, `nudgeRateOrUndefined`) — client-side hardening with
+>   no wire meaning. A big-drift "seek IS allowed" band, and a fallback for a
+>   consumer that cannot set `playbackRate` at all (the Roku class), are likewise
+>   un-ruled and belong to `R-SP-W2-04`.
 
 ### 4.3 Chat
 
@@ -956,6 +1051,50 @@ estate carrier — it is accepted on **both** surfaces above; the `?token=`
 lane exists only on `:8097` for legacy builds and MUST NOT be added to new
 code paths (the hub refuses it).
 
+**Transport encryption is a deployment concern, not a wire field (`:8097`).**
+The server's SyncPlay worker binds a PLAINTEXT `websocket://` listener
+(`phlix-server/src/Server/WebSocket/WebSocketServer.php:186`); it holds no TLS
+context of its own, so `wss://` on the dial path (§8.4's dial form) is served by
+an EXTERNAL reverse proxy / termination layer, not by the socket server. That
+means "the credential MUST ride an encrypted transport" cannot be enforced from
+inside this protocol — it is a deployment obligation on the operator, and the
+bearer subprotocol's secrecy (§8.4) only holds where the operator has actually
+put TLS in front of `:8097`/`:8804`. Whether the contract MUST declare `wss://`
+required (which binds every deployment and both server/hub config stories) is an
+OPEN owner+transport decision — it is NOT ruled here, and no MUST is minted for
+it in this document.
+
+### 8.5 Bounds the server actually enforces today (observed)
+
+The §8 lead-in says every security guarantee is a server responsibility; this
+subsection records which resource bounds that server ALREADY enforces on the
+wire (era `phlix-server` @ `98d7f691`), so a consumer sizing its client or a
+reviewer auditing "is this capped?" reads current fact rather than intent. These
+are descriptive observations of shipped behavior; they add no new client
+requirement. A value marked *error* carries the named `error_code` back to the
+client; the socket otherwise survives.
+
+| Bound | Value | Site | On breach |
+|-------|-------|------|-----------|
+| WS handshake rate (per IP) | 30 / 60 s | `RateLimitProfiles.php:137` (`WS_CONNECT`, `max 30`, `window 60`) | handshake refused before `101` |
+| Join-password attempts | throttled per connection | `SyncPlayManager.php:135`, `JoinPasswordThrottle` (see §8.2) | bad-gate attempts throttled; §8.2 |
+| Members per group | 50 | `GroupState.php:118` (`MAX_MEMBERS`), enforced `addMember` :422 / `joinGroup` :838 | `syncplay.group_full` |
+| Queue length | 1000 | `GroupState.php:128` (`MAX_QUEUE_SIZE`), enforced append :907 / wholesale-set `SyncPlayManager.php:1266-1272` | `syncplay.queue_limit_exceeded` |
+| Per-member nudge rate | 1 / 1000 ms | `GroupState.php:157` (`NUDGE_COOLDOWN_MS`), `claimNudgeSlot` :875 | nudge suppressed (silent, §4.2) |
+
+What is **not** bounded on the wire today — the gap the review named — is a
+per-connection COMMAND frame rate, a maximum message/frame byte size, per-string
+field LENGTH caps, and a defined malformed-input close-code matrix. The server
+absorbs every inbound command frame at whatever rate a client sends (the
+library's `seekThrottleMs` coalescing in §9.1 is CLIENT-side pacing and relieves
+nothing server-side); oversized/over-long payloads and structural garbage are
+handled only by the `type`-dispatch + JSON-parse guards in §2, not by a size or
+length budget. That full normative rate/size matrix — including any delegation to
+the contracts registry for shared limits — requires new enforcement across every
+producer (including the server's own rebroadcasts) and is deferred to the
+contracts wave (`R-SP-W2-03`); it is not something this lane can normalize
+because there is no shipped behavior to describe.
+
 ---
 
 ## 9. Server-derived identity contract (`member_id` / `host_id`)
@@ -1064,6 +1203,46 @@ commands), and self-echo suppression dead — the member's own re-stamped
 commands pass the `=== memberId` test as foreign and double-apply. The full
 law and both carriers' coordinates are documented on
 `SyncPlayClientOptions.memberId` (`src/client.ts`).
+
+### 9.3 Concurrent connections for one identity (observed; era `phlix-server` @ `98d7f691`)
+
+§9.2 fixes the identity VALUE per carrier. This subsection states what happens
+when TWO sockets present the SAME `:8097` identity at once — the law the review
+found undefined — and it is already shipped, so it is recorded descriptively
+(adds no new client requirement):
+
+- **Server `:8097` is one-seat-per-identity, last-wins.** Because the identity
+  is the authenticated user id (JWT subject) and NOT a per-socket value, a
+  second socket that joins the same group with the same id does NOT create a
+  second member — `joinGroup()` detects the membership and re-homes
+  idempotently (`SyncPlayManager.php:791-812`, the S289 branch): the one member
+  record is kept, its display name is refreshed, its `connection_id` is
+  re-pointed to the newest socket, and the stale reverse-map entry for the
+  previous socket is dropped. Broadcast delivery follows the stored (newest)
+  `connection_id`, so the MOST-RECENT dialer is the only socket that receives
+  group traffic; an earlier socket of the same identity goes silent-to-delivery
+  without its membership being removed. This is test-pinned server-side —
+  `SyncPlayManagerTest.php:256 testJoinIsIdempotentForExistingMember` and
+  `:285 testIdempotentJoinRepointsToNewestConnection` — so it is the durable law,
+  not a race artifact.
+- **The re-homed-OUT socket's close does not evict the survivor.** When the
+  older socket later drops, `onConnectionClose()` looks up
+  `connectionToMember[$oldConn]` — which the re-home already unset — gets `null`,
+  and returns WITHOUT calling `leaveGroup` (`SyncPlayManager.php:988-1002`). So
+  the two tabs / reconnect / REST-vs-WS cases all collapse to one member and
+  never cross-evict. (The earlier review figure that "a second socket's drop
+  evicts the first device" described the PRE-S289 state; it is cured.)
+- **Hub relay `:8804` is the opposite, by construction.** Identity there is a
+  hub-generated PER-CONNECTION uuid (§9.2), so every socket is a DISTINCT member
+  and each receives fan-out on its own connection id — there is nothing to
+  re-home and no collapse. The two carriers' concurrent behavior differs
+  because their identity models differ.
+
+The product question the review really raised — whether a two-device household
+on one account should get TRUE multi-device fan-out on `:8097` (both sockets
+receive, membership keyed per connection rather than per user) — is a change to
+the server's identity/delivery model and is deferred to the contracts wave
+(`R-SP-W2-02`); it is not what the wire does today and so is not stated as law.
 
 ---
 

@@ -400,7 +400,13 @@ describe('CONSOLIDATED batch-3 SPEC laws (C1 M2 M4 M6 M9 M13 M14 M15 m6 m21 m31 
 
 describe('CONSOLIDATED batch-3b SPEC prose (M7 m7 m8 m11 m12 m13 m14 m15 m20 m34 m35 m36)', () => {
   it('SPEC carries a rotatable revision stamp (m36)', () => {
-    expect(SPEC).toContain('**Document revision:** 2026-11-03');
+    // The pin asserts the stamp is DATE-SHAPED, not a hard date — a literal
+    // date here would fight the very "rotatable" the title names (it was
+    // red-edited on 2026-11-04 when the deferred-lane normalization wave added
+    // normative text and legitimately rotated the stamp). The concrete
+    // "this lane advanced it" proof lives in the deferred-lane stamp-currency
+    // describe below.
+    expect(SPEC).toMatch(/\*\*Document revision:\*\* \d{4}-\d{2}-\d{2}/);
   });
   it('§7 declares the shorthand convention (m34)', () => {
     expect(SPEC).toContain('Shorthand convention (declared once here');
@@ -451,5 +457,138 @@ describe('CONSOLIDATED batch-4 README currency (m25 m32 m33)', () => {
   it('README obeys the §2 terminology law — no bare room/party labels for the group (m33)', () => {
     expect(README).not.toMatch(/same-room|costs the room|seek a room|Party surface|Party chat/);
     expect(README).toContain('you never seek a group you just left');
+  });
+});
+
+// ── Deferred-lane normalization wave (2026-11-04) ──────────────────────────────
+// Each block below pins a NORMALIZATION of already-shipped wire truth recorded
+// by the `sp-def` deferred lane: SPEC prose tightened to the disk-verified
+// server/hub behavior at `phlix-server @ 98d7f691`, so a future edit that lets
+// the prose drift off observed reality (or deletes the OPEN marker for a part
+// that was deferred to the contracts wave) reddens here. These are red-on-parent
+// at the pre-lane tip: the phrases they assert did not exist before this lane.
+
+describe('SPEC §2 protocol_version receive law (deferred M5, review secnet/exploiter)', () => {
+  it('records the observed :8097 value-refusal with its registry `legacy` code', () => {
+    expect(SPEC).toContain('receive law (observed; era');
+    expect(SPEC).toContain('PROTOCOL_VERSION_MISMATCH');
+    expect(SPEC).toMatch(/MessageHandler\.php:187-197/);
+    // The refusal is additive-safe: it drops ONE frame, socket survives.
+    expect(SPEC).toMatch(/socket SURVIVES the refusal/);
+  });
+
+  it('states the HUB truth honestly — :8804 does not value-validate inbound', () => {
+    expect(SPEC).toContain('value-validate an inbound');
+    // and that hub.protocol_unsupported is the time_sync arm, NOT a version gate
+    expect(SPEC).toMatch(/STATUS-QUERY refusal/);
+  });
+
+  it('pins the library decode as PRESENCE-keyed (current actual behavior)', () => {
+    expect(SPEC).toContain('keys on `protocol_version` PRESENCE');
+    // ...and the framing.ts gate it describes is still the presence test
+    const FRAMING = readFileSync(fileURLToPath(new URL('../src/framing.ts', import.meta.url)), 'utf8');
+    expect(FRAMING).toMatch(/!\('protocol_version' in record\)/);
+  });
+
+  it('defers the negotiation path to the contracts wave (no wire mint here)', () => {
+    expect(SPEC).toContain('R-SP-W2-01');
+    // No new dotted error code was invented for the version lane.
+    expect(SPEC).not.toContain('syncplay.protocol_version');
+  });
+});
+
+describe('SPEC §9.3 concurrent-connection law (deferred m10, review asphp/exploiter)', () => {
+  it('documents the observed S289 :8097 last-wins re-home, citing the server tests', () => {
+    expect(SPEC).toContain('one-seat-per-identity, last-wins');
+    expect(SPEC).toContain('SyncPlayManager.php:791-812');
+    expect(SPEC).toContain('testIdempotentJoinRepointsToNewestConnection');
+  });
+
+  it('records the survivor-safe close and corrects the stale evict claim', () => {
+    expect(SPEC).toContain('close does not evict the survivor');
+    expect(SPEC).toMatch(/PRE-S289 state/);
+  });
+
+  it('contrasts the hub per-connection-uuid model and defers true fan-out', () => {
+    expect(SPEC).toMatch(/Hub relay `:8804` is the opposite/);
+    expect(SPEC).toContain('R-SP-W2-02');
+    // explicitly framed as observation that adds no new client requirement
+    expect(SPEC).toContain('adds no new client requirement');
+  });
+});
+
+describe('SPEC §8.5 enforced-bounds subsection (deferred M1, review exploiter)', () => {
+  it('names the caps the server already enforces, with sites + error codes', () => {
+    expect(SPEC).toMatch(/^### 8\.5 Bounds the server actually enforces today/m);
+    expect(SPEC).toContain('MAX_MEMBERS');
+    expect(SPEC).toContain('MAX_QUEUE_SIZE');
+    expect(SPEC).toContain('syncplay.queue_limit_exceeded');
+    expect(SPEC).toMatch(/RateLimitProfiles\.php:137/);
+  });
+
+  it('is explicitly descriptive (adds no new client requirement) and defers the missing matrix', () => {
+    expect(SPEC).toContain('descriptive observations of shipped behavior');
+    expect(SPEC).toContain('absorbs every inbound command');
+    expect(SPEC).toContain('R-SP-W2-03');
+  });
+});
+
+describe('SPEC §8.4 transport-encryption note (deferred M12, review secnet)', () => {
+  it('states the plaintext-worker reality as a deployment concern, minting no MUST', () => {
+    expect(SPEC).toContain('Transport encryption is a deployment concern');
+    expect(SPEC).toMatch(/websocket:\/\/` listener/);
+    expect(SPEC).toContain('put TLS in front of');
+    // owner call: no "wss:// required" normative text is added
+    expect(SPEC).toMatch(/OPEN owner\+transport decision/);
+  });
+});
+
+describe('SPEC §4.2 nudge exit-side law (deferred M3, review gameux/asphp)', () => {
+  it('records that no rate-reset frame exists and the only signal is nudge absence', () => {
+    expect(SPEC).toContain('Nudge exit-side law');
+    expect(SPEC).toContain('no rate RESET frame');
+    expect(SPEC).toMatch(/absence/);
+  });
+
+  it('records that the reporter is_playing is never consulted (paused members ARE nudged)', () => {
+    expect(SPEC).toContain('reporter');
+    expect(SPEC).toContain('locally PAUSED');
+  });
+
+  it('defers all four convergence sub-laws to the contracts wave', () => {
+    expect(SPEC).toContain('R-SP-W2-04');
+  });
+});
+
+describe('SPEC §4.1 playback_state emitter matrix (deferred M8, review docmaint/gameux)', () => {
+  it('documents which of the four states have live producers', () => {
+    expect(SPEC).toContain('emitter matrix');
+    expect(SPEC).toMatch(/handlePlaybackPlay` → `STATE_PLAYING/);
+    // buffering is declared-but-unproduced; media-end and disband are absent
+    expect(SPEC).toMatch(/no `group_disbanded`/);
+    expect(SPEC).toContain('no "media ended" producer');
+  });
+
+  it('defers the new frames to the contracts wave and the lib redesign to owner', () => {
+    expect(SPEC).toContain('R-SP-W2-05');
+    expect(SPEC).toMatch(/OWNER design call/);
+    // the current lib degrade-to-stopped law is still the shipped behavior
+    expect(CLIENT).toMatch(/\? value\s*\n?\s*:\s*'stopped'/);
+  });
+});
+
+describe('deferred-lane era-cite + TOC currency', () => {
+  it('stamps every observed block to the disk-verified server era', () => {
+    expect((SPEC.match(/98d7f691/g) ?? []).length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('advances the document-revision stamp (a normative surface was touched)', () => {
+    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-04/);
+  });
+
+  it('keeps the Contents TOC in step with the added subsections', () => {
+    expect(SPEC).toMatch(/Security model[\s\S]{0,60}8\.5/);
+    expect(SPEC).toMatch(/identity contract[\s\S]{0,140}9\.3/);
+    expect(SPEC).toMatch(/^### 9\.3 Concurrent connections/m);
   });
 });
