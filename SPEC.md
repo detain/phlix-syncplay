@@ -538,13 +538,16 @@ elected_by: string
 
 The `string | null` domain of `elected_id` has exactly three cases: a leave
 that EMPTIES the group broadcasts nothing at all (the cleanup branch destroys
-the group silently — phlix-server `SyncPlayManager.php:947-951`); when members
+the group silently — phlix-server `SyncPlayManager.php:933-937`); when members
 remain, `GroupState::removeMember()` re-elects the oldest surviving member
 before the broadcast reads `getHostId()`, so a LIVE election frame always
-carries a non-null successor (`:953-960`, `GroupState.php` `removeMember()` →
+carries a non-null successor (`:938-946`, `GroupState.php` `removeMember()` →
 `electNewHost()` @ `6437e318`; the hub's leave path mirrors the oldest-present
-rule); and the null arm itself survives only because the legacy
-`Messages::hostElect` factory permits it — no current producer emits it on
+rule); and the null arm survives only in the DECLARED shape — §4.4's roster
+above and the lib's `HostElectPayload` type (`elected_id: string | null`,
+`src/messages.ts`) — not in any producer: the legacy `Messages::hostElect`
+factory cannot even express it (its `string $electedId` parameter is
+non-nullable) and has zero live call sites, so no current producer emits it on
 either carrier. Consumers MUST treat `elected_id: null` as "no host — await
 the next `group_state`", never as a roster mutation on its own, and MUST NOT
 build UI on its expected frequency: today that frequency is zero.
@@ -817,8 +820,8 @@ MUST derive member/host identity from the authenticated connection (§9), never
 from possession of a `password_hash`.
 
 Two provenance facts about the gate's other half. The group id itself is minted
-by the live server as `sp_` plus a 64-bit CSPRNG hex (`SyncPlayManager.php:2067-
-2070`, `generateGroupId()`, @ `6437e318`), so for a group created WITHOUT a
+by the live server as `sp_` plus a 64-bit CSPRNG hex (`SyncPlayManager.php:2052-
+2054`, `generateGroupId()`, @ `6437e318`), so for a group created WITHOUT a
 password the id — unguessable but trivially shareable — IS the only gate; join
 attempts against password-protected groups are additionally guarded server-side
 by the `JoinPasswordThrottle`. What entropy group ids MUST carry, and whether
