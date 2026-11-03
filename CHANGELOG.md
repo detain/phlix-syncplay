@@ -5,6 +5,61 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Review-cure wave (`REVIEW-CHANGES/syncplay.md`, 2026-11-03) — SPEC truth
+  pass + one shipped-type docblock; zero wire-semantics change.**
+  - **Major 1 (§4.6):** the pre-existing two-field error parenthetical was
+    FALSE at the document's own era — `SyncPlayManager::sendError` is a pure
+    delegate to `Messages::error` (server `SyncPlayManager.php:2025-2028` →
+    `Messages.php:712-727`, era `98d7f691`, re-verified byte-identical at the
+    current tip `8ebd9830`), the wire carries `error_code` on both carriers,
+    and NO live `code`-field producer exists on `:8097` or `:8804`. The field
+    block now names `error_code` the only live emitter field and marks `code`
+    RETIRED-historical; the false "drops every frame from the other"
+    consequence is deleted. The operative consumer MUST ("read `error_code`
+    first, then fall back to `code`") is UNCHANGED — it mirrors the library's
+    own defensive read order (`src/client.ts`) and now stands on its honest
+    justification: tolerance for stale senders, not a second live channel.
+    The same false sentence shipped inside the type declarations
+    (`src/messages.ts` `ErrorPayload.error_code` docblock → `dist/messages.d.ts`)
+    is cured comment-only, hence this entry discloses a dist rebuild.
+  - **Major 2 (§4.3):** "No carrier stores chat history" contradicted server
+    storage — `handleChat` retains the last 100 messages in group state
+    (`SyncPlayManager.php:1331` → `GroupState.php:986-1000`, snapshot-persisted
+    `:1105`/`:1200`). Reworded to the consumer-observable truth per the review
+    cure: no carrier REPLAYS chat history to (re)joiners; retention is named
+    with its verified coordinates; no frame ever delivers them. The m7/m12
+    lead sentence and its pin are intact.
+  - **Minor 3 (§4.1 matrix):** `updatePlayback()` cite renumbered
+    `GroupState.php:714-722` → `:720-726` (measured at the stamped era
+    `98d7f691`; identical at tip `8ebd9830`).
+  - **Minor 4 (§8.5):** capacity-table `joinGroup :838` — file-less and
+    one arm early — is now "joinGroup `SyncPlayManager.php:840`" (the
+    `MAX_MEMBERS` guard line, measured at `98d7f691` and `8ebd9830`).
+  - **Minor 5 (§2):** the hub bullet's four `SyncPlayRelayWorker.php`
+    coordinates now carry their era stamp — `phlix-hub @ 3c4723f4` (where the
+    deferred lane verified them), re-confirmed still exact at the current hub
+    tip `31f694f4` per §1 item 6's stamp law.
+  - **Minor 6 (date fiction):** the `2026-11-04` revision stamp on
+    2026-11-03 work rotates to `2026-11-03` across the LIVE surfaces: SPEC
+    document-revision stamp, the two `specDocLaw.test.ts` header/pin comments,
+    and the deferred-lane stamp-currency pin (rotated from its measured red —
+    it stays a deliberate literal tripwire; the m36 date-SHAPE pin guards
+    rotatability). The tagged `[0.1.7]` CHANGELOG section keeps its
+    `(sp-def, 2026-11-04)` sub-bullets VERBATIM — release history is never
+    rewritten; this line is the forward record (rok05 precedent).
+  - **+7 doc-law cure pins** (362 → 369): negative tripwires retire every
+    false sentence on SPEC and in the shipped types, positive pins lock the
+    corrected phrasings and coordinates, and a self-scanning pin keeps the
+    stale date out of live surfaces.
+  - **Dist disclosure:** the `src/messages.ts` comment cure ships through the
+    declaration + source maps; deterministic `npm run build` ×2, JS payloads
+    (`phlix-syncplay.js`/`.umd.cjs`) byte-identical, deltas limited to
+    `messages.d.ts` + both `.map` files. New aggregates at this unreleased
+    state: all-files `8e46105d791257ef3a2e4415065fff49`, non-map
+    `3fa9c91a63a337d02753a83250ea3f1a` (the `[0.1.7]`-section pins below
+    stay as released).
+  - **Gates:** vitest serial 13f/369 (+7 exact), tsc 0, eslint 0.
+
 ## [0.1.7] - 2026-11-03
 
 The review→fix campaign vein atop v0.1.6: the lib guard wave (boundary

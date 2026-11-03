@@ -12,7 +12,7 @@ The authoritative implementation is the PHP server:
 
 `@phlix/syncplay` is the canonical JS port of that protocol.
 
-> **Document revision:** 2026-11-04 — wire era `@phlix/syncplay` v0.1.6. This
+> **Document revision:** 2026-11-03 — wire era `@phlix/syncplay` v0.1.6. This
 > stamp is rotated with every normative edit to this document (per §1 item 6's
 > era-pin discipline), so a consumer can answer "which spec revision does my
 > build conform to?" without git archaeology.
@@ -103,7 +103,9 @@ Every message — inbound or outbound — is a single flat JSON object:
 >   / no-version lane and are accepted. The socket SURVIVES the refusal — only
 >   that one frame is dropped, so a mixed-version peer keeps its other traffic.
 > - **Hub relay `:8804`.** The relay's canonical dispatch keys on `type` alone
->   (`SyncPlayRelayWorker.php:1235-1296`); it stamps `CANONICAL_PROTOCOL_VERSION`
+>   (`SyncPlayRelayWorker.php:1235-1296`, era `phlix-hub` @ `3c4723f4`, the
+>   block's other three hub coordinates below measured at the same tree and
+>   still exact at the current tip `31f694f4`); it stamps `CANONICAL_PROTOCOL_VERSION`
 >   (`1`) on every OUTBOUND frame (`:254`, applied `:1687`) but does NOT
 >   value-validate an inbound `protocol_version` — there is no version gate on
 >   that carrier today. The hub's `hub.protocol_unsupported` error (`:1269`) is
@@ -329,7 +331,7 @@ your_id?: string           (the recipient's own member id)
 > The union has four names, but the live producers only reach it through a few
 > doors — worth recording so a consumer knows which states can actually appear
 > and which are latent vocabulary. The only state MUTATOR a command reaches is
-> `GroupState::updatePlayback()` (`GroupState.php:714-722`), and its two callers
+> `GroupState::updatePlayback()` (`GroupState.php:720-726`), and its two callers
 > pass exactly two values: `handlePlaybackPlay` → `STATE_PLAYING`,
 > `handlePlaybackPause` → `STATE_PAUSED`.
 >
@@ -565,9 +567,13 @@ message: string
 > included — via `onChat(memberId, memberName, message, timestampMs)`; the
 > outbound arm is `sendChat(message)`.
 >
-> **Chat is ephemeral, and the echo is the only receipt.** No carrier stores
-> chat history: a joiner (or rejoiner) sees only messages sent after
-> admission — an empty pane after joining or reconnecting is conformant
+> **Chat is ephemeral, and the echo is the only receipt.** No carrier REPLAYS
+> chat history to (re)joiners: the server retains the last 100 messages inside
+> group state (`SyncPlayManager.php:1331` → `GroupState::addChatMessage`,
+> `GroupState.php:986-1000`, snapshot-persisted at `:1105`/`:1200`; era
+> `phlix-server` @ `98d7f691`, re-verified byte-identical at `8ebd9830`), but
+> no frame ever delivers them — a joiner (or rejoiner) sees only messages sent
+> after admission — an empty pane after joining or reconnecting is conformant
 > behavior, not a bug. There is no message id and no delivery acknowledgement
 > anywhere on this type: because the fan-out includes the sender, the sender's
 > own echo is the SOLE receipt signal. An optimistic UI that renders on send
@@ -696,15 +702,20 @@ is_stable: boolean         (server TimeSync::isSyncStable())
 
 `syncplay_error` (server → client)
 ```
-error_code?: string        (Messages::error uses error_code)
-code?: string              (SyncPlayManager::sendError uses code)
+error_code: string         (the ONLY field live emitters set — Messages::error, `Messages.php:712-727`)
+code?: string              (RETIRED historical name — no live producer on either carrier; see below)
 message: string
 details?: object
 ```
-> Clients MUST read `error_code` first, then fall back to `code`: the server
-> splits its error emitters across the two fields (`Messages::error` sets
-> `error_code`, `SyncPlayManager::sendError` sets `code`), so a consumer that
-> consults only one silently drops every frame from the other.
+> Clients MUST read `error_code` first, then fall back to `code`. The fallback
+> is defensive tolerance for stale senders, not a second live channel: today
+> the wire carries `error_code` on BOTH carriers. Every `:8097` error path
+> funnels through `Messages::error`, and `SyncPlayManager::sendError`
+> (`SyncPlayManager.php:2025-2028`) is a pure delegate to it (era
+> `phlix-server` @ `98d7f691`, re-verified byte-identical at `8ebd9830`).
+> The historical split in which `sendError` emitted a bare `code` is RETIRED —
+> a consumer that consults only `error_code` sees every frame either carrier
+> actually produces today.
 >
 > **Code vocabulary — registry SSOT, two families on the wire.** The dotted
 > codes (`syncplay.*`, `hub.*`) are registry members: their values have exactly
@@ -1078,7 +1089,7 @@ client; the socket otherwise survives.
 |-------|-------|------|-----------|
 | WS handshake rate (per IP) | 30 / 60 s | `RateLimitProfiles.php:137` (`WS_CONNECT`, `max 30`, `window 60`) | handshake refused before `101` |
 | Join-password attempts | throttled per connection | `SyncPlayManager.php:135`, `JoinPasswordThrottle` (see §8.2) | bad-gate attempts throttled; §8.2 |
-| Members per group | 50 | `GroupState.php:118` (`MAX_MEMBERS`), enforced `addMember` :422 / `joinGroup` :838 | `syncplay.group_full` |
+| Members per group | 50 | `GroupState.php:118` (`MAX_MEMBERS`), enforced `addMember` :422 / joinGroup `SyncPlayManager.php:840` | `syncplay.group_full` |
 | Queue length | 1000 | `GroupState.php:128` (`MAX_QUEUE_SIZE`), enforced append :907 / wholesale-set `SyncPlayManager.php:1266-1272` | `syncplay.queue_limit_exceeded` |
 | Per-member nudge rate | 1 / 1000 ms | `GroupState.php:157` (`NUDGE_COOLDOWN_MS`), `claimNudgeSlot` :875 | nudge suppressed (silent, §4.2) |
 

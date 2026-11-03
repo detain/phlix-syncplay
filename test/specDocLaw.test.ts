@@ -402,7 +402,7 @@ describe('CONSOLIDATED batch-3b SPEC prose (M7 m7 m8 m11 m12 m13 m14 m15 m20 m34
   it('SPEC carries a rotatable revision stamp (m36)', () => {
     // The pin asserts the stamp is DATE-SHAPED, not a hard date — a literal
     // date here would fight the very "rotatable" the title names (it was
-    // red-edited on 2026-11-04 when the deferred-lane normalization wave added
+    // red-edited on 2026-11-03 when the deferred-lane normalization wave added
     // normative text and legitimately rotated the stamp). The concrete
     // "this lane advanced it" proof lives in the deferred-lane stamp-currency
     // describe below.
@@ -460,7 +460,7 @@ describe('CONSOLIDATED batch-4 README currency (m25 m32 m33)', () => {
   });
 });
 
-// ── Deferred-lane normalization wave (2026-11-04) ──────────────────────────────
+// ── Deferred-lane normalization wave (2026-11-03) ──────────────────────────────
 // Each block below pins a NORMALIZATION of already-shipped wire truth recorded
 // by the `sp-def` deferred lane: SPEC prose tightened to the disk-verified
 // server/hub behavior at `phlix-server @ 98d7f691`, so a future edit that lets
@@ -583,12 +583,85 @@ describe('deferred-lane era-cite + TOC currency', () => {
   });
 
   it('advances the document-revision stamp (a normative surface was touched)', () => {
-    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-04/);
+    // Deliberate literal — this is the stamp-rotation TRIPWIRE: any future
+    // normative edit must rotate the SPEC stamp and consciously re-bless this
+    // pin from its measured red (the m36 pin above guards the date SHAPE, so
+    // rotatability itself never fights a lane). 2026-11-04 → 2026-11-03: the
+    // forward-dated stamp was a disclosed date fiction (review minor m6; all
+    // author/commit dates in the range are 2026-11-03).
+    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-03/);
   });
 
   it('keeps the Contents TOC in step with the added subsections', () => {
     expect(SPEC).toMatch(/Security model[\s\S]{0,60}8\.5/);
     expect(SPEC).toMatch(/identity contract[\s\S]{0,140}9\.3/);
     expect(SPEC).toMatch(/^### 9\.3 Concurrent connections/m);
+  });
+});
+
+// ── Review-cure tripwires (REVIEW-CHANGES/syncplay.md Majors 1–2, minors 3–6,
+// all cured 2026-11-03). Each pin asserts the CURED phrasing is present and the
+// false claim stays deleted, so a revert reddens here. Red-on-parent: every
+// negative pin below was green BEFORE this lane (it asserts absence of text
+// that existed at 1a80b1d1) and every positive phrase absent there.
+
+describe('review-cure: SPEC §4.6 error-field truth (Major 1)', () => {
+  it('states error_code as the only field live emitters set', () => {
+    expect(SPEC).toContain('the ONLY field live emitters set');
+    expect(SPEC).toMatch(/`SyncPlayManager\.php:2025-2028`/);
+    // The MUST itself is operative consumer law (client.ts reads the pair in
+    // this order) and survives the cure verbatim:
+    expect(SPEC).toMatch(/Clients MUST read `error_code` first, then fall back to `code`/);
+  });
+
+  it('keeps the false two-field split retired, on SPEC and in the shipped types', () => {
+    expect(SPEC).not.toContain('SyncPlayManager::sendError uses code');
+    expect(SPEC).not.toContain('splits its error emitters across the two fields');
+    expect(SPEC).not.toContain('silently drops every frame from the other');
+    expect(MESSAGES).not.toContain('sendError uses `code`');
+  });
+});
+
+describe('review-cure: SPEC §4.3 chat retention truth (Major 2)', () => {
+  it('says REPLAYS (consumer law) instead of stores (false storage claim)', () => {
+    expect(SPEC).toContain('No carrier REPLAYS');
+    expect(SPEC).toContain('snapshot-persisted');
+    // Server-side retention now named with its verified coordinates:
+    expect(SPEC).toMatch(/GroupState\.php:986-1000/);
+    expect(SPEC).not.toContain('No carrier stores');
+    // The consumer-observable lead sentence m7/m12 pinned is intact:
+    expect(SPEC).toContain('Chat is ephemeral, and the echo is the only receipt');
+  });
+});
+
+describe('review-cure: cite currency (minors 3–5)', () => {
+  it('pins updatePlayback to its measured window (GroupState.php:720-726)', () => {
+    expect(SPEC).toContain('(`GroupState.php:720-726`)');
+    expect(SPEC).not.toContain('GroupState.php:714-722');
+  });
+
+  it('names the file for the joinGroup capacity cite (SyncPlayManager.php:840)', () => {
+    expect(SPEC).toContain('joinGroup `SyncPlayManager.php:840`');
+    expect(SPEC).not.toContain('`joinGroup` :838');
+  });
+
+  it('stamps the §2 hub cites to the verified hub tree', () => {
+    expect(SPEC).toContain('era `phlix-hub` @ `3c4723f4`');
+  });
+});
+
+describe('review-cure: no forward-dated stamps in live surfaces (minor 6)', () => {
+  it('retires the forward-dated stamp fiction from SPEC and this test file', () => {
+    // The [0.1.7] CHANGELOG section keeps its (sp-def, 2026-11-04) bullet
+    // VERBATIM — tagged release history is never rewritten (rok05 precedent);
+    // the fiction is forward-recorded in the [Unreleased] cure entry instead.
+    // Assembled without a contiguous literal so this line cannot self-trip.
+    const stale = '2026-11' + '-04';
+    expect(SPEC).not.toContain(stale);
+    const self = readFileSync(fileURLToPath(new URL('./specDocLaw.test.ts', import.meta.url)), 'utf8');
+    const offenders = self
+      .split('\n')
+      .filter((line) => line.includes(stale) && !line.trimStart().startsWith('//'));
+    expect(offenders).toEqual([]);
   });
 });

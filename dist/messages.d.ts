@@ -521,7 +521,9 @@ export interface GroupListResponsePayload {
 }
 /** ERROR message (Messages::error). */
 export interface ErrorPayload {
-    /** Server uses `error_code` in Messages::error; sendError uses `code`. */
+    /** Live emitters set ONLY `error_code` (`Messages::error` delegates even
+     *  `SyncPlayManager::sendError` to it); `code` below is the RETIRED
+     *  historical field name — read last, for tolerance of stale senders. */
     error_code?: string;
     code?: string;
     message: string;
