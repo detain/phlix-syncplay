@@ -24,7 +24,7 @@
  * TOP-LEVEL payload field (e.g. `syncplay_info`, `Messages::info()`) and
  * survives decode UNTOUCHED (M-SYNCPLAY-02).
  */
-import { type RawMessage, type SyncPlayMessageType } from './messages';
+import { type RawMessage, type SyncPlayMessageType, type UnknownFrame } from './messages';
 /**
  * A clock source, injected so the module stays pure and deterministic.
  *
@@ -62,8 +62,12 @@ export declare function encodeMessage(type: SyncPlayMessageType, payload: Record
  * `onUnknownFrame` makes to non-SyncPlay consumers.
  *
  * Returns `null` for anything that is not a JSON object carrying a string
- * `type`.
+ * `type`. A surviving frame whose `type` passes {@link isValidMessageType}
+ * comes back as {@link RawMessage}; foreign vocabulary comes back as the
+ * honest {@link UnknownFrame} — CONSOLIDATED m19 (review asphp MINOR-7): the
+ * old blanket `as RawMessage` promised canonicity the decode never verified,
+ * handing the `pending_command` lane compiler-false RawMessages.
  */
-export declare function decodeMessage(raw: unknown): RawMessage | null;
+export declare function decodeMessage(raw: unknown): RawMessage | UnknownFrame | null;
 /** Serialize a raw message object to a JSON string for transmission. */
 export declare function serializeMessage(message: RawMessage): string;

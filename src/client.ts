@@ -32,6 +32,7 @@
 
 import { decodeMessage, encodeMessage, type NowFn } from './framing';
 import {
+  isValidMessageType,
   SYNCPLAY_MESSAGE_TYPES,
   type ChatBroadcastPayload,
   type ErrorPayload,
@@ -77,10 +78,22 @@ export interface TimeSyncStatus {
   isStable: boolean;
 }
 
+/** Why {@link SyncPlayClientOptions.onFrameDropped} fired (CONSOLIDATED m5/m17). */
+export type FrameDropReason = 'undecodable' | 'malformed' | 'send-failed';
+
 /**
  * Constructor options. `send` and `now` are required; everything else is an
  * optional callback. `send` receives the RAW message object (already framed);
  * the consumer serializes and writes it to its transport.
+ *
+ * THROW LAW (CONSOLIDATED m17, review asphp MINOR-5): every callback here is
+ * invoked straight — a consumer callback that throws mid-cascade can abort the
+ * remaining events for one frame (roster left-events + `onState`) — so
+ * callbacks MUST NOT throw. The one transport exception: a `send` throw inside
+ * the coalesced-seek TIMER flush cannot surface to any caller (it would be an
+ * uncaught `setTimeout` exception), so it is caught there and reported via
+ * {@link SyncPlayClientOptions.onFrameDropped} as `'send-failed'`; every other
+ * `send` path lets the sink's own throw propagate to the calling method.
  */
 export interface SyncPlayClientOptions {
   /** Transport sink. Receives a framed RAW message object. */
@@ -223,7 +236,18 @@ export interface SyncPlayClientOptions {
    */
   onMemberLeft?: (_member: { id: string; name: string }) => void;
   onHostChanged?: (_newHostId: string | null) => void;
-  onError?: (_code: string, _message: string) => void;
+  /**
+   * A server error frame. `_details` carries the frame's optional `details`
+   * object verbatim (CONSOLIDATED m9, review casualgamer Minor 7 — the
+   * structured "by how much / what limit" context used to die at this
+   * boundary). `undefined` when the frame carried none or the value was not a
+   * plain object (drop-the-garbage law; an array reads as garbage).
+   */
+  onError?: (
+    _code: string,
+    _message: string,
+    _details?: Record<string, unknown>,
+  ) => void;
   onInfo?: (_message: string) => void;
   /** A member started or stopped typing (`TYPING` in `SYNCPLAY_MESSAGE_TYPES`
    *  — wire value `syncplay_typing`; the phlix-server constant is
@@ -360,6 +384,23 @@ export interface SyncPlayClientOptions {
    * through it and the library stays protocol-pure.
    */
   onUnknownFrame?: (_frame: UnknownFrame) => void;
+  /**
+   * CONSOLIDATED m5 (review casualgamer Minor 2): inbound frames the decoder
+   * rejects or a handler refuses for garbage fire here instead of vanishing —
+   * the "your play didn't start and nothing says so" class.
+   *  - `'undecodable'` — {@link decodeMessage} returned null (bad JSON,
+   *    non-object, missing string `type`); `_frame` is the raw inbound value.
+   *  - `'malformed'` — a canonical frame a handler refused for garbage
+   *    (missing/non-finite/negative position, non-string ids, non-object
+   *    `group`, non-array `queue`/`groups`); `_frame` is the decoded message.
+   *  - `'send-failed'` — the coalesced-seek timer flush threw at the
+   *    consumer `send` sink (browser throws on a CLOSED socket mid-window;
+   *    CONSOLIDATED m17); `_frame` is null (the wire frame was never built).
+   * Protocol drops BY DESIGN (late/mismatched `time_pong`, self-echo
+   * suppression, room-change seek cancellation) do NOT fire here — this hook
+   * observes garbage, not law.
+   */
+  onFrameDropped?: (_reason: FrameDropReason, _frame: unknown) => void;
   /**
    * Invoked by {@link SyncPlayClient.onDisconnect} after the client's transient
    * state has been cleared, so the consumer can update its UI (e.g. show a
@@ -514,10 +555,14 @@ export class SyncPlayClient {
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_JOIN, payload);
   }
 
-  /** Leave the current group (no-op if not in one). */
-  leaveGroup(): void {
+  /**
+   * Leave the current group. Returns whether the LEAVE frame actually
+   * dispatched — `false` with no cached group (CONSOLIDATED m4: the silent
+   * void no-op gave wrappers no way to show "still joining").
+   */
+  leaveGroup(): boolean {
     if (this.group === null) {
-      return;
+      return false;
     }
     // A coalesced seek that never shipped belongs to the room we are leaving.
     this.cancelSeekCoalescing();
@@ -526,6 +571,7 @@ export class SyncPlayClient {
       member_id: this.memberId,
     });
     this.group = null;
+    return true;
   }
 
   // --- Playback ------------------------------------------------------------
@@ -543,9 +589,18 @@ export class SyncPlayClient {
   // before rebroadcasting. The echo-suppression in handlePlayback/handleSeek
   // relies on that server-set sender id.
 
-  sendPlay(position: number): void {
+  /**
+   * Host command: play at `position` (ms). Returns whether the frame
+   * dispatched — `false` with no cached group. The same boolean law covers
+   * {@link sendPause}, {@link sendSeek}, {@link reportPosition},
+   * {@link sendChat}, {@link sendTyping} and {@link leaveGroup}
+   * (CONSOLIDATED m4): "accepted for sending" must be observable, silence is
+   * not. `true` means the library handed the frame to the `send` sink, not
+   * that the server accepted it — the receipt story is the echo/error lane.
+   */
+  sendPlay(position: number): boolean {
     if (this.group === null) {
-      return;
+      return false;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY, {
       group_id: this.group.group_id,
@@ -553,11 +608,13 @@ export class SyncPlayClient {
       position,
       server_time: this.getSynchronizedTime(),
     });
+    return true;
   }
 
-  sendPause(position: number): void {
+  /** Host command: pause at `position` (ms). Boolean law per {@link sendPlay}. */
+  sendPause(position: number): boolean {
     if (this.group === null) {
-      return;
+      return false;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PAUSE, {
       group_id: this.group.group_id,
@@ -565,6 +622,7 @@ export class SyncPlayClient {
       position,
       server_time: this.getSynchronizedTime(),
     });
+    return true;
   }
 
   /**
@@ -577,21 +635,29 @@ export class SyncPlayClient {
    * call of a burst ships synchronously and repeats merge into a single
    * trailing frame at the window's close — the wire never sees an
    * intermediate target.
+   *
+   * Returns whether the intent was ACCEPTED for the wire — `false` with no
+   * cached group; `true` both when a frame dispatched synchronously and when
+   * the call merged latest-wins into an open window (CONSOLIDATED m4). The
+   * one lossy path left is the timer flush whose group vanished (defensive
+   * arm in `closeSeekWindow`) or whose `send` threw (guarded —
+   * `'send-failed'` on {@link SyncPlayClientOptions.onFrameDropped}).
    */
-  sendSeek(fromPosition: number, toPosition: number): void {
+  sendSeek(fromPosition: number, toPosition: number): boolean {
     if (this.group === null) {
-      return;
+      return false;
     }
     if (this.seekWindowOpen) {
       // Latest-wins: replace the pending target; intermediate seeks are
       // meaningless, so nothing else from the burst survives.
       this.pendingSeek = { from: fromPosition, to: toPosition };
-      return;
+      return true;
     }
     this.dispatchSeek(fromPosition, toPosition);
     if (this.seekThrottleMs > 0) {
       this.openSeekWindow();
     }
+    return true;
   }
 
   /** The single PLAYBACK_SEEK wire point — leading and trailing edges share it. */
@@ -611,7 +677,20 @@ export class SyncPlayClient {
   /** Arm the window's trailing flush. This is the library's ONLY owned timer. */
   private openSeekWindow(): void {
     this.seekWindowOpen = true;
-    this.seekFlushTimer = setTimeout(() => this.closeSeekWindow(), this.seekThrottleMs);
+    this.seekFlushTimer = setTimeout(() => {
+      // CONSOLIDATED m17 (review asphp MINOR-5): browsers THROW from `send`
+      // on a CLOSED socket, and this call sits on a bare timer — an escaped
+      // throw would surface as an uncaught `setTimeout` exception. Catch it
+      // and report the loss through the garbage-observability seam. State is
+      // already unwound by `closeSeekWindow` before the dispatch attempt
+      // (window closed, pending cleared), and the failed re-arm leaves the
+      // instance timer-free — a later sendSeek simply opens a fresh window.
+      try {
+        this.closeSeekWindow();
+      } catch {
+        this.options.onFrameDropped?.('send-failed', null);
+      }
+    }, this.seekThrottleMs);
   }
 
   /**
@@ -655,9 +734,9 @@ export class SyncPlayClient {
    * ingested for the S446 per-member drift policy (§4 `nudge`). Host-driven
    * pacing is an integration convention, never an authorization precondition.
    */
-  reportPosition(position: number, isPlaying: boolean): void {
+  reportPosition(position: number, isPlaying: boolean): boolean {
     if (this.group === null) {
-      return;
+      return false;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC, {
       group_id: this.group.group_id,
@@ -666,6 +745,7 @@ export class SyncPlayClient {
       is_playing: isPlaying,
       server_time: this.getSynchronizedTime(),
     });
+    return true;
   }
 
   // --- Chat (any member; both producers derive identity server-side) --------
@@ -687,18 +767,19 @@ export class SyncPlayClient {
    *  - the accepted message ECHOES BACK TO YOU through
    *    {@link SyncPlayClientOptions.onChat} (fan-out includes the sender) —
    *    render chat from the callback only, never twice.
-   * No-op outside a group (sendPlay precedent — the frame's `group_id` comes
-   * from the cached group).
+   * Outside a group the frame's `group_id` has no source, so the send is
+   * REFUSED and returns `false` (CONSOLIDATED m4 — it used to be silent).
    */
-  sendChat(message: string): void {
+  sendChat(message: string): boolean {
     if (this.group === null) {
-      return;
+      return false;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.CHAT, {
       group_id: this.group.group_id,
       member_id: this.memberId,
       message,
     });
+    return true;
   }
 
   /**
@@ -714,15 +795,16 @@ export class SyncPlayClient {
    * a transient indicator — there is nothing to observe beyond the peers'
    * view).
    */
-  sendTyping(isTyping: boolean): void {
+  sendTyping(isTyping: boolean): boolean {
     if (this.group === null) {
-      return;
+      return false;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.TYPING, {
       group_id: this.group.group_id,
       member_id: this.memberId,
       is_typing: isTyping,
     });
+    return true;
   }
 
   // --- Time sync -----------------------------------------------------------
@@ -744,8 +826,17 @@ export class SyncPlayClient {
   pingTime(): void {
     const t1 = this.now();
     const outstanding = this.lastPingSendTime;
-    if (outstanding !== null && t1 - outstanding <= MAX_ACCEPTABLE_RTT) {
-      return;
+    // CONSOLIDATED m22 (review asphp MINOR-3): a BACKWARD wall-clock step made
+    // the age NEGATIVE, and a negative age passes `<= MAX_ACCEPTABLE_RTT`
+    // forever — the single-flight slot wedged, sync froze, stale offsets
+    // served with full confidence. A negative age is not a fresh ping: re-ping
+    // and let the newest send time own the slot (SPEC §10's "never wedge"
+    // intent, finally true under clock steps).
+    if (outstanding !== null) {
+      const age = t1 - outstanding;
+      if (age >= 0 && age <= MAX_ACCEPTABLE_RTT) {
+        return;
+      }
     }
     this.lastPingSendTime = t1;
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.TIME_PING, { client_time: t1 });
@@ -779,6 +870,23 @@ export class SyncPlayClient {
     this.options.onDisconnect?.();
   }
 
+  /**
+   * CONSOLIDATED m18 (review asphp MINOR-6): screen-unmount teardown. Unwinds
+   * exactly what {@link onDisconnect} unwinds — coalescing cancelled, TimeSync
+   * window cleared, cached group and outstanding ping dropped — but fires NO
+   * consumer callback: a component that is tearing down must not be dragged
+   * back through its disconnect handler (and the disconnect path's
+   * "reconnecting…" UI is the wrong signal for destroy). After `destroy()` the
+   * instance holds no live timers; it is INERT — do not re-`joinGroup` on it,
+   * build the next client fresh.
+   */
+  destroy(): void {
+    this.cancelSeekCoalescing();
+    this.timeSync.reset();
+    this.group = null;
+    this.lastPingSendTime = null;
+  }
+
   // --- Inbound -------------------------------------------------------------
 
   /**
@@ -789,14 +897,27 @@ export class SyncPlayClient {
    * the two formerly-ignored canonical types (syncplay_chat,
    * syncplay_playback_queue) are orchestrated since M-SYNCPLAY-11 through
    * {@link SyncPlayClientOptions.onChat} / {@link SyncPlayClientOptions.onQueueChanged}
-   * and never reach that hook; invalid/undecodable frames (decodeMessage
-   * returns null) are still ignored.
+   * and never reach that hook; undecodable and garbage-refused frames are
+   * ignored too, but no longer silently — they surface through
+   * {@link SyncPlayClientOptions.onFrameDropped} (CONSOLIDATED m5).
    */
   handleIncoming(raw: unknown): void {
-    const msg = decodeMessage(raw);
-    if (msg === null) {
+    const decoded = decodeMessage(raw);
+    if (decoded === null) {
+      this.options.onFrameDropped?.('undecodable', raw);
       return;
     }
+    if (!isValidMessageType(decoded.type)) {
+      // CONSOLIDATED m19: canonicality is now checked honestly, by the
+      // exported guard, BEFORE the switch. Foreign vocabulary (hub
+      // `pending_command` and any consumer dialect) surfaces on
+      // onUnknownFrame untouched — same behavior the old default arm
+      // provided, now typed as the honest UnknownFrame instead of a cast
+      // that pretended RawMessage.
+      this.options.onUnknownFrame?.(decoded);
+      return;
+    }
+    const msg = decoded as RawMessage;
 
     switch (msg.type) {
       case SYNCPLAY_MESSAGE_TYPES.TIME_PONG:
@@ -845,10 +966,12 @@ export class SyncPlayClient {
         this.handlePlaybackQueueBroadcast(msg);
         break;
       default:
-        // S298: the "custom transport hook" the old comment promised is now real —
-        // frames whose type is outside the 19 canonical syncplay_* types (e.g. the
-        // hub relay's `pending_command`) are surfaced via onUnknownFrame instead of
-        // being silently dropped. The library validates nothing about them; it stays
+        // S298 (still true) + CONSOLIDATED m19: non-canonical vocabulary now
+        // exits handleIncoming through isValidMessageType ABOVE the switch,
+        // typed as UnknownFrame. This arm keeps its meaning for canonical
+        // types with no honest inbound producer (an echoed outbound-only
+        // group_create, a stray time_ping): surfaced as unknown-to-this-client
+        // rather than dropped. The library validates nothing here; it stays
         // protocol-pure.
         this.options.onUnknownFrame?.(msg);
         break;
@@ -955,10 +1078,20 @@ export class SyncPlayClient {
   private static normalizeMembers(members: SyncPlayMembersWire | undefined, hostId: string | null): SyncPlayMember[] {
     let list: Array<Partial<SyncPlayMember> & { id?: string }>;
     if (Array.isArray(members)) {
-      list = members;
+      // CONSOLIDATED M10 (review asphp MAJOR-1): the tolerance this normalizer
+      // advertises is for the ARRAY SPELLING — and `[null]`/`[3]` used to
+      // throw out of handleIncoming mid-fold with the cached group possibly
+      // half-updated, violating the library's own "invalid frames are
+      // ignored" law. Element-level drop now mirrors the field-level law:
+      // non-object entries are skipped, nothing is defaulted into a member.
+      list = members.filter((m) => typeof m === 'object' && m !== null);
     } else if (members && typeof members === 'object') {
-      // Dict keyed by member id → array; the entry KEY is authoritative for id.
-      list = Object.entries(members).map(([id, value]) => ({ ...value, id }));
+      // Dict keyed by member id → array; the entry KEY is authoritative for
+      // id. Was only ACCIDENTALLY safe (spreading a primitive yields garbage,
+      // not a crash) — now the same explicit law as the array spelling.
+      list = Object.entries(members)
+        .filter(([, value]) => typeof value === 'object' && value !== null)
+        .map(([id, value]) => ({ ...value, id }));
     } else {
       list = [];
     }
@@ -1018,7 +1151,10 @@ export class SyncPlayClient {
    * `< 1e12` is treated as seconds (×1000) — a plausible wall-clock epoch-ms
    * value has been ≥ 1e12 ever since 2001-09-09, and epoch seconds stay
    * `< 1e12` until the year 33658. Realistic stamps on either carrier decode
-   * exactly; ms stamps pass through untouched.
+   * exactly; ms stamps pass through untouched. Stamps below 1000 are epoch
+   * ZERO-ish garbage on either scale: the library refuses them at
+   * {@link serverTimeOrNow} (CONSOLIDATED m3) — direct callers should treat a
+   * `< 1000` input the same way an absent stamp is treated.
    */
   static serverTimeToMs(raw: number): number {
     return raw < 1e12 ? raw * 1000 : raw;
@@ -1032,7 +1168,13 @@ export class SyncPlayClient {
    * clock-estimate fallback (M-SYNCPLAY-19).
    */
   private static serverTimeOrNow(raw: unknown, fallback: () => number): number {
-    return typeof raw === 'number' && Number.isFinite(raw)
+    // CONSOLIDATED m3 (review gameux m1): epoch-zero / negative stamps are the
+    // exact "+56 years teleports the playhead" failure this class's own
+    // docblock cites — `server_time: 0` used to fold into 0 ms and poison
+    // every interpolation. No honest wall clock on EITHER carrier scale reads
+    // below 1000 (that is 1970-01-01T00:16:40Z), so it takes the documented
+    // clock-estimate fallback like an absent or non-finite one already did.
+    return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1000
       ? SyncPlayClient.serverTimeToMs(raw)
       : fallback();
   }
@@ -1053,7 +1195,10 @@ export class SyncPlayClient {
     if (!Array.isArray(queue)) {
       return undefined;
     }
-    return queue.map((item) => ({
+    // CONSOLIDATED M10: element-level drop per the normalizeMembers law —
+    // surviving items keep their ORDER (a queue is positional).
+    const items = queue.filter((item) => typeof item === 'object' && item !== null);
+    return items.map((item) => ({
       media_id: typeof item.media_id === 'string' ? item.media_id : '',
       media_info:
         typeof item.media_info === 'object' && item.media_info !== null
@@ -1090,15 +1235,23 @@ export class SyncPlayClient {
     }
     const raw = nudge as Partial<PlaybackSyncNudge>;
     // M-SYNCPLAY-19: every numeric here feeds rate/drift math — finite-only.
+    // CONSOLIDATED m2 (review exploiter m2 / secnet m2): FINITE is not
+    // DOMAIN — `suggested_rate: 1e9` used to flow straight into consumer
+    // playRate. Clamp-every-read on the nudge numerics now: the only honest
+    // rate band is the server's own `1 ± NUDGE_RATE_STEP(0.1)` law
+    // (phlix-server GroupState.php:167, @ the cites on PlaybackSyncNudge),
+    // and tolerance/cooldown are non-negative ms or they are not those
+    // fields. Out-of-domain drops to undefined — the same drop-the-garbage
+    // arm a non-finite value already took.
     return {
       drift_ms: SyncPlayClient.finiteOrUndefined(raw.drift_ms),
       direction:
         raw.direction === 'behind' || raw.direction === 'ahead'
           ? raw.direction
           : undefined,
-      suggested_rate: SyncPlayClient.finiteOrUndefined(raw.suggested_rate),
-      tolerance_ms: SyncPlayClient.finiteOrUndefined(raw.tolerance_ms),
-      cooldown_ms: SyncPlayClient.finiteOrUndefined(raw.cooldown_ms),
+      suggested_rate: SyncPlayClient.nudgeRateOrUndefined(raw.suggested_rate),
+      tolerance_ms: SyncPlayClient.nonnegOrUndefined(raw.tolerance_ms),
+      cooldown_ms: SyncPlayClient.nonnegOrUndefined(raw.cooldown_ms),
     };
   }
 
@@ -1138,6 +1291,52 @@ export class SyncPlayClient {
   }
 
   /**
+   * Nudge rate domain (CONSOLIDATED m2): the server's only emitted values are
+   * `1 ± 0.1`, so anything outside `[0.9, 1.1]` has no honest producer and
+   * reads as absent. A future band change is a WIRE-LAW edit: widen here only
+   * together with the SPEC §4 nudge section (never silently).
+   */
+  private static nudgeRateOrUndefined(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.9 || value > 1.1) {
+      return undefined;
+    }
+    return value;
+  }
+
+  /** Finite AND non-negative ms (CONSOLIDATED m2): tolerance/cooldown domain. */
+  private static nonnegOrUndefined(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return undefined;
+    }
+    return value;
+  }
+
+  /**
+   * Inbound-position acceptance law (CONSOLIDATED m2 + the M6 clamp arm made
+   * executable): finite, never negative (no honest producer for a <0
+   * position — that frame class already refuses the 0-teleport family, the
+   * sign is the same question), and clamped to the cached group's
+   * `current_media_duration` when one is known — the SPEC §5/M6 consumer
+   * clamp duty inherited by every wrapper that delegates here. `null` =
+   * garbage; each caller drops the frame via its existing precedent.
+   */
+  private positionOrDrop(value: unknown): number | null {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return null;
+    }
+    const duration = this.group?.current_media_duration;
+    if (
+      typeof duration === 'number' &&
+      Number.isFinite(duration) &&
+      duration > 0 &&
+      value > duration
+    ) {
+      return duration;
+    }
+    return value;
+  }
+
+  /**
    * Membership-check `playback_state` against the canonical four (SPEC §4,
    * `PlaybackState` in `messages.ts`); anything else degrades to `'stopped'`
    * (M-SYNCPLAY-19). A cast through this guard is the difference between a
@@ -1154,6 +1353,7 @@ export class SyncPlayClient {
     const payload = msg as Partial<GroupStatePayload>;
     const group = payload.group;
     if (typeof group !== 'object' || group === null) {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
     }
 
@@ -1237,10 +1437,11 @@ export class SyncPlayClient {
     // concrete jump-to-00:00 command the whole group obeys; the boundary now
     // refuses the frame instead. (A real 0 is finite and passes: this is a
     // type/presence check, not a truthiness check.)
-    if (typeof msg.position !== 'number' || !Number.isFinite(msg.position)) {
+    const position = this.positionOrDrop(msg.position);
+    if (position === null) {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
     }
-    const position = msg.position;
     const serverTime = SyncPlayClient.serverTimeOrNow(
       msg.server_time,
       () => this.getSynchronizedTime(),
@@ -1260,10 +1461,11 @@ export class SyncPlayClient {
     // M-SYNCPLAY-12: malformed seek positions (missing / non-numeric /
     // non-finite) drop the frame — same law as handlePlayback; defaulting to
     // 0 rewound the group to 00:00 on a frame no server would ever emit.
-    if (typeof msg.to_position !== 'number' || !Number.isFinite(msg.to_position)) {
+    const position = this.positionOrDrop(msg.to_position);
+    if (position === null) {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
     }
-    const position = msg.to_position;
     const serverTime = SyncPlayClient.serverTimeOrNow(
       msg.server_time,
       () => this.getSynchronizedTime(),
@@ -1273,7 +1475,13 @@ export class SyncPlayClient {
 
   private handleHostElect(msg: RawMessage): void {
     const payload = msg as Partial<HostElectPayload>;
-    const newHostId = payload.elected_id ?? null;
+    // CONSOLIDATED m1 (review asphp MINOR-1, secnet m1): `?? null` admitted
+    // ANY JSON value into `host_id: string | null` — a number or object then
+    // silently killed every `=== hostId` derivation and `isHost()` forever.
+    // The M-SYNCPLAY-19 string law now covers this site like the rest of the
+    // boundary (and a genuinely absent/null elected_id still means "no
+    // host", unchanged).
+    const newHostId = SyncPlayClient.strOrNull(payload.elected_id);
     if (this.group !== null) {
       // M-SYNCPLAY-03 (review `syncplay__crossfe` m3, ghost half): BOTH live
       // producers emit `host_elect` only on the host-LEAVE path, and on that
@@ -1292,8 +1500,26 @@ export class SyncPlayClient {
           ? payload.elected_by
           : null;
       let group = this.group;
-      if (departed !== null && departed !== this.memberId) {
-        group = { ...group, members: group.members.filter((m) => m.id !== departed) };
+      const remaining =
+        departed !== null && departed !== this.memberId
+          ? group.members.filter((m) => m.id !== departed)
+          : group.members;
+      if (remaining.length !== group.members.length) {
+        const gone = group.members.find((m) => m.id === departed);
+        group = { ...group, members: remaining };
+        this.group = SyncPlayClient.foldHostId(group, newHostId);
+        // CONSOLIDATED m16 (review asphp MINOR-4): the eager eviction used to
+        // swallow the departure — roster-diff `onMemberLeft` could never fire
+        // for host departures on EITHER carrier, making the lib's leave
+        // signal strictly worse than the hand-rolled diffs it replaced. Fire
+        // it where the eviction ACTUALLY removed a member, before
+        // `onHostChanged` so wrappers see the roster change first (same
+        // fold-then-announce order as handleGroupState).
+        if (gone !== undefined) {
+          this.options.onMemberLeft?.({ id: gone.id, name: gone.name });
+        }
+        this.options.onHostChanged?.(newHostId);
+        return;
       }
       this.group = SyncPlayClient.foldHostId(group, newHostId);
     }
@@ -1325,15 +1551,33 @@ export class SyncPlayClient {
           ? payload.code
           : 'UNKNOWN';
     const message = typeof payload.message === 'string' ? payload.message : 'Unknown error';
-    this.options.onError?.(code, message);
+    // CONSOLIDATED m9 (review casualgamer Minor 7): SPEC §4's error frame may
+    // carry a structured `details` object ("by how much / what limit"). It
+    // used to die at this boundary. Object-guarded VERBATIM pass-through —
+    // arrays and other JSON garbage read as absent, exactly like the rest of
+    // the boundary's drop-the-garbage law.
+    const details =
+      typeof payload.details === 'object' &&
+      payload.details !== null &&
+      !Array.isArray(payload.details)
+        ? (payload.details as Record<string, unknown>)
+        : undefined;
+    this.options.onError?.(code, message, details);
   }
 
   private handleTyping(msg: RawMessage): void {
     const payload = msg as Partial<TypingPayload>;
     if (typeof payload.member_id !== 'string') {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
     }
-    this.options.onMemberTyping?.(payload.member_id, payload.is_typing ?? false);
+    // CONSOLIDATED m1 (review asphp MINOR-2, secnet m1): `?? false` admitted
+    // `'1'` / `1` / `{}` into a typed boolean consumer. Finite-truthiness is
+    // not the law here — the producers stamp a real boolean (server reads
+    // `=== true` or legacy '1', but only ever WRITES true/false), so anything
+    // that is not a boolean is a malformed frame and reads as false.
+    const isTyping = typeof payload.is_typing === 'boolean' ? payload.is_typing : false;
+    this.options.onMemberTyping?.(payload.member_id, isTyping);
   }
 
   /**
@@ -1352,6 +1596,7 @@ export class SyncPlayClient {
   private handleChat(msg: RawMessage): void {
     const payload = msg as Partial<ChatBroadcastPayload>;
     if (typeof payload.member_id !== 'string' || typeof payload.message !== 'string') {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
     }
     const memberName = typeof payload.member_name === 'string' ? payload.member_name : '';
@@ -1380,6 +1625,7 @@ export class SyncPlayClient {
     const payload = msg as Partial<QueueBroadcastPayload>;
     const queue = SyncPlayClient.normalizeQueue(payload.queue);
     if (queue === undefined) {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
     }
     if (this.group !== null) {
@@ -1391,6 +1637,7 @@ export class SyncPlayClient {
   private handleHostTransfer(msg: RawMessage): void {
     const payload = msg as Partial<HostTransferPayload>;
     if (typeof payload.current_host_id !== 'string' || typeof payload.new_host_id !== 'string') {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
     }
     if (this.group !== null) {
@@ -1414,10 +1661,11 @@ export class SyncPlayClient {
     // re-anchor to, and defaulting 0 would soft-seek every consumer away from
     // where the reporter actually is. Drop the frame; the is_playing and
     // server_time fallbacks below stay (those defaults are truthful).
-    if (typeof msg.position !== 'number' || !Number.isFinite(msg.position)) {
+    const position = this.positionOrDrop(msg.position);
+    if (position === null) {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
     }
-    const position = msg.position;
     const isPlaying = typeof msg.is_playing === 'boolean' ? msg.is_playing : false;
     // Carrier unit normalization (M-SYNCPLAY-04): the `:8097` echo arrives in
     // UNIX seconds, the hub echo in ms — consumers get ms either way.
@@ -1456,6 +1704,7 @@ export class SyncPlayClient {
       !(typeof payload.drift_rate === 'number' && Number.isFinite(payload.drift_rate)) ||
       typeof payload.is_stable !== 'boolean'
     ) {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
     }
     this.options.onTimeSync?.({
@@ -1476,12 +1725,20 @@ export class SyncPlayClient {
     // derivable — see SPEC §4 group_list reply block).
     const groups = payload.groups;
     if (!Array.isArray(groups)) {
+      this.options.onFrameDropped?.('malformed', msg);
       return;
+    }
+    // CONSOLIDATED M10: element-level guard shares normalizeMembers' law —
+    // `groups: [null]` used to throw mid-fold below.
+    if (groups.some((g) => typeof g !== 'object' || g === null)) {
+      // Keep rows honest without re-ordering: non-object rows are dropped.
+      // (map() below still normalizes each surviving row's FIELDS.)
     }
     // Parse-at-the-boundary against the REAL producer keys (server
     // groupSummary() :1740-1750, hub handleCanonicalGroupList() :1938-1943 —
     // every key always emitted, so each row is total-typed, never optional).
-    const list: GroupListSummaryRow[] = groups.map(
+    const rows = groups.filter((g) => typeof g === 'object' && g !== null);
+    const list: GroupListSummaryRow[] = rows.map(
       (g): GroupListSummaryRow => ({
         id: typeof g.id === 'string' ? g.id : '',
         name: typeof g.name === 'string' ? g.name : '',

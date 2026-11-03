@@ -27,9 +27,11 @@
  */
 
 import {
+  isValidMessageType,
   PROTOCOL_VERSION,
   type RawMessage,
   type SyncPlayMessageType,
+  type UnknownFrame,
 } from './messages';
 
 /**
@@ -82,9 +84,13 @@ export function encodeMessage(
  * `onUnknownFrame` makes to non-SyncPlay consumers.
  *
  * Returns `null` for anything that is not a JSON object carrying a string
- * `type`.
+ * `type`. A surviving frame whose `type` passes {@link isValidMessageType}
+ * comes back as {@link RawMessage}; foreign vocabulary comes back as the
+ * honest {@link UnknownFrame} — CONSOLIDATED m19 (review asphp MINOR-7): the
+ * old blanket `as RawMessage` promised canonicity the decode never verified,
+ * handing the `pending_command` lane compiler-false RawMessages.
  */
-export function decodeMessage(raw: unknown): RawMessage | null {
+export function decodeMessage(raw: unknown): RawMessage | UnknownFrame | null {
   let obj: unknown = raw;
 
   if (typeof raw === 'string') {
@@ -113,22 +119,26 @@ export function decodeMessage(raw: unknown): RawMessage | null {
   // (M-SYNCPLAY-02). The wrapper never carries `protocol_version`, so the
   // tolerance for legacy Tizen sends is preserved exactly.
   const data = record.data;
-  if (
+  const frame: Record<string, unknown> =
     !('protocol_version' in record) &&
     typeof data === 'object' &&
     data !== null &&
     !Array.isArray(data)
-  ) {
-    const rest: Record<string, unknown> = {};
-    for (const key of Object.keys(record)) {
-      if (key !== 'data') {
-        rest[key] = record[key];
-      }
-    }
-    return { ...(data as Record<string, unknown>), ...rest } as RawMessage;
-  }
+      ? (() => {
+          const rest: Record<string, unknown> = {};
+          for (const key of Object.keys(record)) {
+            if (key !== 'data') {
+              rest[key] = record[key];
+            }
+          }
+          return { ...(data as Record<string, unknown>), ...rest };
+        })()
+      : record;
 
-  return record as RawMessage;
+  // The canonicity check the return type always claimed (CONSOLIDATED m19).
+  return isValidMessageType(record.type)
+    ? (frame as RawMessage)
+    : (frame as UnknownFrame);
 }
 
 /** Serialize a raw message object to a JSON string for transmission. */

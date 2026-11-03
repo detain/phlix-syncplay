@@ -48,10 +48,21 @@ export interface TimeSyncStatus {
     latency: number;
     isStable: boolean;
 }
+/** Why {@link SyncPlayClientOptions.onFrameDropped} fired (CONSOLIDATED m5/m17). */
+export type FrameDropReason = 'undecodable' | 'malformed' | 'send-failed';
 /**
  * Constructor options. `send` and `now` are required; everything else is an
  * optional callback. `send` receives the RAW message object (already framed);
  * the consumer serializes and writes it to its transport.
+ *
+ * THROW LAW (CONSOLIDATED m17, review asphp MINOR-5): every callback here is
+ * invoked straight — a consumer callback that throws mid-cascade can abort the
+ * remaining events for one frame (roster left-events + `onState`) — so
+ * callbacks MUST NOT throw. The one transport exception: a `send` throw inside
+ * the coalesced-seek TIMER flush cannot surface to any caller (it would be an
+ * uncaught `setTimeout` exception), so it is caught there and reported via
+ * {@link SyncPlayClientOptions.onFrameDropped} as `'send-failed'`; every other
+ * `send` path lets the sink's own throw propagate to the calling method.
  */
 export interface SyncPlayClientOptions {
     /** Transport sink. Receives a framed RAW message object. */
@@ -198,7 +209,14 @@ export interface SyncPlayClientOptions {
         name: string;
     }) => void;
     onHostChanged?: (_newHostId: string | null) => void;
-    onError?: (_code: string, _message: string) => void;
+    /**
+     * A server error frame. `_details` carries the frame's optional `details`
+     * object verbatim (CONSOLIDATED m9, review casualgamer Minor 7 — the
+     * structured "by how much / what limit" context used to die at this
+     * boundary). `undefined` when the frame carried none or the value was not a
+     * plain object (drop-the-garbage law; an array reads as garbage).
+     */
+    onError?: (_code: string, _message: string, _details?: Record<string, unknown>) => void;
     onInfo?: (_message: string) => void;
     /** A member started or stopped typing (`TYPING` in `SYNCPLAY_MESSAGE_TYPES`
      *  — wire value `syncplay_typing`; the phlix-server constant is
@@ -325,6 +343,23 @@ export interface SyncPlayClientOptions {
      */
     onUnknownFrame?: (_frame: UnknownFrame) => void;
     /**
+     * CONSOLIDATED m5 (review casualgamer Minor 2): inbound frames the decoder
+     * rejects or a handler refuses for garbage fire here instead of vanishing —
+     * the "your play didn't start and nothing says so" class.
+     *  - `'undecodable'` — {@link decodeMessage} returned null (bad JSON,
+     *    non-object, missing string `type`); `_frame` is the raw inbound value.
+     *  - `'malformed'` — a canonical frame a handler refused for garbage
+     *    (missing/non-finite/negative position, non-string ids, non-object
+     *    `group`, non-array `queue`/`groups`); `_frame` is the decoded message.
+     *  - `'send-failed'` — the coalesced-seek timer flush threw at the
+     *    consumer `send` sink (browser throws on a CLOSED socket mid-window;
+     *    CONSOLIDATED m17); `_frame` is null (the wire frame was never built).
+     * Protocol drops BY DESIGN (late/mismatched `time_pong`, self-echo
+     * suppression, room-change seek cancellation) do NOT fire here — this hook
+     * observes garbage, not law.
+     */
+    onFrameDropped?: (_reason: FrameDropReason, _frame: unknown) => void;
+    /**
      * Invoked by {@link SyncPlayClient.onDisconnect} after the client's transient
      * state has been cleared, so the consumer can update its UI (e.g. show a
      * "reconnecting…" indicator). This library owns no socket; the consumer calls
@@ -405,10 +440,24 @@ export declare class SyncPlayClient {
      * **replayable** SHA-256 group gate, not an identity.
      */
     joinGroup(groupId: string, passwordHash?: string): void;
-    /** Leave the current group (no-op if not in one). */
-    leaveGroup(): void;
-    sendPlay(position: number): void;
-    sendPause(position: number): void;
+    /**
+     * Leave the current group. Returns whether the LEAVE frame actually
+     * dispatched — `false` with no cached group (CONSOLIDATED m4: the silent
+     * void no-op gave wrappers no way to show "still joining").
+     */
+    leaveGroup(): boolean;
+    /**
+     * Host command: play at `position` (ms). Returns whether the frame
+     * dispatched — `false` with no cached group. The same boolean law covers
+     * {@link sendPause}, {@link sendSeek}, {@link reportPosition},
+     * {@link sendChat}, {@link sendTyping} and {@link leaveGroup}
+     * (CONSOLIDATED m4): "accepted for sending" must be observable, silence is
+     * not. `true` means the library handed the frame to the `send` sink, not
+     * that the server accepted it — the receipt story is the echo/error lane.
+     */
+    sendPlay(position: number): boolean;
+    /** Host command: pause at `position` (ms). Boolean law per {@link sendPlay}. */
+    sendPause(position: number): boolean;
     /**
      * Send a seek command, coalesced against key-repeat by the
      * {@link SyncPlayClientOptions.seekThrottleMs} throttle (leading + trailing,
@@ -419,8 +468,15 @@ export declare class SyncPlayClient {
      * call of a burst ships synchronously and repeats merge into a single
      * trailing frame at the window's close — the wire never sees an
      * intermediate target.
+     *
+     * Returns whether the intent was ACCEPTED for the wire — `false` with no
+     * cached group; `true` both when a frame dispatched synchronously and when
+     * the call merged latest-wins into an open window (CONSOLIDATED m4). The
+     * one lossy path left is the timer flush whose group vanished (defensive
+     * arm in `closeSeekWindow`) or whose `send` threw (guarded —
+     * `'send-failed'` on {@link SyncPlayClientOptions.onFrameDropped}).
      */
-    sendSeek(fromPosition: number, toPosition: number): void;
+    sendSeek(fromPosition: number, toPosition: number): boolean;
     /** The single PLAYBACK_SEEK wire point — leading and trailing edges share it. */
     private dispatchSeek;
     /** Arm the window's trailing flush. This is the library's ONLY owned timer. */
@@ -441,7 +497,7 @@ export declare class SyncPlayClient {
      * ingested for the S446 per-member drift policy (§4 `nudge`). Host-driven
      * pacing is an integration convention, never an authorization precondition.
      */
-    reportPosition(position: number, isPlaying: boolean): void;
+    reportPosition(position: number, isPlaying: boolean): boolean;
     /**
      * Send a chat message to the group. Outbound shape mirrors the server's own
      * factory `Messages::chatMessage` (phlix-server
@@ -459,10 +515,10 @@ export declare class SyncPlayClient {
      *  - the accepted message ECHOES BACK TO YOU through
      *    {@link SyncPlayClientOptions.onChat} (fan-out includes the sender) —
      *    render chat from the callback only, never twice.
-     * No-op outside a group (sendPlay precedent — the frame's `group_id` comes
-     * from the cached group).
+     * Outside a group the frame's `group_id` has no source, so the send is
+     * REFUSED and returns `false` (CONSOLIDATED m4 — it used to be silent).
      */
-    sendChat(message: string): void;
+    sendChat(message: string): boolean;
     /**
      * Announce typing state (`syncplay_typing`, {@link SyncPlayClientOptions.onMemberTyping}
      * is the inbound arm). Shape mirrors `Messages::chatTyping` (phlix-server
@@ -476,7 +532,7 @@ export declare class SyncPlayClient {
      * a transient indicator — there is nothing to observe beyond the peers'
      * view).
      */
-    sendTyping(isTyping: boolean): void;
+    sendTyping(isTyping: boolean): boolean;
     /**
      * Send a time_ping. Call periodically (e.g. every 10–30s).
      *
@@ -512,6 +568,17 @@ export declare class SyncPlayClient {
      */
     onDisconnect(): void;
     /**
+     * CONSOLIDATED m18 (review asphp MINOR-6): screen-unmount teardown. Unwinds
+     * exactly what {@link onDisconnect} unwinds — coalescing cancelled, TimeSync
+     * window cleared, cached group and outstanding ping dropped — but fires NO
+     * consumer callback: a component that is tearing down must not be dragged
+     * back through its disconnect handler (and the disconnect path's
+     * "reconnecting…" UI is the wrong signal for destroy). After `destroy()` the
+     * instance holds no live timers; it is INERT — do not re-`joinGroup` on it,
+     * build the next client fresh.
+     */
+    destroy(): void;
+    /**
      * Route one inbound frame (string or parsed object). Feeds time-sync on pong,
      * applies group_state, surfaces playback commands, host changes, errors, info,
      * chat and queue updates. Frames whose type is outside the 19 canonical
@@ -519,8 +586,9 @@ export declare class SyncPlayClient {
      * the two formerly-ignored canonical types (syncplay_chat,
      * syncplay_playback_queue) are orchestrated since M-SYNCPLAY-11 through
      * {@link SyncPlayClientOptions.onChat} / {@link SyncPlayClientOptions.onQueueChanged}
-     * and never reach that hook; invalid/undecodable frames (decodeMessage
-     * returns null) are still ignored.
+     * and never reach that hook; undecodable and garbage-refused frames are
+     * ignored too, but no longer silently — they surface through
+     * {@link SyncPlayClientOptions.onFrameDropped} (CONSOLIDATED m5).
      */
     handleIncoming(raw: unknown): void;
     private handleTimePong;
@@ -574,7 +642,10 @@ export declare class SyncPlayClient {
      * `< 1e12` is treated as seconds (×1000) — a plausible wall-clock epoch-ms
      * value has been ≥ 1e12 ever since 2001-09-09, and epoch seconds stay
      * `< 1e12` until the year 33658. Realistic stamps on either carrier decode
-     * exactly; ms stamps pass through untouched.
+     * exactly; ms stamps pass through untouched. Stamps below 1000 are epoch
+     * ZERO-ish garbage on either scale: the library refuses them at
+     * {@link serverTimeOrNow} (CONSOLIDATED m3) — direct callers should treat a
+     * `< 1000` input the same way an absent stamp is treated.
      */
     static serverTimeToMs(raw: number): number;
     /**
@@ -630,6 +701,25 @@ export declare class SyncPlayClient {
     private static finiteOr;
     private static finiteOrNull;
     private static finiteOrUndefined;
+    /**
+     * Nudge rate domain (CONSOLIDATED m2): the server's only emitted values are
+     * `1 ± 0.1`, so anything outside `[0.9, 1.1]` has no honest producer and
+     * reads as absent. A future band change is a WIRE-LAW edit: widen here only
+     * together with the SPEC §4 nudge section (never silently).
+     */
+    private static nudgeRateOrUndefined;
+    /** Finite AND non-negative ms (CONSOLIDATED m2): tolerance/cooldown domain. */
+    private static nonnegOrUndefined;
+    /**
+     * Inbound-position acceptance law (CONSOLIDATED m2 + the M6 clamp arm made
+     * executable): finite, never negative (no honest producer for a <0
+     * position — that frame class already refuses the 0-teleport family, the
+     * sign is the same question), and clamped to the cached group's
+     * `current_media_duration` when one is known — the SPEC §5/M6 consumer
+     * clamp duty inherited by every wrapper that delegates here. `null` =
+     * garbage; each caller drops the frame via its existing precedent.
+     */
+    private positionOrDrop;
     /**
      * Membership-check `playback_state` against the canonical four (SPEC §4,
      * `PlaybackState` in `messages.ts`); anything else degrades to `'stopped'`
