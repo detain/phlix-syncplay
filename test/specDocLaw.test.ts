@@ -440,3 +440,16 @@ describe('CONSOLIDATED batch-3b SPEC prose (M7 m7 m8 m11 m12 m13 m14 m15 m20 m34
     expect(SPEC).toContain('schedules no periodic timers');
   });
 });
+
+describe('CONSOLIDATED batch-4 README currency (m25 m32 m33)', () => {
+  it('README names the Tizen stack as Vite, and keyword-cases per SPEC (m25/m32)', () => {
+    expect(README).toContain('tizen / Vite');
+    expect(README).not.toContain('webpack');
+    expect(README).toContain('the handshake MUST\ncarry your credential');
+    expect(README).toContain('MUST NOT be added to new code paths');
+  });
+  it('README obeys the §2 terminology law — no bare room/party labels for the group (m33)', () => {
+    expect(README).not.toMatch(/same-room|costs the room|seek a room|Party surface|Party chat/);
+    expect(README).toContain('you never seek a group you just left');
+  });
+});

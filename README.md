@@ -7,7 +7,7 @@
 
 The single shared, canonical implementation of the **Phlix SyncPlay** wire
 protocol + NTP time-sync for JavaScript clients (mobile / React Native,
-windows / Electron, tizen / webpack).
+windows / Electron, tizen / Vite).
 
 It eliminates the protocol drift that accumulated across clients (Windows
 missing message types and reading `group_state` flat; Tizen inventing
@@ -16,7 +16,7 @@ Roku using a wrong `syncplay.` dot prefix over HTTP-POST). **The PHP server is
 the source of truth** — this package mirrors it exactly.
 
 - **No framework deps.** Pure TypeScript, usable in RN/Metro, Electron
-  renderer, and Tizen webpack.
+  renderer, and Tizen Vite.
 - **Transport-agnostic.** WebSocket is *injected* — you pass a `send` function
   and call `handleIncoming(raw)` per frame. The library never imports a WS lib.
 - **Deterministic.** The clock is injected (`now: () => number`); no
@@ -68,7 +68,7 @@ npm install
 
 ## Connecting
 
-The library owns no socket — you dial the WebSocket, and the handshake must
+The library owns no socket — you dial the WebSocket, and the handshake MUST
 carry your credential: both listeners reject the upgrade **before the 101**
 without it (nothing is ever read on an unauthenticated connection). Browsers
 (and React Native) cannot set an `Authorization` header on a WebSocket
@@ -86,7 +86,7 @@ const ws = new WebSocket('wss://phlix.example:8097/api/v1/syncplay/ws', ['bearer
 The `Sec-WebSocket-Protocol: bearer, <jwt>` two-entry subprotocol is the
 estate target carrier; the server answers the 101 with the `bearer` marker
 only, never the token. The legacy `?token=<jwt>` query is still accepted on
-`:8097` for older client builds but **must never be added to new code paths**
+`:8097` for older client builds but **MUST NOT be added to new code paths**
 — a URL-borne credential leaks into access/proxy logs and handshake
 diagnostics.
 
@@ -135,7 +135,7 @@ const client = new SyncPlayClient({
   onSyncDegraded: (consecutiveRejections) => { /* fires per matched-but-rejected ping round (rtt outside SPEC §5's window); resets on any acceptance — consumer owns the threshold */ },
   onPlaybackCommand: ({ type, position, serverTime }) => { /* apply locally */ },
   onMemberJoined: ({ id, name }) => {},
-  onMemberLeft: ({ id, name }) => {}, // roster diff inside a same-room group_state (SPEC §6 leave law)
+  onMemberLeft: ({ id, name }) => {}, // roster diff inside a same-group group_state (SPEC §6 leave law)
   onHostChanged: (hostId) => {},
   onError: (code, message) => {},
   onMemberTyping: (memberId, isTyping) => {},
@@ -166,7 +166,7 @@ client.sendSeek(fromMs, toMs);
 // S446 drift policy and echoes the group state back to everyone):
 client.reportPosition(positionMs, isPlaying);
 
-// Party surface (any member; identity is server-derived, SPEC §4/§9):
+// Group-chat surface (any member; identity is server-derived, SPEC §4/§9):
 client.sendChat('popcorn tonight?');   // your message arrives back via onChat
 client.sendTyping(true);               // peers see it on THEIR onMemberTyping
 ```
@@ -224,11 +224,11 @@ per-intent, not per-key-event.** How that is met per sender:
   pattern keeps working), repeats inside the window merge **latest-wins**
   (an intermediate seek target is meaningless — only the last position
   matters), and the last position always reaches the wire within one window
-  of release. A held remote costs the room at most 4 seek frames/s instead of
+  of release. A held remote costs the group at most 4 seek frames/s instead of
   10–30 full player seeks. Escape hatch: `seekThrottleMs: 0` restores raw
   per-call dispatch — the seek coalescer is this library's ONLY owned timer,
   and off-mode owns none. `leaveGroup()` / `onDisconnect()` cancel a
-  not-yet-flushed trailing seek: you never seek a room you just left.
+  not-yet-flushed trailing seek: you never seek a group you just left.
 - **`sendPlay` / `sendPause` — per-intent, consumer-side.** Dispatch stays
   synchronous and un-shaped: each is a state EDGE and latest-wins merging
   would be semantically wrong (it can lose a legitimate pause behind a
@@ -241,7 +241,7 @@ per-intent, not per-key-event.** How that is met per sender:
   surely as long silence does. Remember background-tab timer clamping:
   resume your interval on visibility change.
 
-### Party chat and queue (M-SYNCPLAY-11)
+### Chat and queue (M-SYNCPLAY-11)
 
 - **Render chat from `onChat` only — never also locally on `sendChat`.**
   Both producers fan chat out **including the sender** (phlix-server
