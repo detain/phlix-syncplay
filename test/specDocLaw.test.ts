@@ -397,3 +397,46 @@ describe('CONSOLIDATED batch-3 SPEC laws (C1 M2 M4 M6 M9 M13 M14 M15 m6 m21 m31 
     expect(SPEC).toContain('MAY be used only for obvious self-reference detection');
   });
 });
+
+describe('CONSOLIDATED batch-3b SPEC prose (M7 m7 m8 m11 m12 m13 m14 m15 m20 m34 m35 m36)', () => {
+  it('SPEC carries a rotatable revision stamp (m36)', () => {
+    expect(SPEC).toContain('**Document revision:** 2026-11-03');
+  });
+  it('§7 declares the shorthand convention (m34)', () => {
+    expect(SPEC).toContain('Shorthand convention (declared once here');
+  });
+  it('§8 lead-in bold respects sentence boundaries (m35)', () => {
+    expect(SPEC).toContain('orchestrator**. It performs');
+  });
+  it('§8.3 rules member_name as claimed display data, identity keyed on member_id (M7)', () => {
+    expect(SPEC).toContain('claimed display data, not identity');
+    expect(SPEC).toContain('never on `member_name`, which any member may rewrite');
+  });
+  it('§4.3 states chat ephemerality + echo-only receipt (m7/m12)', () => {
+    expect(SPEC).toContain('Chat is ephemeral, and the echo is the only receipt');
+    expect(SPEC).toContain('no message id and no delivery acknowledgement');
+  });
+  it('§4.3 rules the typing cleanup floor as consumer duty (m13)', () => {
+    expect(SPEC).toContain('Typing has no protocol-level cleanup floor');
+    expect(SPEC).toContain('Consumers MUST expire stale');
+  });
+  it('§4.2 rules media_info opaque + defensive rendering (m14)', () => {
+    expect(SPEC).toContain('opaque host-supplied payload');
+    expect(SPEC).toContain('minimum-key profile, not even `title`');
+  });
+  it('§4.2 documents the play/pause/seek echo shapes per direction (m11)', () => {
+    expect(SPEC).toContain('Echo shapes (both directions, per type');
+    expect(SPEC).toContain('The echo omits `group_id`');
+  });
+  it('§8.4 states the hub-lane drift-blindness consequence (m15)', () => {
+    expect(SPEC).toContain('consumer self-monitors');
+  });
+  it('§10.2 states returning-host + credential-custody facts (m8)', () => {
+    expect(SPEC).toContain('Returning host & rejoin credentials');
+    expect(SPEC).toContain('NEVER stores a');
+  });
+  it('§10 lead + §10.3 use the periodic-timer qualifier (m20)', () => {
+    expect(SPEC).toContain('no socket and no periodic timers');
+    expect(SPEC).toContain('schedules no periodic timers');
+  });
+});

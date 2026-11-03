@@ -12,6 +12,11 @@ The authoritative implementation is the PHP server:
 
 `@phlix/syncplay` is the canonical JS port of that protocol.
 
+> **Document revision:** 2026-11-03 — wire era `@phlix/syncplay` v0.1.6. This
+> stamp is rotated with every normative edit to this document (per §1 item 6's
+> era-pin discipline), so a consumer can answer "which spec revision does my
+> build conform to?" without git archaeology.
+
 ---
 
 ## Contents
@@ -344,6 +349,23 @@ to_position: number
 server_time: number        (same §4 unit law as play/pause above)
 ```
 
+> **Echo shapes (both directions, per type — the echo is NOT the sender's
+> shape).** On `:8097` (verified `SyncPlayManager.php`
+> `handlePlaybackPlay()` / `handlePlaybackPause()` / `handlePlaybackSeek()`
+> @ `6437e318`): an accepted command re-broadcasts under the same type
+> carrying `member_id` (the server-derived sender id — the claim is
+> overwritten, §9 item 3), the positions (`position`, or
+> `from_position`/`to_position` for seek) and `server_time` — the sender's own
+> value echoed verbatim, or the `?? time()` seconds fallback (the §4 named
+> exception). **The echo omits `group_id`** — membership is implicit in the
+> fan-out, the chat law again. Fan-out EXCLUDES the sender for pause and seek;
+> PLAY is the asymmetric one: the server unicasts the identical frame to the
+> host as a self-confirmation and then broadcasts the same bytes to all OTHER
+> members (the `@fires` docblock states this ordering). Consumers MUST parse
+> echoes by (type, fields-present), never by reusing their outbound request
+> shape; `@phlix/syncplay` relies on exactly these facts (§9.1 self-echo
+> suppression, host-side PLAY confirmation).
+
 `syncplay_playback_queue` (both directions — the shapes DIFFER)
 ```
 client → server (host replaces the queue; Messages::playbackQueue,
@@ -372,6 +394,15 @@ queue: [ { media_id: string, media_info?: object,
 > and the cached group is folded (former "carried-but-not-orchestrated /
 > ignored by design" law retired; reading the queue off `onState` remains
 > valid for the `group_state` copy).
+>
+> **`media_info` is an opaque host-supplied payload.** The server stores the
+> enqueuer's object verbatim (`GroupState::addToQueue()` stamps `media_id`,
+> `media_info`, `added_at`, `added_by` and nothing inside the info dict,
+> @ `6437e318`) and neither carrier validates or decorates it — there is no
+> minimum-key profile, not even `title`. Queue rows therefore diverge
+> cross-client BY CONSTRUCTION unless consumers render defensively: tolerate
+> any subset of keys, unknown extras, and per-item heterogeneity (each row
+> carries whatever its enqueuer chose to send).
 
 `syncplay_playback_sync` (periodic position broadcast)
 ```
@@ -438,6 +469,18 @@ message: string
 > message comes back to you. The library delivers every chat frame — echo
 > included — via `onChat(memberId, memberName, message, timestampMs)`; the
 > outbound arm is `sendChat(message)`.
+>
+> **Chat is ephemeral, and the echo is the only receipt.** No carrier stores
+> chat history: a joiner (or rejoiner) sees only messages sent after
+> admission — an empty pane after joining or reconnecting is conformant
+> behavior, not a bug. There is no message id and no delivery acknowledgement
+> anywhere on this type: because the fan-out includes the sender, the sender's
+> own echo is the SOLE receipt signal. An optimistic UI that renders on send
+> MUST reconcile against the echo (dedupe by `(member_id, message,
+> timestamp)`), and a message whose echo never arrives was refused or lost
+> with no machine-readable outcome either way — stating that limit is all the
+> contract can honestly offer without a new ack frame (wire addition: not
+> made here).
 
 `syncplay_typing` (both directions)
 ```
@@ -456,6 +499,16 @@ is_typing: boolean
 > frames for a transient indicator). Inbound is delivered by `onMemberTyping`;
 > outbound is `sendTyping(isTyping)` since M-SYNCPLAY-11 (the inbound arm was
 > already wired — the missing sender half made the indicator one-way).
+>
+> **Typing has no protocol-level cleanup floor.** The wire carries only
+> explicit `is_typing` flips. A member whose socket drops mid-typing sends no
+> `false`, and nothing fabricates one: neither carrier re-broadcasts a
+> typing-off frame on departure, and `@phlix/syncplay` fires no
+> `onMemberTyping(false)` when its roster diff removes the typer (verified:
+> the leave path fires membership events only). Consumers MUST expire stale
+> typing indicators locally — a few-second timer per typer, reset by each
+> `true`, cleared on that member's departure — or bind the indicator to
+> roster presence outright.
 
 ### 4.4 Host management
 
@@ -712,13 +765,20 @@ The canonical decisions: underscore `syncplay_` prefix, flat RAW JSON framing,
 `protocol_version = 1`, nested `group_state`, and member events via INFO /
 HOST_ELECT (never dedicated member types).
 
+> **Shorthand convention (declared once here, so §1 item 1 stays unbroken):**
+> the divergence bullets above abbreviate names from the §3 catalog by
+> dropping the `syncplay_` prefix (`chat` is `syncplay_chat`, `time_sync` is
+> `syncplay_time_sync`, and likewise for every name in those lists). The
+> abbreviations are prose shorthand only; the wire always carries the full
+> underscore-prefixed names.
+
 ---
 
 ## 8. Security model
 
 `@phlix/syncplay` is a **transport-agnostic protocol codec and client-state
-orchestrator. It performs NO authentication and NO authorization, and MUST NOT
-be relied on for either.** The library never opens a socket, never sees
+orchestrator**. It performs **no authentication and no authorization** and
+**MUST NOT be relied on for either**. The library never opens a socket, never sees
 credentials, and cannot verify who is on the other end of the wire. Every
 security guarantee in SyncPlay is a **server responsibility**. The points below
 enumerate what the server MUST enforce; the client merely mirrors the wire
@@ -771,6 +831,18 @@ owners — noted here, not ruled.
 strings — `group_name`, `member_name`, chat/info `message` — pass through this
 library untouched. Consumers MUST escape/sanitize them before rendering in any
 UI; this DOM-free library deliberately does not mutate display strings.
+
+> **`member_name` is claimed display data, not identity.** §4.1 takes the
+> value from the joining client and the live server stores the claim verbatim
+> in the roster — including on the re-home branch, where an already-member
+> socket that re-sends `syncplay_group_join` overwrites its roster `name` with
+> the new claim, un-gated by password or capacity and with NO rename event on
+> the wire (`SyncPlayManager.php` `joinGroup()` re-home branch, which updates
+> `name`/`is_active`/`connection_id` only, @ `6437e318`). A server MAY derive
+> the display name from the authenticated user record instead of trusting the
+> claim. Consumers' security-relevant UX — host-transfer confirmation,
+> "who paused this", any moderation context — MUST key on `member_id` (§9),
+> never on `member_name`, which any member may rewrite between frames.
 
 ### 8.4 WebSocket credential carrier (server `:8097` vs hub relay `:8804`)
 
@@ -839,6 +911,14 @@ exists only in the `:8097` server, `SyncPlayManager.php:1569-1585`
 `handleCanonicalPlaybackSync()` reply, `SyncPlayRelayWorker.php:1673-1680`
 @f85f48ec, never stamps the key) is not relayed — on that carrier the
 `onPlaybackSync` nudge argument is always `undefined`.
+
+That silence has a stated consequence: a hub-lane party has no server-side
+out-of-sync policy, so drift blindness there is **permanent unless the
+consumer self-monitors**. Hub-lane consumers MUST compute drift themselves
+from the echoed playhead-bearing frames — §5's adjusted-position machinery,
+which the reference library runs on every `onPlaybackSync` ingest whichever
+carrier fed it — and own any correction UX locally; nothing on `:8804` will
+ever tell them they are behind.
 
 The first consumer of the relay's canonical lane is phlix-mobile-client
 `13715d0`, whose interim `RELAY_NOT_SUPPORTED` refusal was lifted in the same
@@ -986,8 +1066,10 @@ law and both carriers' coordinates are documented on
 
 ## 10. Reconnect & resume recovery
 
-`@phlix/syncplay` owns **no socket and no timers** — the consumer's transport
-opens, closes, and reconnects the WebSocket. The library only models the
+`@phlix/syncplay` owns **no socket and no periodic timers** — the consumer's
+transport opens, closes, and reconnects the WebSocket; the library's only
+timer at all is the one-shot seek-coalescing flush, disarmed by every reset
+path (`onDisconnect()`, `destroy()`). The library only models the
 SyncPlay *state* that depends on a live connection, and exposes one method to
 reset it.
 
@@ -1036,6 +1118,22 @@ resume periodic client.pingTime()   // rebuild the time-sync window
 optional `onDisconnect` consumer callback (a UI hook, e.g. a "reconnecting…"
 banner). It does **not** reconnect, re-join, or schedule any timer.
 
+**Returning host & rejoin credentials — observed facts, not new law.**
+Re-election is oldest-member-first on both carriers (§4.4's election path,
+§8.4's hub rule), so a host whose connection blips — close vacates the seat,
+and the rejoin lands as a NEW member record with a fresh `joined_at`
+(`GroupState::addMember()` @ `6437e318`) — sits behind every remaining member
+and regains the host seat only if all earlier joiners leave first. There is
+no protocol notion of a "previous host" to restore: ordinary-member-forever
+is the designed social outcome, not a defect to chase. Credential custody is
+the consumer's mirror problem: `@phlix/syncplay` NEVER stores a
+`password_hash` — `createGroup`/`joinGroup` stamp it onto the frame and
+forget it (no field retains it), and `onDisconnect()` clears the cached group
+— so a reconnect path MUST re-supply the hash it obtained at join time
+(session-scoped custody is the consumer's to design). Server-side, the
+group's gate hash lives exactly as long as the group does: membership churn
+never rotates or clears it (§8.2).
+
 **Joiner position catch-up — observed law, OPEN decision.** When a (re)joiner
 receives its first `syncplay_group_state`, the position law in effect today is
 ADOPTION: playback starts at `group.playback_position` verbatim. That field
@@ -1057,6 +1155,7 @@ that choice and this spec neither requires nor forbids it.
 ### 10.3 Backoff is a transport (consumer) concern
 
 The reconnect **retry/backoff timer** is owned by the consumer's transport layer,
-not by this library (it has no socket and schedules no timers). The recommended
+not by this library (it has no socket and schedules no periodic timers — §10
+lead-in). The recommended
 exponential-backoff recipe lives in the README ("Reconnect recovery"); this spec
 only mandates the ordering in §10.2.
