@@ -5,6 +5,41 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Fix-forward lane w11-L10-R (register `.reviews/2026-11-07/
+  REVIEW-w11L10syncplay.md`, verdict PATCH-FIRST; 2026-11-07) — forward
+  correction of the LW-045 case-fold claim + two hygiene cures; zero
+  behavior-union change.** The entry below (kept VERBATIM as history —
+  append-only law) states an uppercase `passwordHash` "can never
+  authenticate": FALSE at the authority it cites — phlix-server
+  `SyncPlayManager::groupPasswordGate` (read at tip `4a30962600`,
+  :2238-2250) `strtolower`s the raw value BEFORE its `/^([0-9a-f]{64})$/`
+  match, so an uppercase 64-hex digest case-folds and DOES authenticate on
+  `:8097` (and `openssl dgst` prints lowercase — the parenthetical was
+  doubly wrong). The shipped refusal is UNCHANGED and stays fail-CLOSED:
+  canonical wire form is lowercase and this library refuses non-canonical
+  shapes as a STRICTER-THAN-SERVER local fail-fast — but the law is now
+  described as what it is in all four carriers (method docblock, runtime
+  refusal message, `reviewWave11L10` header + uppercase dataset label;
+  `dist/client.d.ts` re-vendored accordingly). Register Minor 2:
+  `destroy()`'s `consecutiveSyncRejections` reset DELETED as unpinnable
+  dead state (post-LW-046 every reader sits behind the terminal latch; the
+  review's executed deletion probe kept the battery 425/425 green) — the
+  field docblock and the `LW-043c` pin title were truthed to match, and the
+  observable-reset law remains pinned on the sanctioned `onDisconnect` lane
+  (`LW-043b`, untouched). Register Minor 3: the refusal-message builder is
+  now coercion-safe — the former `String(raw).length` interpolation could
+  crash on uncoercible garbage (`Object.create(null)` → engine TypeError
+  replaced the curated message) and fabricated a "length of Symbol()" fact
+  for symbols; length is disclosed only on the string arm. Adjudication
+  disclosed: the register's mechanism was misattributed — `String(symbol)`
+  is the legal explicit conversion and cannot throw (measured, node v24);
+  the crash class is uncoercible objects, and the symbol leg was a
+  fabricated-shape (and description-echo) issue, not a crash. +2 pins
+  (red-first measured at `930a0d4`: exactly these 2 red, 43 holding green;
+  battery 14f/425P -> 14f/427P, delta = the 2 new teeth, no golden moved).
+  Wire union frozen, `time-sync.ts` zero-diff, no tag, no version bump
+  (v0.1.8 TAGGATE is a separate estate decision).
+
 - **Fix lane w11-L10 (plan_review register `LW-045`–`LW-050`; reviews
   `syncplay__secnet` #3/#4/#5, `syncplay__crossfe`, `syncplay__asphp` #6,
   2026-11-06) — password-hash shape gate, terminal `destroy()`, ratified

@@ -96,17 +96,23 @@ afterEach(() => {
 
 // ---------------------------------------------------------------------------
 // LW-045 (review syncplay__secnet #3 class): passwordHash shape gate.
-// The server gate (phlix-server `SyncPlayManager::groupPasswordGate`) accepts
-// exactly /^([0-9a-f]{64})$/ and compares with hash_equals — a present-but-
-// malformed value can NEVER authenticate, so shipping one to the wire is
-// theater. The library now refuses at the call boundary, fail-fast, without
-// echoing the value (it may be a plaintext password the caller mis-passed).
+// TRUTH (w11 L10 re-review cure, register REVIEW-w11L10syncplay.md Major):
+// the server gate (phlix-server `SyncPlayManager::groupPasswordGate` @
+// 4a30962600 :2238-2250) `strtolower`s the raw value BEFORE matching
+// /^([0-9a-f]{64})$/ and compares with hash_equals — an uppercase 64-hex
+// copy case-folds and DOES authenticate on :8097. Short/long/non-hex/
+// plaintext legs cannot survive the server's own regex, but the uppercase
+// leg is where THIS library is STRICTER-THAN-SERVER: canonical wire form is
+// lowercase and this client refuses non-canonical shapes as a local
+// fail-fast, never shipping a value it would first have to normalize. The
+// refusal itself stands — at the call boundary, fail-fast, without echoing
+// the value (it may be a plaintext password the caller mis-passed).
 // ---------------------------------------------------------------------------
 describe('LW-045 — createGroup/joinGroup refuse malformed passwordHash at the boundary', () => {
   const malformed: Array<[string, string]> = [
     ['8-char fake hash', 'deadbeef'],
     ['plaintext password mis-passed', 'hunter2-super-secret'],
-    ['uppercase hex (server gate is lowercase-only)', VALID_HASH.toUpperCase()],
+    ['uppercase hex (stricter-than-server: the server case-folds it)', VALID_HASH.toUpperCase()],
     ['63 hex chars', VALID_HASH.slice(0, 63)],
     ['65 hex chars', VALID_HASH + 'a'],
     ['non-hex 64 chars', 'g'.repeat(64)],
@@ -151,6 +157,46 @@ describe('LW-045 — createGroup/joinGroup refuse malformed passwordHash at the 
     h.sent.length = 0;
     h.client.joinGroup('sp_1');
     expect(h.sent[0]).not.toHaveProperty('password_hash');
+  });
+
+  // w11 L10 RE-REVIEW cure (register REVIEW-w11L10syncplay.md Minor): the
+  // refusal MESSAGE BUILDER must not crash — or fabricate — on values the
+  // type forbids, since runtime garbage is exactly what this gate is for.
+  // Register adjudication, measured on disk (node v24): `String(symbol)`
+  // does NOT throw (explicit String() is the legal symbol→string conversion;
+  // the register's stated mechanism was off), so the old code printed a
+  // fabricated "length of 'Symbol(desc)'" fact — and echoed the description,
+  // which may BE the mis-passed secret. The true crash class is uncoercible
+  // garbage: `String(Object.create(null))` throws 'Cannot convert object to
+  // primitive value', silently REPLACING the curated message with an engine
+  // one. Both legs pinned here, red-first at 930a0d4; the cure reports
+  // length only on the string arm and never coerces unknown input.
+  function refusalMessage(client: SyncPlayClient, value: unknown): string {
+    try {
+      client.createGroup('Movie Night', value as string);
+    } catch (e) {
+      expect(e).toBeInstanceOf(TypeError);
+      return (e as TypeError).message;
+    }
+    throw new Error('expected createGroup to refuse the value');
+  }
+
+  it('the refusal message survives uncoercible garbage — curated, never the engine message', () => {
+    const h = makeHarness();
+    const message = refusalMessage(h.client, Object.create(null));
+    expect(message.startsWith('SyncPlayClient: passwordHash must be undefined')).toBe(true);
+    expect(message).not.toContain('Cannot convert');
+    expect(message).toContain('Got a object.');
+    expect(h.sent).toHaveLength(0);
+  });
+
+  it('a symbol refusal discloses typeof only — no "length of Symbol()" fiction, no description echo', () => {
+    const h = makeHarness();
+    const message = refusalMessage(h.client, Symbol('hunter2'));
+    expect(message).toContain('Got a symbol.');
+    expect(message).not.toContain('of length');
+    expect(message).not.toContain('hunter2');
+    expect(h.sent).toHaveLength(0);
   });
 });
 

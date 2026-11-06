@@ -2566,7 +2566,7 @@ describe('SyncPlayClient — identity refusal, state clamps, streak reset, group
     expect(h.degraded).toEqual([1, 1]); // NOT [1, 2] — the fresh connection starts honest at zero
   });
 
-  it('LW-043c: destroy() clears the streak as part of a now-TERMINAL teardown (w11 L10 reshaped the probe)', () => {
+  it('LW-043c: destroy() is TERMINAL — nothing after it runs (the observable-reset law is LW-043b; w11 L10 reshaped the probe)', () => {
     const h = makeHarness();
     h.client.pingTime();
     h.clock.set(3000);

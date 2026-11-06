@@ -464,10 +464,14 @@ export class SyncPlayClient {
   /**
    * M-SYNCPLAY-14: consecutive REJECTED (but matched-consumed) time-sync
    * rounds — RTT-window rejections and no-usable-server_time rounds
-   * (LW-043); reset by any accepted sample and by the per-connection
-   * teardowns (`onDisconnect` / `destroy` — the streak is measurement
-   * history of ONE connection). Feeds `onSyncDegraded` so silence at the
-   * sync boundary becomes observable.
+   * (LW-043); reset by any accepted sample and by the sanctioned per-
+   * connection teardown (`onDisconnect` — the streak is measurement history
+   * of ONE connection). `destroy()` does NOT reset it: post-LW-046 every
+   * reader sits behind the terminal latch, so a reset there was writing
+   * history no one could ever read (w11 L10 re-review: the line was retired
+   * dead state — the review's executed deletion probe kept the full battery
+   * 425/425 green). Feeds `onSyncDegraded` so silence at the sync boundary
+   * becomes observable.
    */
   private consecutiveSyncRejections = 0;
 
@@ -503,28 +507,48 @@ export class SyncPlayClient {
 
   /**
    * LW-045 (review syncplay__secnet): parse the group-gate password hash at
-   * the call boundary. Accepted domain = undefined (no password) or EXACTLY
-   * the shape the server can use: 64 LOWERCASE hex chars. Mirror law, verified
-   * against phlix-server `SyncPlayManager::groupPasswordGate` — it validates
-   * `/^([0-9a-f]{64})$/` and compares with `hash_equals` against a lowercase
-   * sha256 — so an uppercase copy (openssl prints uppercase) is malformed data
-   * that can NEVER authenticate: refusing it locally is fail-fast honesty, not
-   * a restriction. Anything present-but-malformed (short, long, non-hex,
-   * uppercase, a plaintext password mis-passed) THROWS — it is never silently
-   * shipped nor coerced. The message reports only shape facts (typeof +
-   * length): a mis-passed plaintext secret must not be echoed into logs.
+   * the call boundary. Accepted domain = undefined (no password) or the
+   * CANONICAL wire form: 64 lowercase hex chars. This is deliberately
+   * STRICTER-THAN-SERVER local validation, not a mirrored wire law — the
+   * authority, read at phlix-server tip `4a30962600`
+   * (`SyncPlayManager::groupPasswordGate` :2238-2250), `strtolower`s the raw
+   * value BEFORE matching `/^([0-9a-f]{64})$/` and compares with
+   * `hash_equals` against the lowercase store: an uppercase 64-hex copy
+   * case-folds and DOES authenticate on `:8097` (`openssl dgst` prints
+   * lowercase in the first place — the pre-wave parenthetical here was
+   * doubly wrong; forward-corrected in CHANGELOG, never edited in place).
+   * The refusal of non-canonical shapes (uppercase, short, long, non-hex,
+   * a plaintext password mis-passed) stands as fail-fast law: canonical
+   * form is lowercase and this library never ships a value it had to
+   * normalize to admit — but the law it enforces is LOCAL. Anything
+   * present-but-malformed THROWS; nothing is silently shipped or coerced.
+   * The message reports only shape facts (typeof; length for strings —
+   * never a coercion of unknown garbage): a mis-passed plaintext secret
+   * must not be echoed into logs.
    */
   private static parsePasswordHash(raw: string | undefined): string | undefined {
     if (raw === undefined) {
       return undefined;
     }
     if (typeof raw !== 'string' || !/^([0-9a-f]{64})$/.test(raw)) {
+      // Coercion-safe refusal (w11 L10 re-review): the message builder runs
+      // on values the TYPE forbids and must not crash — or fabricate — while
+      // composing its own text. `String(raw)` throws on uncoercible garbage
+      // (e.g. `Object.create(null)`: an engine TypeError would silently
+      // replace this curated message), and on a symbol it renders
+      // "Symbol(desc)" — reporting the length OF THAT RENDERING is a
+      // fabricated shape fact. Length is a property of strings, so only the
+      // string arm states it; every other runtime value is disclosed by
+      // typeof alone, never coerced.
+      const lengthFact = typeof raw === 'string' ? ` of length ${raw.length}` : '';
       throw new TypeError(
         'SyncPlayClient: passwordHash must be undefined or 64 lowercase hex ' +
-          'characters (unsalted SHA-256 hex; SPEC §4/§8.2, server gate ' +
-          'SyncPlayManager::groupPasswordGate) — a present-but-malformed value ' +
-          'can never authenticate and is refused, never coerced. Got a ' +
-          `${typeof raw} of length ${String(raw).length}.`,
+          'characters (unsalted SHA-256 hex; SPEC §4/§8.2, canonical form of ' +
+          'the server gate SyncPlayManager::groupPasswordGate) — this library ' +
+          'ships canonical form only: a present-but-malformed value is ' +
+          'refused as a local fail-fast (stricter than the server, whose gate ' +
+          'case-folds before matching) and is never shipped or coerced. Got a ' +
+          `${typeof raw}${lengthFact}.`,
       );
     }
     return raw;
@@ -959,9 +983,13 @@ export class SyncPlayClient {
 
   /**
    * CONSOLIDATED m18 (review asphp MINOR-6): screen-unmount teardown. Unwinds
-   * exactly what {@link onDisconnect} unwinds — coalescing cancelled, TimeSync
-   * window cleared, cached group and outstanding ping dropped — but fires NO
-   * consumer callback: a component that is tearing down must not be dragged
+   * everything {@link onDisconnect} unwinds that a destroyed instance can
+   * still be observed through — coalescing cancelled, TimeSync window
+   * cleared, cached group and outstanding ping dropped (the LW-043 streak
+   * reset is onDisconnect's ALONE: post-LW-046 no reader of the counter
+   * survives the latch, so the reset line here was unpinnable dead state
+   * and was deleted in the w11 L10 re-review cure) — but fires NO consumer
+   * callback: a component that is tearing down must not be dragged
    * back through its disconnect handler (and the disconnect path's
    * "reconnecting…" UI is the wrong signal for destroy). LW-046 makes the
    * INERT promise literally true: after `destroy()` the instance routes NO
@@ -978,7 +1006,6 @@ export class SyncPlayClient {
     this.destroyed = true;
     this.cancelSeekCoalescing();
     this.timeSync.reset();
-    this.consecutiveSyncRejections = 0; // LW-043: same per-connection history reset as onDisconnect
     this.group = null;
     this.lastPingSendTime = null;
   }

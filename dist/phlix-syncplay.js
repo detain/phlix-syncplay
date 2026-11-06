@@ -234,7 +234,10 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	static parsePasswordHash(e) {
 		if (e !== void 0) {
-			if (typeof e != "string" || !/^([0-9a-f]{64})$/.test(e)) throw TypeError(`SyncPlayClient: passwordHash must be undefined or 64 lowercase hex characters (unsalted SHA-256 hex; SPEC §4/§8.2, server gate SyncPlayManager::groupPasswordGate) — a present-but-malformed value can never authenticate and is refused, never coerced. Got a ${typeof e} of length ${String(e).length}.`);
+			if (typeof e != "string" || !/^([0-9a-f]{64})$/.test(e)) {
+				let t = typeof e == "string" ? ` of length ${e.length}` : "";
+				throw TypeError(`SyncPlayClient: passwordHash must be undefined or 64 lowercase hex characters (unsalted SHA-256 hex; SPEC §4/§8.2, canonical form of the server gate SyncPlayManager::groupPasswordGate) — this library ships canonical form only: a present-but-malformed value is refused as a local fail-fast (stricter than the server, whose gate case-folds before matching) and is never shipped or coerced. Got a ${typeof e}${t}.`);
+			}
 			return e;
 		}
 	}
@@ -365,7 +368,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		this.cancelSeekCoalescing(), this.timeSync.reset(), this.consecutiveSyncRejections = 0, this.group = null, this.lastPingSendTime = null, (e = (t = this.options).onDisconnect) == null || e.call(t);
 	}
 	destroy() {
-		this.destroyed = !0, this.cancelSeekCoalescing(), this.timeSync.reset(), this.consecutiveSyncRejections = 0, this.group = null, this.lastPingSendTime = null;
+		this.destroyed = !0, this.cancelSeekCoalescing(), this.timeSync.reset(), this.group = null, this.lastPingSendTime = null;
 	}
 	handleIncoming(t) {
 		if (this.destroyed) return;
