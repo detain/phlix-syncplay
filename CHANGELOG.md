@@ -5,6 +5,75 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Fix lane L10 (plan_review register `LW-021`–`LW-026`; reviews
+  `syncplay__asphp` #1/#4/#8, `syncplay__crossfe` #1/#6/#9/#11,
+  `syncplay__docmaint` #1/#3/#5/#6/#7, 2026-11-03) — README reconnect recipe
+  single-fire, wire-coordinate re-anchor + era stamps, hook/docblock truth,
+  docs-surface completion, engines floor; zero wire-semantics change.**
+  - **LW-021 (major, README):** the backoff recipe double-fired `onDrop` —
+    transports raise `error` *then* `close` per failure and the snippet wired
+    both handlers straight to it, so every blip armed two reconnect timers
+    (the handle was never cleared) and a clean open left a zombie fallback
+    dial. The recipe now counts each socket's drop once and cancels the
+    pending timer in both `scheduleReconnect()` and `onopen`. The ordering
+    law lines (`client.onDisconnect()` before every reschedule; `attempt = 0`
+    only on a clean open) are unchanged; SPEC §10 defers to this snippet as
+    the estate recipe, so the cure is the estate recipe.
+  - **LW-022 (src):** `handleGroupList`'s CONSOLIDATED M10 guard was a
+    `some()` whose body was only comments — it deleted nothing; the `filter`
+    below was always the real guard. Dead block removed and the M10
+    annotation re-homed onto the filter. Zero behavior change (the M10 pins
+    in `test/consolidatedGuards.test.ts` stayed green UNMODIFIED).
+  - **LW-023 (src docs + tests + README):** the `onUnknownFrame` option
+    docblock claimed ONLY non-canonical types reach the hook; the
+    dispatcher's default arm in fact forwards the four canonical types that
+    have no inbound arm (`group_create`/`group_join`/`group_leave` echoes,
+    stray `time_ping`). Option docblock, `UnknownFrame` type docblock,
+    README, and the overclaiming test name + comment cured to the real
+    routing law; a new doc-law pin feeds all four types through
+    `handleIncoming`. No dispatcher arms added — surfacing unhandled
+    canonical echoes through the extension hook is the shipped behavior.
+  - **LW-024 (README):** wire-coordinate clusters re-anchored by measurement
+    at the current tips — server `SyncPlayManager.php` your_id
+    `:1853`/`:1909`, rebroadcast `:1107-1117`/`:1206-1211`, nudge
+    `:1563-1565`/`:1587`, chat `:1338-1340`/`:1347-1350`, typing
+    `:1401-1404`, `broadcastToGroup` default `:1986`, queue
+    `:1295-1297`/`publishSnapshot :1302`; hub `SyncPlayRelayWorker.php`
+    clientId `:694` + `generateClientId()` `:2766-2779`, your_id echo
+    `:2057-2062`, chat trim-drop `:2398-2400`, chat broadcast `:2402-2405`,
+    typing `:2432-2435` — every cluster now carries its era stamp (server
+    tree @ `a63dc0db`, hub tree @ `30012378`) per SPEC §1 item 6, so future
+    drift is detectable. The controller trio `:173`/`:267`/`:305` held.
+  - **LW-025 (README + time-sync docs):** options list gains `onInfo` and
+    `onFrameDropped`; the remaining public surface (`leaveGroup()` return
+    law, `isHost`/`getGroup`/`getMemberId`/`getTimeSync`/`getSynchronizedTime`
+    /`destroy`) is documented; the lower-level exports complete with
+    `serializeMessage`, `isValidMessageType`, `ALL_MESSAGE_TYPES`, the
+    `TimeSync` consts and `getSampleAgeMs`; the offset formula now shows the
+    integer `trunc(rtt/2)` in BOTH the README and the `time-sync.ts`
+    Algorithm header (the "reproduces the server formula exactly" claim was
+    false by omission — `addSample` truncates, mirroring the server's int
+    cast); `getAdjustedPosition` carries its consumer law — interpolate ONLY
+    while the group is playing, HOLD the commanded position when paused.
+    One adjacent micro-truth rode the export rewrite (disclosed, outside the
+    six items): the stale `decodeMessage` README annotation now names the
+    shipped return type (`RawMessage | UnknownFrame | null`).
+  - **LW-026 (package.json):** `engines.node` floor `>=18.0.0` →
+    `>=22.12.0` — the measured common floor of the dev/test toolchain
+    (vitest 5: `^22.12.0 || ^24.0.0 || >=26.0.0`; vite 8:
+    `^20.19.0 || >=22.12.0`), with the rationale carried in a strict-JSON
+    `//engines` note (the file must stay `JSON.parse`-able — pinned).
+  - Follow-on drift NOT in this lane's six items (reported, same stale
+    generation): SPEC.md §4/§5/§6 coordinate cites and the doc-comment
+    coords in `test/chatQueueFrames.test.ts`, `test/memberIdentity.test.ts`,
+    `test/playbackSyncNudge.test.ts`, `test/seekCoalescing.test.ts`, plus
+    the SPEC.md:774 formula that omits `trunc` like the cured README one did.
+  - Gates: vitest serial 13f/370 (+1 doc-law pin; the +10 baseline figure
+    369→370 measured, not blessed), tsc 0, eslint 0, dual-recipe build
+    deterministic ×2 — dist rebuilt in the same commit because
+    `handleGroupList` code moved (bundle bytes) and three docblocks ship in
+    the `.d.ts`.
+
 - **Review-cure wave (`REVIEW-CHANGES/syncplay.md`, 2026-11-03) — SPEC truth
   pass + one shipped-type docblock; zero wire-semantics change.**
   - **Major 1 (§4.6):** the pre-existing two-field error parenthetical was

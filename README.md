@@ -126,9 +126,9 @@ const client = new SyncPlayClient({
   memberName: 'Alice',
   onState: (group, yourId) => {
     // `yourId` is the identity the server stamped for THIS connection
-    // (phlix-server `SyncPlayManager.php:1799`/`:1855`). Reconcile — if it
-    // ever differs from the id you passed, you have a ghost identity: fix
-    // the source, or gate host UX on `group.host_id === yourId`.
+    // (phlix-server `SyncPlayManager.php:1853`/`:1909` @ `a63dc0db`). Reconcile
+    // — if it ever differs from the id you passed, you have a ghost identity:
+    // fix the source, or gate host UX on `group.host_id === yourId`.
     /* render group (`group.members` normalized to an array; `group.queue` delivered per producer — SPEC §4); you are yourId */
   },
   onSync: ({ offset, latency, isStable }) => { /* time-sync status */ },
@@ -138,6 +138,7 @@ const client = new SyncPlayClient({
   onMemberLeft: ({ id, name }) => {}, // roster diff inside a same-group group_state (SPEC §6 leave law)
   onHostChanged: (hostId) => {},
   onError: (code, message) => {},
+  onInfo: (message) => { /* syncplay_info text frames (member-join INFOs also drive onMemberJoined) */ },
   onMemberTyping: (memberId, isTyping) => {},
   onChat: (memberId, memberName, message, timestampMs) => { /* every accepted message, INCLUDING your own echo (fan-out includes the sender) — render chat from here only */ },
   onQueueChanged: (queue) => { /* wholesale queue replacement; also folded into getGroup().queue; [] = cleared */ },
@@ -145,7 +146,8 @@ const client = new SyncPlayClient({
   onPlaybackSync: (memberId, position, isPlaying, serverTime, nudge) => { /* `nudge` = server-directed S446 soft correction ({drift_ms, direction, suggested_rate, tolerance_ms, cooldown_ms}); undefined unless the `:8097` server unicasted it to THIS member — apply suggested_rate, never seek (SPEC §4) */ },
   onTimeSync: (state) => { /* { memberId, groupId, serverTimeSec, offsetMs, latencyMs, driftRate, isStable } */ },
   onGroupList: (groups) => { /* [{ id, name, member_count, has_password, current_media, is_playing }] — live producer row, SPEC §4 */ },
-  onUnknownFrame: (frame) => { /* non-SyncPlay types only, e.g. the hub relay's `pending_command` */ },
+  onUnknownFrame: (frame) => { /* non-SyncPlay types, e.g. the hub relay's `pending_command` — plus the four canonical types with no inbound arm (`group_create`/`group_join`/`group_leave` echoes, stray `time_ping`), surfaced as unknown-to-this-client; see the option docblock */ },
+  onFrameDropped: (reason, frame) => { /* the no-silent-drop law: 'undecodable' | 'malformed' inbound refusals, 'send-failed' when the send seam throws — see the option docblock */ },
   onDisconnect: () => { /* UI hook, e.g. show a "reconnecting…" banner */ },
 });
 
@@ -171,6 +173,16 @@ client.sendChat('popcorn tonight?');   // your message arrives back via onChat
 client.sendTyping(true);               // peers see it on THEIR onMemberTyping
 ```
 
+The rest of the surface: `leaveGroup()` — returns whether the LEAVE frame
+actually dispatched (`false` with no cached group), and always cancels a
+pending coalesced seek; `isHost()` / `getGroup()` / `getMemberId()` (the
+constructor identity — on `:8804` adopt `yourId` per the identity contract
+below); `getTimeSync()` (the live `TimeSync` instance); `getSynchronizedTime()`
+(server-corrected clock in ms — the value the outbound frames stamp as
+`server_time`); and `destroy()` (cancel the seek timer, reset time-sync, drop
+the group; fires no `onDisconnect` callback — close your transport yourself,
+and build the next client fresh rather than re-joining on an inert instance).
+
 ### Identity contract (`memberId` ↔ `your_id`)
 
 Every id the server puts on an inbound frame — `your_id` on
@@ -185,8 +197,8 @@ id MUST be the same identity. What that identity is, per carrier:
 
 | Carrier | Stamped identity | Source of truth |
 |---|---|---|
-| Direct `:8097` (WS + REST) | the authenticated **user id** (JWT subject) | server `SyncPlayManager.php:1799`/`:1855` (`your_id = $connection->getUserId()`), `SyncPlayController.php:173`/`:267`/`:305` (S289: "identity is the authenticated JWT subject ONLY"), rebroadcast stamps `:1084-1093`/`:1182-1187` |
-| Hub relay `:8804` | a hub-generated **per-connection uuid** | hub `SyncPlayRelayWorker.php:423` + `generateClientId()` `:2107-2120`, echoed as `your_id` at `:1486-1491` |
+| Direct `:8097` (WS + REST) | the authenticated **user id** (JWT subject) | server `SyncPlayManager.php:1853`/`:1909` (`your_id = $connection->getUserId()`), `SyncPlayController.php:173`/`:267`/`:305` (S289: "identity is the authenticated JWT subject ONLY"), rebroadcast stamps `:1107-1117`/`:1206-1211` — server tree @ `a63dc0db` |
+| Hub relay `:8804` | a hub-generated **per-connection uuid** | hub `SyncPlayRelayWorker.php:694` + `generateClientId()` `:2766-2779`, echoed as `your_id` at `:2057-2062` — hub tree @ `30012378` |
 
 On `:8097` you know the id **before** dialing — your login/auth store holds
 it; pass it to the constructor and assert `yourId === memberId` in `onState`.
@@ -210,9 +222,9 @@ the consumer's assertion to make, and the reason this example sources
 A TV remote key held on a seek bar emits **10–30 repeat events/s**, and every
 playback command is a broadcast: the server rebroadcasts each accepted
 `syncplay_playback_play` / `_pause` / `_seek` to **every member** of the group
-(phlix-server `SyncPlayManager.php:1182`). The server absorbs none of this
-rate: its only WebSocket limiter guards the CONNECT handshake (30 conns / 60 s,
-`RateLimitProfiles::WS_CONNECT`), `JoinPasswordThrottle` guards wrong group
+(phlix-server `SyncPlayManager.php:1206` @ `a63dc0db`). The server absorbs none of
+this rate: its only WebSocket limiter guards the CONNECT handshake (30 conns /
+60 s, `RateLimitProfiles::WS_CONNECT`), `JoinPasswordThrottle` guards wrong group
 passwords, and `queue_limit_exceeded` caps media-QUEUE depth — none of them
 throttle command repeat. The law for senders is therefore: **commands are
 per-intent, not per-key-event.** How that is met per sender:
@@ -237,7 +249,8 @@ per-intent, not per-key-event.** How that is met per sender:
   for its own controls).
 - **`reportPosition` — cadence is consumer-owned; seconds-scale is sane.**
   The server's S446 out-of-sync nudge judges staleness of exactly these
-  reports (`SyncPlayManager.php:1569-1585`), so flooding them mis-signals as
+  reports (server verdict `SyncPlayManager.php:1563-1565`, nudge send `:1587`
+  @ `a63dc0db`), so flooding them mis-signals as
   surely as long silence does. Remember background-tab timer clamping:
   resume your interval on visibility change.
 
@@ -245,26 +258,29 @@ per-intent, not per-key-event.** How that is met per sender:
 
 - **Render chat from `onChat` only — never also locally on `sendChat`.**
   Both producers fan chat out **including the sender** (phlix-server
-  `SyncPlayManager.php:1323` broadcast via `broadcastToGroup`'s default
-  `$excludeIds = []` :1932; hub `SyncPlayRelayWorker.php:1795` omits the
-  exclusion), so your own message arrives back as a frame. The library
+  `SyncPlayManager.php:1347-1350` broadcast via `broadcastToGroup`'s default
+  `$excludeIds = []` :1986 — server tree @ `a63dc0db`; hub
+  `SyncPlayRelayWorker.php:2402-2405` omits the exclusion @ `30012378`), so
+  your own message arrives back as a frame. The library
   deliberately does not suppress that echo: suppression would key on the
   ctor-vs-stamped identity gap SPEC §9 documents as unreconciled.
   `onChat` carries `(memberId, memberName, message, timestampMs)` — the
   broadcast's producer bytes (`member_id`/`member_name`/`message`,
-  `SyncPlayManager.php:1323-1326`; the envelope `timestamp` is authoritative
+  `SyncPlayManager.php:1347-1350` @ `a63dc0db`; the envelope `timestamp` is authoritative
   **ms** on both carriers, S417), and `undefined` for the timestamp only on
   hand-built frames. Note the producers drop blank messages **in silence**
-  (server :1314-1316, hub :1791-1793) — no error, no echo — so gate empty
+  (server `SyncPlayManager.php:1338-1340` @ `a63dc0db`, hub
+  `SyncPlayRelayWorker.php:2398-2400` @ `30012378`) — no error, no echo — so gate empty
   sends yourself.
 - **Typing is the exception that proves the law:** its fan-out EXCLUDES the
-  sender (server `[$memberId]` :1380, hub :1828), so your own indicator never
+  sender (server `[$memberId]` `SyncPlayManager.php:1401-1404` @ `a63dc0db`, hub
+  `SyncPlayRelayWorker.php:2432-2435` @ `30012378`), so your own indicator never
   comes back to your `onMemberTyping`.
 - **`onQueueChanged` is the only live queue signal.** An accepted
   `syncplay_playback_queue` broadcast replaces the queue wholesale and the
   server does NOT re-broadcast `group_state` after it
-  (`SyncPlayManager.php:1271-1278` — the `publishSnapshot()` at :1278 is an
-  internal HTTP-worker snapshot). The library delivers the normalized items
+  (`SyncPlayManager.php:1295-1297` @ `a63dc0db` — the `publishSnapshot()` at
+  :1302 is an internal HTTP-worker snapshot). The library delivers the normalized items
   (per-carrier item law, SPEC §4: hub items lack `added_*` — absent, never
   zeroed), **folds them into `getGroup().queue`**, and does not re-fire
   `onState`. A cleared queue arrives as `[]`, distinct from a frame that
@@ -295,7 +311,14 @@ The recipe is **consumer-side** code: its `Math.random()` sits outside the
 module-scope purity claim above (which binds this library's `src/`, never your
 transport), and SPEC §10.3 defers to this snippet as the estate recipe. The
 load-bearing lines are the ordering ones — `client.onDisconnect()` before every
-reschedule and `attempt = 0` only on a clean open (SPEC §10.1/§10.2):
+reschedule and `attempt = 0` only on a clean open (SPEC §10.1/§10.2). The other
+load-bearing duty is **single-fire**: transports commonly raise `error` and
+*then* `close` for one failure, and the two handlers must count that drop
+**once** (the per-socket guard below), while every reschedule and every clean
+open **cancels the pending timer** — otherwise one blip arms two dials and the
+backoff ladder doubles per storm. (Verified against real browser WebSocket and
+`ws` behavior; an unguarded `onclose` + `onerror` pair calls
+`client.onDisconnect()` twice per drop.)
 
 ```ts
 const BASE_MS = 1000;   // first retry delay
@@ -304,6 +327,7 @@ let attempt = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleReconnect() {
+  if (timer !== null) clearTimeout(timer);    // one pending dial at a time
   const expo = Math.min(MAX_MS, BASE_MS * 2 ** attempt);
   const delay = Math.random() * expo;        // full jitter (consumer-side — see purity note above)
   attempt += 1;
@@ -313,13 +337,17 @@ function scheduleReconnect() {
 function connect() {
   // Carrier on every dial, reconnects included (SPEC §8.4):
   const ws = new WebSocket(URL, ['bearer', token]);
+  let dropped = false;                        // this socket's drop is counted once
   ws.onmessage = (e) => client.handleIncoming(e.data);
   ws.onopen = () => {
+    if (timer !== null) clearTimeout(timer);  // this dial won — retire its fallback
     attempt = 0;                              // reset backoff on success
     client.joinGroup(savedGroupId, savedPasswordHash);
     // resume your periodic pingTime() scheduler here
   };
   const onDrop = () => {
+    if (dropped) return;                      // error→close is ONE drop
+    dropped = true;
     client.onDisconnect();                    // reset client state FIRST
     scheduleReconnect();
   };
@@ -333,12 +361,21 @@ function connect() {
 ```ts
 import {
   SYNCPLAY_MESSAGE_TYPES, // the 19 canonical type strings
+  ALL_MESSAGE_TYPES,      // the same 19 as a frozen array (validation/iteration)
   PROTOCOL_VERSION,       // 1
   encodeMessage,          // (type, payload, now) -> flat RAW JSON object
-  decodeMessage,          // (raw) -> flat RawMessage | null (unwraps Tizen envelope)
+  serializeMessage,       // (RAW object) -> wire JSON string (server-shaped envelope)
+  decodeMessage,          // (raw) -> flat RawMessage | UnknownFrame | null (unwraps Tizen envelope)
+  isValidMessageType,     // (type) -> true for exactly the 19 canonical strings
   TimeSync,               // NTP offset/latency/stability/drift
 } from '@phlix/syncplay';
 ```
+
+`TimeSync`'s tuning constants ship too: `OFFSET_SAMPLE_COUNT` (5),
+`MAX_ACCEPTABLE_RTT` (ms), `STABILITY_VARIANCE_THRESHOLD`,
+`DRIFT_CORRECTION_FACTOR`, `DRIFT_RATE_MIN`/`DRIFT_RATE_MAX`,
+`TIME_SYNC_PROTOCOL_VERSION`; instances expose `getSampleAgeMs()` (ms since
+the last accepted sample, `null` with none).
 
 Types for the two `group_state` shapes are exported too: `SyncPlayGroupWire` /
 `SyncPlayMembersWire` (the frame as received — `members` is a dict keyed by
@@ -350,12 +387,20 @@ member id) and `SyncPlayGroup` (the normalized model with `members: SyncPlayMemb
 
 ```
 rtt    = t4 - t1 - (t3 - t2)      // server pong has no t3 → pass t3 = t2
-offset = t2 - t1 + rtt/2          // add to local time to get server time
+offset = t2 - t1 + trunc(rtt/2)   // add to local time to get server time —
+                                  // rtt/2 is INTEGER-TRUNCATED (`Math.trunc`
+                                  // in addSample), mirroring the server's int cast
 ```
 
 Offset is a low-RTT-weighted mean over the last 5 samples; sync is "stable" when
 ≥5 samples and the population variance of recent offsets is < 50 (unit ms² —
 variance of ms; mirrors the server's unit-less 50); drift is an EMA with factor 0.1.
+
+One application law for `getAdjustedPosition()`: it advances the playhead
+unconditionally from the last commanded position on the corrected clock. Call
+it ONLY while the group's `playback_state` is playing — while paused, HOLD the
+commanded position (the seek/playback frames carry it); interpolating past a
+pause drifts the picture off the frame every peer honored.
 
 ## Develop
 

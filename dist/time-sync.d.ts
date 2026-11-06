@@ -34,7 +34,8 @@
  *   t4 = client receive time
  *
  *   rtt    = t4 - t1 - (t3 - t2)
- *   oneWay = rtt / 2
+ *   oneWay = trunc(rtt / 2)        // INTEGER-truncated — `Math.trunc` in
+ *                                  // addSample, mirroring the server's int cast
  *   offset = t2 - t1 + oneWay        // add to local time to get server time
  *
  * Samples with `rtt < 0` (corrupt: negative one-way latency) or
@@ -185,6 +186,11 @@ export declare class TimeSync {
      * Compute the playback position a member should currently be at, given the
      * host's reported `position` captured at `serverTime`, evaluated at local
      * time `now`. Applies drift to the elapsed synchronized interval.
+     *
+     * CONSUMER LAW: the advance here is UNCONDITIONAL — interpolate ONLY while
+     * the group's `playback_state` is playing; while paused, HOLD the commanded
+     * position the frames carry (a paused player that interpolates drifts off
+     * the pause every peer honored).
      *
      * @param position   Host position (ms) at the moment of `serverTime`.
      * @param serverTime Server-synchronized timestamp the position was captured at (ms).

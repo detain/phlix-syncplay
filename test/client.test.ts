@@ -1970,7 +1970,7 @@ describe('SyncPlayClient — onUnknownFrame (S298 phantom-hook decision)', () =>
     expect(h.unknown[0]).toEqual({ type: 'hub_room_state', room: 'r1' });
   });
 
-  it('does NOT route any of the 19 canonical types to the hook', () => {
+  it('does not double-route the orchestrated canonical types to the hook', () => {
     const h = makeHarness();
     h.client.handleIncoming(groupStateMessage('host1', 'me'));
     h.client.handleIncoming({
@@ -1980,9 +1980,11 @@ describe('SyncPlayClient — onUnknownFrame (S298 phantom-hook decision)', () =>
       member_id: 'guest1',
       member_name: 'Guest',
     });
-    // Since M-SYNCPLAY-11 EVERY canonical type — chat and playback_queue
-    // included — is orchestrated by its own handler; all 19 still route
-    // BEFORE the default arm, so none may reach this hook either.
+    // The 15 canonical types that HAVE an inbound handler are routed by their
+    // own case arm before the default — chat and playback_queue included
+    // (M-SYNCPLAY-11). The four with no inbound handler (group_create,
+    // group_join, group_leave, time_ping) DO reach the hook through the
+    // default arm — pinned by the next test, per the option docblock law.
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.CHAT,
       protocol_version: 1,
@@ -1997,10 +1999,32 @@ describe('SyncPlayClient — onUnknownFrame (S298 phantom-hook decision)', () =>
       queue: [{ media_id: 'm-1' }],
     });
 
-    // Canonical types go through their own handlers only — no double-routing.
+    // Orchestrated types go through their own handlers only — no double-routing.
     expect(h.unknown).toHaveLength(0);
     expect(h.states).toHaveLength(1);
     expect(h.joined).toEqual([{ id: 'guest1', name: 'Guest' }]);
+  });
+
+  it('routes the four canonical types with no inbound arm to the hook (doc-law pin)', () => {
+    const h = makeHarness();
+    // Neither carrier emits group_create / group_join / group_leave / time_ping
+    // inbound (all four are outbound-only per SPEC §4), but an echo or an
+    // off-dialect frame carrying one of these types must be surfaced —
+    // unknown-to-this-client — rather than silently dropped. This test pins
+    // the routing law stated in SyncPlayClientOptions.onUnknownFrame and the
+    // UnknownFrame type docblock; if a future arm absorbs one of these types,
+    // it must update this pin and the docblocks together.
+    const unarmed = [
+      SYNCPLAY_MESSAGE_TYPES.GROUP_CREATE,
+      SYNCPLAY_MESSAGE_TYPES.GROUP_JOIN,
+      SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE,
+      SYNCPLAY_MESSAGE_TYPES.TIME_PING,
+    ];
+    for (const type of unarmed) {
+      h.client.handleIncoming({ type, protocol_version: 1 });
+    }
+    expect(h.unknown).toHaveLength(4);
+    expect(h.unknown.map((f) => f.type)).toEqual(unarmed);
   });
 
   it('unknown frames are still ignored (not thrown) when no hook is provided', () => {

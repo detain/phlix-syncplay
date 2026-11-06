@@ -331,15 +331,20 @@ export interface SyncPlayClientOptions {
     onQueueChanged?: (_queue: PlaybackQueueItem[]) => void;
     /**
      * Extension point for non-SyncPlay vocabulary. This library owns ONLY the 19
-     * canonical `syncplay_*` types; ONLY frames whose type is NOT one of them
-     * (e.g. the hub relay's `pending_command`) reach this hook — untouched, no
-     * validation, no mutation. The two canonical types that used to be named
-     * here as "carried but not orchestrated" — syncplay_chat,
-     * syncplay_playback_queue — are ORCHESTRATED since M-SYNCPLAY-11 (they fire
-     * {@link SyncPlayClientOptions.onChat} / {@link SyncPlayClientOptions.onQueueChanged});
-     * they still NEVER reach this hook. This remains the extension point the old
-     * default-arm comment promised; consumers route non-SyncPlay vocabulary
-     * through it and the library stays protocol-pure.
+     * canonical `syncplay_*` types; frames whose type is NOT one of them (e.g.
+     * the hub relay's `pending_command`) reach this hook — untouched, no
+     * validation, no mutation. The hook ALSO carries the four canonical types
+     * that have no inbound case in the dispatcher — `syncplay_group_create`,
+     * `syncplay_group_join`, `syncplay_group_leave`, `syncplay_time_ping`:
+     * neither carrier emits them inbound, but echoes or off-dialect frames
+     * arriving with one of these types are surfaced here as unknown-to-this-
+     * client instead of dropped (the default-arm law in `handleIncoming`). The
+     * two canonical types that used to be named here as "carried but not
+     * orchestrated" — syncplay_chat, syncplay_playback_queue — are ORCHESTRATED
+     * since M-SYNCPLAY-11 (they fire {@link SyncPlayClientOptions.onChat} /
+     * {@link SyncPlayClientOptions.onQueueChanged}); they still NEVER reach this
+     * hook. Consumers route non-SyncPlay vocabulary through it and the library
+     * stays protocol-pure.
      */
     onUnknownFrame?: (_frame: UnknownFrame) => void;
     /**

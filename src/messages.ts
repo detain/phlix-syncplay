@@ -634,7 +634,10 @@ export interface InfoPayload {
 export type RawMessage = BaseMessage & Record<string, unknown>;
 
 /**
- * A decoded frame whose `type` is NOT one of the 19 canonical SyncPlay types.
+ * A decoded frame the client does not orchestrate: one whose `type` is NOT one
+ * of the 19 canonical SyncPlay types, or one of the four canonical types that
+ * have no inbound dispatcher case (see
+ * {@link SyncPlayClientOptions.onUnknownFrame} — the full routing law).
  *
  * Surfaced via {@link SyncPlayClientOptions.onUnknownFrame} (S298): consumers
  * routing non-SyncPlay vocabulary (e.g. the hub relay's `pending_command`
