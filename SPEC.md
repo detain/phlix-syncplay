@@ -119,6 +119,18 @@ Every message — inbound or outbound — is a single flat JSON object:
 > version-NEGOTIATION or "update required" handshake path is NOT part of the
 > current wire on either carrier: it needs new producers across the stack and
 > is deferred to the contracts wave (`R-SP-W2-01`), not ruled here.
+>
+> **Receiver-side mirror (LW-049).** The library's `handleIncoming` now mirrors
+> the `:8097` value law on canonical frames: a present `protocol_version` that
+> is not an integer, or is an integer above the implemented version (`1`), is
+> refused through the existing `onFrameDropped('malformed')` machinery and
+> never dispatched — no new wire vocabulary is minted, and the hub lane's
+> gate-absence ("binds nobody on `:8804`") is no longer the library's excuse.
+> An absent or stale integer (`0`, negative) falls through accepted exactly
+> like the server's arms; foreign vocabulary still reaches `onUnknownFrame`
+> untouched — the value law binds canonical `syncplay_*` frames only, while
+> `decodeMessage` stays presence-keyed (the codec paragraph above is still
+> true of it).
 
 > **Units footnote — the §4 unit law, hub-relay detail site.** There is no
 > hub-wide "everything is milliseconds" rule on `:8804`, and this footnote
@@ -223,7 +235,14 @@ All field names are **snake_case**.
 > frames are normalized to ms AT PARSE: `SyncPlayClient.serverTimeToMs`
 > (`src/client.ts`, epoch-magnitude rule) is applied by `handlePlayback`,
 > `handleSeek` and `handlePlaybackSync`, so `onPlaybackCommand` and
-> `onPlaybackSync` receive milliseconds whichever carrier stamped. The ONE
+> `onPlaybackSync` receive milliseconds whichever carrier stamped. Magnitudes
+> outside the **consumer-bound trust window (LW-050)** are not believed:
+> `serverTimeOrNow` accepts only `≥ 1e12` (epoch ms) and `[1e9, 4e9)` (epoch
+> seconds, 2001-09 → 2096-11); any other finite stamp — a monotonic-uptime
+> `9e11` the raw magnitude rule would fold to `9e14` — takes the same honest
+> clock-estimate fallback an absent stamp already gets. `serverTimeToMs`
+> itself keeps its pure heuristic; the bound lives at the single consumer
+> boundary. The ONE
 > deliberate verbatim arm is the `time_sync` advisory: `handleTimeSync`
 > surfaces its seconds stamp UNCONVERTED as the unit-named `serverTimeSec`,
 > because that snapshot's siblings are `_ms`-named and it is read per-field

@@ -33,6 +33,7 @@
 import { decodeMessage, encodeMessage, type NowFn } from './framing';
 import {
   isValidMessageType,
+  PROTOCOL_VERSION,
   SYNCPLAY_MESSAGE_TYPES,
   type ChatBroadcastPayload,
   type ErrorPayload,
@@ -404,7 +405,10 @@ export interface SyncPlayClientOptions {
    *    non-object, missing string `type`); `_frame` is the raw inbound value.
    *  - `'malformed'` — a canonical frame a handler refused for garbage
    *    (missing/non-finite/negative position, non-string ids, non-object
-   *    `group`, non-array `queue`/`groups`); `_frame` is the decoded message.
+   *    `group`, non-array `queue`/`groups`) or an unimplementable
+   *    `protocol_version` — non-integer or above what this decoder
+   *    implements (LW-049; absent/stale integers fall through like the
+   *    server's arms do); `_frame` is the decoded message.
    *  - `'send-failed'` — the coalesced-seek timer flush threw at the
    *    consumer `send` sink (browser throws on a CLOSED socket mid-window;
    *    CONSOLIDATED m17); `_frame` is null (the wire frame was never built).
@@ -447,6 +451,14 @@ export class SyncPlayClient {
   private seekFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
   private group: SyncPlayGroup | null = null;
+  /**
+   * LW-046: latch set by {@link SyncPlayClient.destroy}. The m18 docblock
+   * already promised INERTY — this is the field that makes it true: inbound
+   * routing, the void senders and the coalescer re-arm all consult it, and
+   * the instance owns no timers past `destroy()` even when a `send` sink
+   * re-enters the class mid-dispatch.
+   */
+  private destroyed = false;
   /** Local t1 of the most recent outstanding ping, ms. */
   private lastPingSendTime: number | null = null;
   /**
@@ -484,6 +496,35 @@ export class SyncPlayClient {
       throw new TypeError(
         `SyncPlayClient: seekThrottleMs must be a finite number >= 0 ` +
           `(0 disables the seek coalescing throttle), got ${String(raw)}`,
+      );
+    }
+    return raw;
+  }
+
+  /**
+   * LW-045 (review syncplay__secnet): parse the group-gate password hash at
+   * the call boundary. Accepted domain = undefined (no password) or EXACTLY
+   * the shape the server can use: 64 LOWERCASE hex chars. Mirror law, verified
+   * against phlix-server `SyncPlayManager::groupPasswordGate` — it validates
+   * `/^([0-9a-f]{64})$/` and compares with `hash_equals` against a lowercase
+   * sha256 — so an uppercase copy (openssl prints uppercase) is malformed data
+   * that can NEVER authenticate: refusing it locally is fail-fast honesty, not
+   * a restriction. Anything present-but-malformed (short, long, non-hex,
+   * uppercase, a plaintext password mis-passed) THROWS — it is never silently
+   * shipped nor coerced. The message reports only shape facts (typeof +
+   * length): a mis-passed plaintext secret must not be echoed into logs.
+   */
+  private static parsePasswordHash(raw: string | undefined): string | undefined {
+    if (raw === undefined) {
+      return undefined;
+    }
+    if (typeof raw !== 'string' || !/^([0-9a-f]{64})$/.test(raw)) {
+      throw new TypeError(
+        'SyncPlayClient: passwordHash must be undefined or 64 lowercase hex ' +
+          'characters (unsalted SHA-256 hex; SPEC §4/§8.2, server gate ' +
+          'SyncPlayManager::groupPasswordGate) — a present-but-malformed value ' +
+          'can never authenticate and is refused, never coerced. Got a ' +
+          `${typeof raw} of length ${String(raw).length}.`,
       );
     }
     return raw;
@@ -539,13 +580,20 @@ export class SyncPlayClient {
    * accepting this frame.
    */
   createGroup(groupName: string, passwordHash?: string): void {
+    // LW-045: parse (THROWS on malformed) BEFORE any other work — an invalid
+    // argument is a caller bug on every lifecycle path. LW-046: a destroyed
+    // instance is inert and ships nothing.
+    const parsed = SyncPlayClient.parsePasswordHash(passwordHash);
+    if (this.destroyed) {
+      return;
+    }
     const payload: Record<string, unknown> = {
       group_name: groupName,
       member_id: this.memberId,
       member_name: this.memberName,
     };
-    if (passwordHash !== undefined) {
-      payload.password_hash = passwordHash;
+    if (parsed !== undefined) {
+      payload.password_hash = parsed;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_CREATE, payload);
   }
@@ -559,13 +607,18 @@ export class SyncPlayClient {
    * **replayable** SHA-256 group gate, not an identity.
    */
   joinGroup(groupId: string, passwordHash?: string): void {
+    // LW-045 / LW-046: same parse-before-lifecycle law as {@link createGroup}.
+    const parsed = SyncPlayClient.parsePasswordHash(passwordHash);
+    if (this.destroyed) {
+      return;
+    }
     const payload: Record<string, unknown> = {
       group_id: groupId,
       member_id: this.memberId,
       member_name: this.memberName,
     };
-    if (passwordHash !== undefined) {
-      payload.password_hash = passwordHash;
+    if (parsed !== undefined) {
+      payload.password_hash = parsed;
     }
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_JOIN, payload);
   }
@@ -669,7 +722,11 @@ export class SyncPlayClient {
       return true;
     }
     this.dispatchSeek(fromPosition, toPosition);
-    if (this.seekThrottleMs > 0) {
+    // LW-046 (review asphp #6): a `send` sink that re-enters sendSeek during
+    // the synchronous dispatch above has ALREADY opened the window — opening
+    // unconditionally here overwrote its handle, orphaning a timer that
+    // `cancelSeekCoalescing` could never clear. Open only if we still own none.
+    if (this.seekThrottleMs > 0 && !this.seekWindowOpen) {
       this.openSeekWindow();
     }
     return true;
@@ -728,7 +785,14 @@ export class SyncPlayClient {
       return;
     }
     this.dispatchSeek(pending.from, pending.to);
-    this.openSeekWindow();
+    // LW-046: the dispatch above runs consumer code. If a re-entrant sendSeek
+    // already opened a fresh window, or the sink destroyed/left the client
+    // (destroy(), onDisconnect() — both null the group), re-arming here would
+    // own a timer on an instance that promised zero. Re-arm only when the
+    // client is still alive, grouped, and owns no window.
+    if (!this.destroyed && this.group !== null && this.seekThrottleMs > 0 && !this.seekWindowOpen) {
+      this.openSeekWindow();
+    }
   }
 
   /** Drop any coalesced intent and disarm the window (leave/disconnect). */
@@ -839,6 +903,10 @@ export class SyncPlayClient {
    * clears the slot immediately (SPEC §10.1 item 3).
    */
   pingTime(): void {
+    // LW-046: a destroyed client owns no connection and no slots — ship nothing.
+    if (this.destroyed) {
+      return;
+    }
     const t1 = this.now();
     const outstanding = this.lastPingSendTime;
     // CONSOLIDATED m22 (review asphp MINOR-3): a BACKWARD wall-clock step made
@@ -895,11 +963,19 @@ export class SyncPlayClient {
    * window cleared, cached group and outstanding ping dropped — but fires NO
    * consumer callback: a component that is tearing down must not be dragged
    * back through its disconnect handler (and the disconnect path's
-   * "reconnecting…" UI is the wrong signal for destroy). After `destroy()` the
-   * instance holds no live timers; it is INERT — do not re-`joinGroup` on it,
-   * build the next client fresh.
+   * "reconnecting…" UI is the wrong signal for destroy). LW-046 makes the
+   * INERT promise literally true: after `destroy()` the instance routes NO
+   * inbound callbacks (`handleIncoming` returns before decoding), ships
+   * NOTHING from `createGroup`/`joinGroup`/`pingTime` (silently inert), keeps
+   * the `group === null` false-law for the boolean senders, and owns ZERO
+   * timers — including when a `send` sink re-enters the class mid-dispatch.
+   * Do not re-`joinGroup` on a destroyed instance: it is terminal by design
+   * (the reconnect lane is {@link onDisconnect}); build the next client fresh.
    */
   destroy(): void {
+    // LW-046: latch FIRST — every consulted path below (and any synchronous
+    // sink re-entry from cancelSeekCoalescing's clear) sees a destroyed client.
+    this.destroyed = true;
     this.cancelSeekCoalescing();
     this.timeSync.reset();
     this.consecutiveSyncRejections = 0; // LW-043: same per-connection history reset as onDisconnect
@@ -919,9 +995,17 @@ export class SyncPlayClient {
    * {@link SyncPlayClientOptions.onChat} / {@link SyncPlayClientOptions.onQueueChanged}
    * and never reach that hook; undecodable and garbage-refused frames are
    * ignored too, but no longer silently — they surface through
-   * {@link SyncPlayClientOptions.onFrameDropped} (CONSOLIDATED m5).
+   * {@link SyncPlayClientOptions.onFrameDropped} (CONSOLIDATED m5). A
+   * destroyed instance (LW-046) routes nothing at all: `handleIncoming`
+   * returns before decoding, firing no callback on any hook.
    */
   handleIncoming(raw: unknown): void {
+    // LW-046: a destroyed instance is INERT — route nothing, fire nothing,
+    // not even the garbage-observability hook (per m18, a torn-down consumer
+    // must not be dragged back through its callbacks).
+    if (this.destroyed) {
+      return;
+    }
     const decoded = decodeMessage(raw);
     if (decoded === null) {
       this.options.onFrameDropped?.('undecodable', raw);
@@ -938,6 +1022,24 @@ export class SyncPlayClient {
       return;
     }
     const msg = decoded as RawMessage;
+
+    // LW-049 (review syncplay__secnet #4): the receiver-side mirror of the
+    // server's `protocol_version` VALUE law, on canonical frames only. Truth
+    // mirrored: `:8097` MessageHandler refuses integer stamps HIGHER than its
+    // PROTOCOL_VERSION and (the check being `is_int`-keyed) lets ABSENT and
+    // stale integers fall through accepted; the hub :8804 gates nothing. The
+    // codec was presence-keyed only (framing unwraps on the key's existence),
+    // so a version-2 frame drove the v1 state machine. A non-integer, or an
+    // integer above what this decoder implements, is refused through the
+    // existing malformed-drop machinery — no new wire vocabulary, and absent/
+    // stale integers keep falling through exactly like the server's arms.
+    if ('protocol_version' in msg) {
+      const version = (msg as { protocol_version?: unknown }).protocol_version;
+      if (typeof version !== 'number' || !Number.isInteger(version) || version > PROTOCOL_VERSION) {
+        this.options.onFrameDropped?.('malformed', msg);
+        return;
+      }
+    }
 
     switch (msg.type) {
       case SYNCPLAY_MESSAGE_TYPES.TIME_PONG:
@@ -1183,6 +1285,11 @@ export class SyncPlayClient {
    * ZERO-ish garbage on either scale: the library refuses them at
    * {@link serverTimeOrNow} (CONSOLIDATED m3) — direct callers should treat a
    * `< 1000` input the same way an absent stamp is treated.
+   *
+   * LW-050 (review syncplay__secnet #5): this method's heuristic stays PURE
+   * and UNTOUCHED — plausibility policing belongs to the single consumer
+   * boundary {@link serverTimeOrNow}, where an implausible magnitude has an
+   * honest fallback to take.
    */
   static serverTimeToMs(raw: number): number {
     return raw < 1e12 ? raw * 1000 : raw;
@@ -1194,6 +1301,16 @@ export class SyncPlayClient {
    * unit-normalized via {@link serverTimeToMs}; anything else (absent,
    * non-numeric, `1e999` → `Infinity`) yields the caller's honest
    * clock-estimate fallback (M-SYNCPLAY-19).
+   *
+   * LW-050 (review syncplay__secnet #5): the finite gate BELIEVED any
+   * magnitude — a monotonic-uptime clock reading 9e11 "ms" normalized to 9e14
+   * (year ~30540) and teleported every interpolating consumer. Trust is now
+   * bounded to the two plausible wall-clock windows: `≥ 1e12` (epoch ms, real
+   * since 2001-09) and `[1e9, 4e9)` (epoch seconds, 2001-09 → 2096-11). A
+   * stamp outside both — above the m3 floor of 1000 but no honest carrier
+   * would emit it — takes the SAME clock-estimate fallback an absent stamp
+   * already gets. Deliberately ABSOLUTE (not estimate-relative): a fake
+   * `now`-clock in tests must never change what a real-epoch stamp is worth.
    */
   private static serverTimeOrNow(raw: unknown, fallback: () => number): number {
     // CONSOLIDATED m3 (review gameux m1): epoch-zero / negative stamps are the
@@ -1202,9 +1319,12 @@ export class SyncPlayClient {
     // every interpolation. No honest wall clock on EITHER carrier scale reads
     // below 1000 (that is 1970-01-01T00:16:40Z), so it takes the documented
     // clock-estimate fallback like an absent or non-finite one already did.
-    return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1000
-      ? SyncPlayClient.serverTimeToMs(raw)
-      : fallback();
+    // LW-050 extends the same honesty to implausible MIDDLE magnitudes.
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 1000) {
+      return fallback();
+    }
+    const plausible = raw >= 1e12 || (raw >= 1e9 && raw < 4e9);
+    return plausible ? SyncPlayClient.serverTimeToMs(raw) : fallback();
   }
 
   /**
@@ -1553,6 +1673,15 @@ export class SyncPlayClient {
     this.options.onPlaybackCommand?.({ type: 'seek', position, serverTime });
   }
 
+  /**
+   * HOST_ELECT handler. LW-047 (review syncplay__crossfe): the `group ===
+   * null` fall-through to `onHostChanged` below is DELIBERATE and ratified —
+   * host_elect is the NAMED EXCEPTION to the grouped-delivery law (SPEC §4,
+   * landed with LW-044 in `9268b66`): the frame carries no `group_id` to
+   * scope by, there is no cached group to fold, and banner-style consumers
+   * ("host X now leads") act on the announced id alone. A future consistency
+   * sweep must NOT silence this path; see test/reviewWave11L10.test.ts.
+   */
   private handleHostElect(msg: RawMessage): void {
     const payload = msg as Partial<HostElectPayload>;
     // CONSOLIDATED m1 (review asphp MINOR-1, secnet m1): `?? null` admitted

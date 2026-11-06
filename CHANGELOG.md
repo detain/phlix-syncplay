@@ -5,6 +5,68 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Fix lane w11-L10 (plan_review register `LW-045`–`LW-050`; reviews
+  `syncplay__secnet` #3/#4/#5, `syncplay__crossfe`, `syncplay__asphp` #6,
+  2026-11-06) — password-hash shape gate, terminal `destroy()`, ratified
+  ungrouped `host_elect` pin, wire-unit annotations, receiver-side
+  `protocol_version` value mirror, consumer-bound `server_time` trust
+  window. Receiver hardening only; zero error-code-union change, zero new
+  wire vocabulary.**
+  - **LW-045 (src):** `createGroup`/`joinGroup` now refuse a present-but-
+    malformed `passwordHash` with a `TypeError` BEFORE building the frame —
+    accepted domain is the shape the server gate itself admits
+    (`SyncPlayManager::groupPasswordGate`: `/^([0-9a-f]{64})$/` +
+    `hash_equals`): 64 LOWERCASE hex, or absent. A mis-passed plaintext,
+    short/long/non-hex or uppercase value can never authenticate, so it is
+    refused locally instead of shipped as wire theater; the refusal message
+    reports only typeof + length (never the value — it may BE the secret).
+    Disclosed fixture moves: two `client.test.ts` goldens carried the
+    never-wire-usable `'deadbeef'` stand-in and moved to a real sha256 hex
+    with the law restated in place.
+  - **LW-046 (src):** `destroy()` is now LITERALLY terminal (the m18 docblock
+    always promised INERTY): a `destroyed` latch set before any teardown
+    silences `handleIncoming` entirely (no callbacks, no drop reports), turns
+    the void senders (`createGroup`/`joinGroup`/`pingTime`) into no-ops, and
+    closes two coalescer timer holes — a `send` sink re-entering `sendSeek`
+    during a synchronous dispatch can no longer orphan an untracked flush
+    timer (leading-edge and re-arm sites open only when no window is owned),
+    and a sink calling `destroy()` mid-flush no longer gets a blind re-arm on
+    a corpse (post-wave the instance provably owns ZERO timers;
+    `vi.getTimerCount()` pins). The boolean senders keep the existing
+    `group === null` false-law. Reshaped golden (disclosed): `LW-043c` had
+    probed the streak reset by re-pinging AFTER `destroy()` — exactly the
+    forbidden usage; the observable-reset law stays pinned on the sanctioned
+    `onDisconnect` lane (`LW-043b`) and the probe became terminality law.
+  - **LW-047 (docs + test):** the ungrouped `host_elect` announcement is
+    ratified-intent, not an oversight: SPEC §4's Grouped-delivery law names
+    `host_elect` the EXCEPTION (9268b66/LW-044), the frame carries no
+    `group_id` to scope by and banner consumers act on the id alone. Cure is
+    a `handleHostElect` docblock banner + a named law-pin so a future
+    consistency sweep cannot silence the path.
+  - **LW-048 (src):** `SyncPlayMember.joined_at` and
+    `GroupStatePayload.created_at`/`last_activity_at` now name their unit at
+    the type: UNIX SECONDS (server `time()` stamps; SPEC §4 family (ii)) —
+    the ms law covers POSITIONS only; multiply by 1000 before ms clocks.
+    Ships in `dist/messages.d.ts`.
+  - **LW-049 (src + SPEC §2):** `handleIncoming` mirrors the server's
+    `protocol_version` VALUE law on canonical frames (the codec stayed
+    presence-keyed and the hub `:8804` still gates nothing, so pre-wave a
+    version-2 frame drove the v1 state machine unhindered). Non-integer or
+    >-1 versions are refused through the existing
+    `onFrameDropped('malformed')` machinery — no new drop vocabulary — and
+    absent/stale integers (`0`, negative) fall through exactly like the
+    server's `is_int` arms; foreign vocabulary still reaches
+    `onUnknownFrame` untouched. SPEC §2 records the receiver-side mirror.
+  - **LW-050 (src + SPEC §4):** `serverTimeOrNow` — the single consumer
+    boundary for `server_time` — now TRUSTS only plausible wall-clock
+    magnitudes (`≥ 1e12` epoch-ms, or `[1e9, 4e9)` epoch-seconds 2001→2096);
+    any other finite stamp (a monotonic-uptime `9e11` the pure
+    `serverTimeToMs` heuristic folds to year-30540's `9e14`) takes the same
+    honest clock-estimate fallback an absent stamp already got. The bound is
+    ABSOLUTE, not estimate-relative — fake-clock goldens hold.
+    `serverTimeToMs` math UNTOUCHED (pinned). SPEC §4 Delivery-policy records
+    the consumer-bound trust window.
+
 - **Fix lane w02-L10 (plan_review register `LW-041`–`LW-044`; reviews
   `syncplay__asphp` #2/#3, `syncplay__crossfe` #2–#5, `syncplay__secnet` #2;
   `LW-099-b` attestation + `LW-100` owner-gate park, 2026-11-06) — inbound

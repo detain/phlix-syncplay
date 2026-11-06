@@ -362,7 +362,10 @@ export interface SyncPlayClientOptions {
      *    non-object, missing string `type`); `_frame` is the raw inbound value.
      *  - `'malformed'` — a canonical frame a handler refused for garbage
      *    (missing/non-finite/negative position, non-string ids, non-object
-     *    `group`, non-array `queue`/`groups`); `_frame` is the decoded message.
+     *    `group`, non-array `queue`/`groups`) or an unimplementable
+     *    `protocol_version` — non-integer or above what this decoder
+     *    implements (LW-049; absent/stale integers fall through like the
+     *    server's arms do); `_frame` is the decoded message.
      *  - `'send-failed'` — the coalesced-seek timer flush threw at the
      *    consumer `send` sink (browser throws on a CLOSED socket mid-window;
      *    CONSOLIDATED m17); `_frame` is null (the wire frame was never built).
@@ -395,6 +398,14 @@ export declare class SyncPlayClient {
     /** The single owned flush timer (present only while {@link seekWindowOpen}). */
     private seekFlushTimer;
     private group;
+    /**
+     * LW-046: latch set by {@link SyncPlayClient.destroy}. The m18 docblock
+     * already promised INERTY — this is the field that makes it true: inbound
+     * routing, the void senders and the coalescer re-arm all consult it, and
+     * the instance owns no timers past `destroy()` even when a `send` sink
+     * re-enters the class mid-dispatch.
+     */
+    private destroyed;
     /** Local t1 of the most recent outstanding ping, ms. */
     private lastPingSendTime;
     /**
@@ -415,6 +426,20 @@ export declare class SyncPlayClient {
      * be tuning against a phantom.
      */
     private static parseSeekThrottleMs;
+    /**
+     * LW-045 (review syncplay__secnet): parse the group-gate password hash at
+     * the call boundary. Accepted domain = undefined (no password) or EXACTLY
+     * the shape the server can use: 64 LOWERCASE hex chars. Mirror law, verified
+     * against phlix-server `SyncPlayManager::groupPasswordGate` — it validates
+     * `/^([0-9a-f]{64})$/` and compares with `hash_equals` against a lowercase
+     * sha256 — so an uppercase copy (openssl prints uppercase) is malformed data
+     * that can NEVER authenticate: refusing it locally is fail-fast honesty, not
+     * a restriction. Anything present-but-malformed (short, long, non-hex,
+     * uppercase, a plaintext password mis-passed) THROWS — it is never silently
+     * shipped nor coerced. The message reports only shape facts (typeof +
+     * length): a mis-passed plaintext secret must not be echoed into logs.
+     */
+    private static parsePasswordHash;
     /** The TimeSync instance (for status/offset queries). */
     getTimeSync(): TimeSync;
     /** The current group, or null if not in one. */
@@ -588,9 +613,14 @@ export declare class SyncPlayClient {
      * window cleared, cached group and outstanding ping dropped — but fires NO
      * consumer callback: a component that is tearing down must not be dragged
      * back through its disconnect handler (and the disconnect path's
-     * "reconnecting…" UI is the wrong signal for destroy). After `destroy()` the
-     * instance holds no live timers; it is INERT — do not re-`joinGroup` on it,
-     * build the next client fresh.
+     * "reconnecting…" UI is the wrong signal for destroy). LW-046 makes the
+     * INERT promise literally true: after `destroy()` the instance routes NO
+     * inbound callbacks (`handleIncoming` returns before decoding), ships
+     * NOTHING from `createGroup`/`joinGroup`/`pingTime` (silently inert), keeps
+     * the `group === null` false-law for the boolean senders, and owns ZERO
+     * timers — including when a `send` sink re-enters the class mid-dispatch.
+     * Do not re-`joinGroup` on a destroyed instance: it is terminal by design
+     * (the reconnect lane is {@link onDisconnect}); build the next client fresh.
      */
     destroy(): void;
     /**
@@ -603,7 +633,9 @@ export declare class SyncPlayClient {
      * {@link SyncPlayClientOptions.onChat} / {@link SyncPlayClientOptions.onQueueChanged}
      * and never reach that hook; undecodable and garbage-refused frames are
      * ignored too, but no longer silently — they surface through
-     * {@link SyncPlayClientOptions.onFrameDropped} (CONSOLIDATED m5).
+     * {@link SyncPlayClientOptions.onFrameDropped} (CONSOLIDATED m5). A
+     * destroyed instance (LW-046) routes nothing at all: `handleIncoming`
+     * returns before decoding, firing no callback on any hook.
      */
     handleIncoming(raw: unknown): void;
     private handleTimePong;
@@ -661,6 +693,11 @@ export declare class SyncPlayClient {
      * ZERO-ish garbage on either scale: the library refuses them at
      * {@link serverTimeOrNow} (CONSOLIDATED m3) — direct callers should treat a
      * `< 1000` input the same way an absent stamp is treated.
+     *
+     * LW-050 (review syncplay__secnet #5): this method's heuristic stays PURE
+     * and UNTOUCHED — plausibility policing belongs to the single consumer
+     * boundary {@link serverTimeOrNow}, where an implausible magnitude has an
+     * honest fallback to take.
      */
     static serverTimeToMs(raw: number): number;
     /**
@@ -669,6 +706,16 @@ export declare class SyncPlayClient {
      * unit-normalized via {@link serverTimeToMs}; anything else (absent,
      * non-numeric, `1e999` → `Infinity`) yields the caller's honest
      * clock-estimate fallback (M-SYNCPLAY-19).
+     *
+     * LW-050 (review syncplay__secnet #5): the finite gate BELIEVED any
+     * magnitude — a monotonic-uptime clock reading 9e11 "ms" normalized to 9e14
+     * (year ~30540) and teleported every interpolating consumer. Trust is now
+     * bounded to the two plausible wall-clock windows: `≥ 1e12` (epoch ms, real
+     * since 2001-09) and `[1e9, 4e9)` (epoch seconds, 2001-09 → 2096-11). A
+     * stamp outside both — above the m3 floor of 1000 but no honest carrier
+     * would emit it — takes the SAME clock-estimate fallback an absent stamp
+     * already gets. Deliberately ABSOLUTE (not estimate-relative): a fake
+     * `now`-clock in tests must never change what a real-epoch stamp is worth.
      */
     private static serverTimeOrNow;
     /**
@@ -759,6 +806,15 @@ export declare class SyncPlayClient {
     private handleGroupState;
     private handlePlayback;
     private handleSeek;
+    /**
+     * HOST_ELECT handler. LW-047 (review syncplay__crossfe): the `group ===
+     * null` fall-through to `onHostChanged` below is DELIBERATE and ratified —
+     * host_elect is the NAMED EXCEPTION to the grouped-delivery law (SPEC §4,
+     * landed with LW-044 in `9268b66`): the frame carries no `group_id` to
+     * scope by, there is no cached group to fold, and banner-style consumers
+     * ("host X now leads") act on the announced id alone. A future consistency
+     * sweep must NOT silence this path; see test/reviewWave11L10.test.ts.
+     */
     private handleHostElect;
     private handleInfo;
     private handleError;

@@ -77,7 +77,10 @@ function groupStateMessage(hostId: string, yourId: string): RawMessage {
 describe('SyncPlayClient — group management sends', () => {
   it('createGroup emits a flat group_create with member fields', () => {
     const h = makeHarness();
-    h.client.createGroup('Movie Night', 'deadbeef');
+    // LW-045-era fixture move (disclosed): the shape gate now refuses the old
+    // 8-char 'deadbeef' stand-in, which was never a wire-usable value — the
+    // server gate is /^([0-9a-f]{64})$/ + hash_equals. sha256('') below.
+    h.client.createGroup('Movie Night', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]).toEqual({
       type: 'syncplay_group_create',
@@ -86,7 +89,7 @@ describe('SyncPlayClient — group management sends', () => {
       group_name: 'Movie Night',
       member_id: 'me',
       member_name: 'Tester',
-      password_hash: 'deadbeef',
+      password_hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
     });
   });
 
@@ -1381,7 +1384,9 @@ describe('SyncPlayClient — leaveGroup early return when not in a group', () =>
 describe('SyncPlayClient — joinGroup with password hash', () => {
   it('joinGroup includes password_hash when provided (line 190)', () => {
     const h = makeHarness();
-    h.client.joinGroup('sp_abc', 'deadbeef');
+    // LW-045-era fixture move (disclosed): 64-lowercase-hex shape, see the
+    // createGroup fixture above for the gate law.
+    h.client.joinGroup('sp_abc', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
     expect(h.sent[0]).toMatchObject({
       type: 'syncplay_group_join',
       protocol_version: 1,
@@ -1389,7 +1394,7 @@ describe('SyncPlayClient — joinGroup with password hash', () => {
       group_id: 'sp_abc',
       member_id: 'me',
       member_name: 'Tester',
-      password_hash: 'deadbeef',
+      password_hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
     });
   });
 });
@@ -2561,7 +2566,7 @@ describe('SyncPlayClient — identity refusal, state clamps, streak reset, group
     expect(h.degraded).toEqual([1, 1]); // NOT [1, 2] — the fresh connection starts honest at zero
   });
 
-  it('LW-043c: destroy() clears the streak alongside the rest of the teardown', () => {
+  it('LW-043c: destroy() clears the streak as part of a now-TERMINAL teardown (w11 L10 reshaped the probe)', () => {
     const h = makeHarness();
     h.client.pingTime();
     h.clock.set(3000);
@@ -2570,12 +2575,21 @@ describe('SyncPlayClient — identity refusal, state clamps, streak reset, group
     });
     expect(h.degraded).toEqual([1]);
     h.client.destroy();
+    // LW-046 (review wave w11 L10, review asphp #6): destroy is TERMINAL —
+    // the pre-wave probe re-pinged after destroy and read the reset off that
+    // round, which is exactly the "do not use a destroyed instance" usage
+    // the m18 docblock always forbade. The observable-streak-reset law lives
+    // on the sanctioned reconnect lane (LW-043b, directly above); destroy's
+    // law now is that NOTHING after it runs.
+    expect(h.client.getGroup()).toBeNull();
+    h.sent.length = 0;
     h.client.pingTime();
+    expect(h.sent).toHaveLength(0);
     h.clock.set(5000);
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG, protocol_version: 1, client_time: 3000, server_time: 4000,
     });
-    expect(h.degraded).toEqual([1, 1]);
+    expect(h.degraded).toEqual([1]); // no second round ever reaches the estimator
   });
 
   it('LW-044a: an ungrouped client refuses room-scoped fan-out as malformed — no state without a room', () => {

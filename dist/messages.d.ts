@@ -70,6 +70,13 @@ export interface SyncPlayMember {
     id: string;
     name: string;
     is_host: boolean;
+    /**
+     * When the member joined, in UNIX **SECONDS** (server `time()` stamps —
+     * phlix-server `SyncPlayManager` member rows; SPEC §4 field-family (ii)).
+     * NOT ms: multiply by 1000 before comparing with any position/pong clock.
+     * LW-048 (review syncplay__crossfe): unit named at the type because the
+     * wire carries no suffix to tell you.
+     */
     joined_at: number;
 }
 /**
@@ -122,6 +129,12 @@ export interface SyncPlayGroup {
      * frames only).
      */
     queue?: PlaybackQueueItem[];
+    /**
+     * Group birth / last-activity time, in UNIX **SECONDS** (server `time()`
+     * stamps — SPEC §4 field-family (ii); the ms law covers POSITIONS only).
+     * Multiply by 1000 before use with ms clocks. LW-048 names the unit at the
+     * type; both producers stamp seconds (`GroupState.php` era `time()`).
+     */
     created_at?: number;
     last_activity_at?: number;
     /**

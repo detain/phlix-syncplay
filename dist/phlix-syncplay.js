@@ -225,12 +225,18 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 }, x = 250, S = class t {
 	constructor(e) {
 		var n;
-		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "lastPingSendTime", null), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "User" : n, this.timeSync = new b(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
+		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "User" : n, this.timeSync = new b(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
 	}
 	static parseSeekThrottleMs(e) {
 		if (e === void 0) return x;
 		if (typeof e != "number" || !Number.isFinite(e) || e < 0) throw TypeError(`SyncPlayClient: seekThrottleMs must be a finite number >= 0 (0 disables the seek coalescing throttle), got ${String(e)}`);
 		return e;
+	}
+	static parsePasswordHash(e) {
+		if (e !== void 0) {
+			if (typeof e != "string" || !/^([0-9a-f]{64})$/.test(e)) throw TypeError(`SyncPlayClient: passwordHash must be undefined or 64 lowercase hex characters (unsalted SHA-256 hex; SPEC §4/§8.2, server gate SyncPlayManager::groupPasswordGate) — a present-but-malformed value can never authenticate and is refused, never coerced. Got a ${typeof e} of length ${String(e).length}.`);
+			return e;
+		}
 	}
 	getTimeSync() {
 		return this.timeSync;
@@ -247,21 +253,25 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	getSynchronizedTime() {
 		return this.timeSync.getSynchronizedTime(this.now());
 	}
-	createGroup(t, n) {
-		let r = {
-			group_name: t,
+	createGroup(n, r) {
+		let i = t.parsePasswordHash(r);
+		if (this.destroyed) return;
+		let a = {
+			group_name: n,
 			member_id: this.memberId,
 			member_name: this.memberName
 		};
-		n !== void 0 && (r.password_hash = n), this.dispatch(e.GROUP_CREATE, r);
+		i !== void 0 && (a.password_hash = i), this.dispatch(e.GROUP_CREATE, a);
 	}
-	joinGroup(t, n) {
-		let r = {
-			group_id: t,
+	joinGroup(n, r) {
+		let i = t.parsePasswordHash(r);
+		if (this.destroyed) return;
+		let a = {
+			group_id: n,
 			member_id: this.memberId,
 			member_name: this.memberName
 		};
-		n !== void 0 && (r.password_hash = n), this.dispatch(e.GROUP_JOIN, r);
+		i !== void 0 && (a.password_hash = i), this.dispatch(e.GROUP_JOIN, a);
 	}
 	leaveGroup() {
 		return this.group !== null && (this.cancelSeekCoalescing(), this.dispatch(e.GROUP_LEAVE, {
@@ -289,7 +299,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		return this.group === null ? !1 : this.seekWindowOpen ? (this.pendingSeek = {
 			from: e,
 			to: t
-		}, !0) : (this.dispatchSeek(e, t), this.seekThrottleMs > 0 && this.openSeekWindow(), !0);
+		}, !0) : (this.dispatchSeek(e, t), this.seekThrottleMs > 0 && !this.seekWindowOpen && this.openSeekWindow(), !0);
 	}
 	dispatchSeek(t, n) {
 		this.group !== null && this.dispatch(e.PLAYBACK_SEEK, {
@@ -313,7 +323,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	closeSeekWindow() {
 		this.seekWindowOpen = !1, this.seekFlushTimer = null;
 		let e = this.pendingSeek;
-		e !== null && (this.pendingSeek = null, this.group !== null && (this.dispatchSeek(e.from, e.to), this.openSeekWindow()));
+		e !== null && (this.pendingSeek = null, this.group !== null && (this.dispatchSeek(e.from, e.to), !this.destroyed && this.group !== null && this.seekThrottleMs > 0 && !this.seekWindowOpen && this.openSeekWindow()));
 	}
 	cancelSeekCoalescing() {
 		this.pendingSeek = null, this.seekFlushTimer !== null && (clearTimeout(this.seekFlushTimer), this.seekFlushTimer = null), this.seekWindowOpen = !1;
@@ -342,6 +352,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		}), !0);
 	}
 	pingTime() {
+		if (this.destroyed) return;
 		let t = this.now(), n = this.lastPingSendTime;
 		if (n !== null) {
 			let e = t - n;
@@ -354,9 +365,10 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		this.cancelSeekCoalescing(), this.timeSync.reset(), this.consecutiveSyncRejections = 0, this.group = null, this.lastPingSendTime = null, (e = (t = this.options).onDisconnect) == null || e.call(t);
 	}
 	destroy() {
-		this.cancelSeekCoalescing(), this.timeSync.reset(), this.consecutiveSyncRejections = 0, this.group = null, this.lastPingSendTime = null;
+		this.destroyed = !0, this.cancelSeekCoalescing(), this.timeSync.reset(), this.consecutiveSyncRejections = 0, this.group = null, this.lastPingSendTime = null;
 	}
 	handleIncoming(t) {
+		if (this.destroyed) return;
 		let n = d(t);
 		if (n === null) {
 			var i, a;
@@ -369,6 +381,14 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			return;
 		}
 		let c = n;
+		if ("protocol_version" in c) {
+			let e = c.protocol_version;
+			if (typeof e != "number" || !Number.isInteger(e) || e > 1) {
+				var l, u;
+				(l = (u = this.options).onFrameDropped) == null || l.call(u, "malformed", c);
+				return;
+			}
+		}
 		switch (c.type) {
 			case e.TIME_PONG:
 				this.handleTimePong(c);
@@ -416,8 +436,8 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 				this.handlePlaybackQueueBroadcast(c);
 				break;
 			default:
-				var l, u;
-				(l = (u = this.options).onUnknownFrame) == null || l.call(u, c);
+				var f, p;
+				(f = (p = this.options).onUnknownFrame) == null || f.call(p, c);
 		}
 	}
 	handleTimePong(e) {
@@ -462,7 +482,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		return e < 0xe8d4a51000 ? e * 1e3 : e;
 	}
 	static serverTimeOrNow(e, n) {
-		return typeof e == "number" && Number.isFinite(e) && e >= 1e3 ? t.serverTimeToMs(e) : n();
+		return typeof e != "number" || !Number.isFinite(e) || e < 1e3 ? n() : e >= 0xe8d4a51000 || e >= 1e9 && e < 4e9 ? t.serverTimeToMs(e) : n();
 	}
 	static normalizeQueue(e) {
 		if (Array.isArray(e)) return e.filter((e) => typeof e == "object" && !!e).map((e) => ({
