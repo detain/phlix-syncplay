@@ -173,17 +173,24 @@ export interface SyncPlayClientOptions {
     onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
     onSync?: (_status: TimeSyncStatus) => void;
     /**
-     * A matched pong completed its round trip but the sample was REJECTED by the
-     * NTP window (`rtt < 0 || rtt > MAX_ACCEPTABLE_RTT`, SPEC §5). Pre-fix every
-     * rejection was silent: a distant member (cellular / intercontinental RTT
-     * against a home server, realistic at `MAX_ACCEPTABLE_RTT = 1000`) watched
-     * `isStable()` sit `false` forever with no signal to explain it
-     * (W-min124 M-SYNCPLAY-14, review `syncplay__gameux` m3). Fires per
-     * rejection with the CURRENT consecutive-rejection streak; any accepted
-     * sample resets the streak to 0 and fires nothing. The library deliberately
-     * picks no "degraded" threshold — after N rejections is consumer policy
-     * (spinner copy, retry pacing, transport hint). Observes what was already
-     * true at the boundary; changes no sync math.
+     * A matched pong completed its round trip but the sample was REJECTED: by
+     * the NTP window (`rtt < 0 || rtt > MAX_ACCEPTABLE_RTT`, SPEC §5), or
+     * because the pong carries no usable server_time at all — absent or
+     * non-finite t2 measures nothing and now counts as a rejection too
+     * (LW-043, review `syncplay__asphp` #3; it used to return in silence).
+     * Pre-fix every rejection was silent: a distant member (cellular /
+     * intercontinental RTT against a home server, realistic at
+     * `MAX_ACCEPTABLE_RTT = 1000`) watched `isStable()` sit `false` forever
+     * with no signal to explain it (W-min124 M-SYNCPLAY-14, review
+     * `syncplay__gameux` m3). Fires per rejection with the CURRENT
+     * consecutive-rejection streak; any accepted sample resets the streak to 0
+     * and fires nothing, and {@link SyncPlayClient.onDisconnect} /
+     * {@link SyncPlayClient.destroy} reset it as well — the streak is
+     * per-connection measurement history (LW-043): the fresh connection after
+     * a reconnect starts honest at zero. The library deliberately picks no
+     * "degraded" threshold — after N rejections is consumer policy (spinner
+     * copy, retry pacing, transport hint). Observes what was already true at
+     * the boundary; changes no sync math.
      */
     onSyncDegraded?: (_consecutiveRejections: number) => void;
     onPlaybackCommand?: (_command: PlaybackCommand) => void;
@@ -392,8 +399,11 @@ export declare class SyncPlayClient {
     private lastPingSendTime;
     /**
      * M-SYNCPLAY-14: consecutive REJECTED (but matched-consumed) time-sync
-     * samples; reset by any accepted sample. Feeds `onSyncDegraded` so silence
-     * at the sync boundary becomes observable.
+     * rounds — RTT-window rejections and no-usable-server_time rounds
+     * (LW-043); reset by any accepted sample and by the per-connection
+     * teardowns (`onDisconnect` / `destroy` — the streak is measurement
+     * history of ONE connection). Feeds `onSyncDegraded` so silence at the
+     * sync boundary becomes observable.
      */
     private consecutiveSyncRejections;
     constructor(options: SyncPlayClientOptions);
@@ -726,6 +736,19 @@ export declare class SyncPlayClient {
      */
     private positionOrDrop;
     /**
+     * `group_state` fold position law (LW-042, review `syncplay__crossfe` #4):
+     * the SAME bounds {@link positionOrDrop} enforces on command frames — floor
+     * at 0, ceiling at the fold's duration — applied as CLAMPS instead of
+     * drops. Commands refuse garbage because a malformed command has no honest
+     * producer; the state fold repairs instead, because §10.2's join-adoption
+     * law feeds the folded `playback_position` verbatim to every player — a
+     * dropped state would freeze the whole room on an entry frame, while a
+     * clamped one is honest UX. Non-finite garbage keeps the ratified fallback 0
+     * (M-SYNCPLAY-19 law, re-pinned); an absent/non-finite duration invents no
+     * ceiling.
+     */
+    private static clampedPosition;
+    /**
      * Membership-check `playback_state` against the canonical four (SPEC §4,
      * `PlaybackState` in `messages.ts`); anything else degrades to `'stopped'`
      * (M-SYNCPLAY-19). A cast through this guard is the difference between a
@@ -764,6 +787,9 @@ export declare class SyncPlayClient {
      * per-carrier shape, and a frame whose `queue` is absent or not an array
      * is garbage the handleGroupList precedent drops — half-applied (or
      * fabricated-empty) queue state is exactly how next-up UIs start lying.
+     * LW-044 (SPEC §4 Grouped-delivery law): the broadcast is room-scoped
+     * fan-out — received while ungrouped it is refused like the command
+     * family, and the fold below needs no null branch anymore.
      */
     private handlePlaybackQueueBroadcast;
     private handleHostTransfer;

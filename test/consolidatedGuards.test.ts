@@ -208,6 +208,7 @@ describe('m1 — host_elect / typing guard gaps closed', () => {
 describe('m2 — nudge numerics carry domains; positions are ≥0 + duration-clamped', () => {
   it('suggested_rate 1e9 / tolerance -5 / cooldown -1 drop to undefined', () => {
     const h = makeHarness();
+    h.client.handleIncoming(JOINED_GROUP); // LW-044: room-scoped fan-out — the nudge domain law is measured inside a room
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -228,6 +229,7 @@ describe('m2 — nudge numerics carry domains; positions are ≥0 + duration-cla
   it('in-band rates pass: 0.9 and 1.1 are the law’s edges', () => {
     const h = makeHarness();
     for (const rate of [0.9, 1.1]) {
+      h.client.handleIncoming(JOINED_GROUP); // LW-044: see above — grouped premise
       h.client.handleIncoming({
         type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
         protocol_version: 1,
@@ -271,6 +273,7 @@ describe('m2 — nudge numerics carry domains; positions are ≥0 + duration-cla
 
   it('without a cached duration the position passes untouched (no invented clamp)', () => {
     const h = makeHarness();
+    h.client.handleIncoming(groupStateWith({ current_media_duration: null })); // LW-044: grouped premise kept honest — duration null so no clamp is invented
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -289,6 +292,7 @@ describe('m3 — epoch-zero stamps take the clock-estimate fallback', () => {
   it('server_time: 0 is garbage; serverTime falls back to the (unsynced) clock', () => {
     const h = makeHarness();
     h.t.value = 5000;
+    h.client.handleIncoming(JOINED_GROUP); // LW-044: grouped premise (position 1000 < duration 100000: untouched)
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -302,6 +306,7 @@ describe('m3 — epoch-zero stamps take the clock-estimate fallback', () => {
 
   it('server_time: -1 same law', () => {
     const h = makeHarness();
+    h.client.handleIncoming(JOINED_GROUP); // LW-044: grouped premise
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,

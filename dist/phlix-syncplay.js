@@ -351,10 +351,10 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	onDisconnect() {
 		var e, t;
-		this.cancelSeekCoalescing(), this.timeSync.reset(), this.group = null, this.lastPingSendTime = null, (e = (t = this.options).onDisconnect) == null || e.call(t);
+		this.cancelSeekCoalescing(), this.timeSync.reset(), this.consecutiveSyncRejections = 0, this.group = null, this.lastPingSendTime = null, (e = (t = this.options).onDisconnect) == null || e.call(t);
 	}
 	destroy() {
-		this.cancelSeekCoalescing(), this.timeSync.reset(), this.group = null, this.lastPingSendTime = null;
+		this.cancelSeekCoalescing(), this.timeSync.reset(), this.consecutiveSyncRejections = 0, this.group = null, this.lastPingSendTime = null;
 	}
 	handleIncoming(t) {
 		let n = d(t);
@@ -428,18 +428,19 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		let i = this.now(), a = r == null ? t : r;
 		this.lastPingSendTime = null;
 		let o = typeof n.server_time == "number" && Number.isFinite(n.server_time) ? n.server_time : null;
-		if (o !== null) {
-			if (this.timeSync.addSample(a, o, o, i)) {
-				var s, c;
-				this.consecutiveSyncRejections = 0, (s = (c = this.options).onSync) == null || s.call(c, {
-					offset: this.timeSync.getOffset(),
-					latency: this.timeSync.getLatency(),
-					isStable: this.timeSync.isStable()
-				});
-			} else {
-				var l, u;
-				this.consecutiveSyncRejections += 1, (l = (u = this.options).onSyncDegraded) == null || l.call(u, this.consecutiveSyncRejections);
-			}
+		if (o === null) {
+			var s, c;
+			this.consecutiveSyncRejections += 1, (s = (c = this.options).onSyncDegraded) == null || s.call(c, this.consecutiveSyncRejections);
+		} else if (this.timeSync.addSample(a, o, o, i)) {
+			var l, u;
+			this.consecutiveSyncRejections = 0, (l = (u = this.options).onSync) == null || l.call(u, {
+				offset: this.timeSync.getOffset(),
+				latency: this.timeSync.getLatency(),
+				isStable: this.timeSync.isStable()
+			});
+		} else {
+			var d, f;
+			this.consecutiveSyncRejections += 1, (d = (f = this.options).onSyncDegraded) == null || d.call(f, this.consecutiveSyncRejections);
 		}
 	}
 	static normalizeMembers(e, t) {
@@ -509,6 +510,10 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		let n = (t = this.group) == null ? void 0 : t.current_media_duration;
 		return typeof n == "number" && Number.isFinite(n) && n > 0 && e > n ? n : e;
 	}
+	static clampedPosition(e, n) {
+		let r = t.finiteOr(e, 0);
+		return r < 0 ? 0 : n !== null && n > 0 && r > n ? n : r;
+	}
 	static playbackState(e) {
 		return e === "playing" || e === "paused" || e === "buffering" || e === "stopped" ? e : "stopped";
 	}
@@ -520,27 +525,32 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			(o = (s = this.options).onFrameDropped) == null || o.call(s, "malformed", e);
 			return;
 		}
-		let c = t.strOr(a.group_id, ""), l = t.strOrNull(a.host_id);
-		this.group !== null && this.group.group_id !== c && this.cancelSeekCoalescing();
-		let u = this.group, d = t.normalizeMembers(a.members, l);
+		if (typeof a.group_id != "string") {
+			var c, l;
+			(c = (l = this.options).onFrameDropped) == null || c.call(l, "malformed", e);
+			return;
+		}
+		let u = a.group_id, d = t.strOrNull(a.host_id);
+		this.group !== null && this.group.group_id !== u && this.cancelSeekCoalescing();
+		let f = this.group, p = t.normalizeMembers(a.members, d), m = t.finiteOrNull(a.current_media_duration);
 		if (this.group = {
-			group_id: c,
+			group_id: u,
 			group_name: t.strOr(a.group_name, ""),
-			members: d,
+			members: p,
 			member_count: t.finiteOrUndefined(a.member_count),
-			host_id: l,
+			host_id: d,
 			current_media_id: t.strOrNull(a.current_media_id),
-			current_media_duration: t.finiteOrNull(a.current_media_duration),
-			playback_position: t.finiteOr(a.playback_position, 0),
+			current_media_duration: m,
+			playback_position: t.clampedPosition(a.playback_position, m),
 			playback_state: t.playbackState(a.playback_state),
 			queue: t.normalizeQueue(a.queue),
 			created_at: t.finiteOrUndefined(a.created_at),
 			last_activity_at: t.finiteOrUndefined(a.last_activity_at)
-		}, u !== null && u.group_id === c) {
-			let e = new Set(d.map((e) => e.id));
-			for (let t of u.members) if (!e.has(t.id)) {
-				var f, p;
-				(f = (p = this.options).onMemberLeft) == null || f.call(p, {
+		}, f !== null && f.group_id === u) {
+			let e = new Set(p.map((e) => e.id));
+			for (let t of f.members) if (!e.has(t.id)) {
+				var h, g;
+				(h = (g = this.options).onMemberLeft) == null || h.call(g, {
 					id: t.id,
 					name: t.name
 				});
@@ -550,34 +560,44 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	handlePlayback(e, n) {
 		var r, i;
-		if ((typeof n.member_id == "string" ? n.member_id : void 0) === this.memberId) return;
-		let a = this.positionOrDrop(n.position);
-		if (a === null) {
-			var o, s;
-			(o = (s = this.options).onFrameDropped) == null || o.call(s, "malformed", n);
+		if (this.group === null) {
+			var a, o;
+			(a = (o = this.options).onFrameDropped) == null || a.call(o, "malformed", n);
 			return;
 		}
-		let c = t.serverTimeOrNow(n.server_time, () => this.getSynchronizedTime());
+		if ((typeof n.member_id == "string" ? n.member_id : void 0) === this.memberId) return;
+		let s = this.positionOrDrop(n.position);
+		if (s === null) {
+			var c, l;
+			(c = (l = this.options).onFrameDropped) == null || c.call(l, "malformed", n);
+			return;
+		}
+		let u = t.serverTimeOrNow(n.server_time, () => this.getSynchronizedTime());
 		(r = (i = this.options).onPlaybackCommand) == null || r.call(i, {
 			type: e,
-			position: a,
-			serverTime: c
+			position: s,
+			serverTime: u
 		});
 	}
 	handleSeek(e) {
 		var n, r;
-		if ((typeof e.member_id == "string" ? e.member_id : void 0) === this.memberId) return;
-		let i = this.positionOrDrop(e.to_position);
-		if (i === null) {
-			var a, o;
-			(a = (o = this.options).onFrameDropped) == null || a.call(o, "malformed", e);
+		if (this.group === null) {
+			var i, a;
+			(i = (a = this.options).onFrameDropped) == null || i.call(a, "malformed", e);
 			return;
 		}
-		let s = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime());
+		if ((typeof e.member_id == "string" ? e.member_id : void 0) === this.memberId) return;
+		let o = this.positionOrDrop(e.to_position);
+		if (o === null) {
+			var s, c;
+			(s = (c = this.options).onFrameDropped) == null || s.call(c, "malformed", e);
+			return;
+		}
+		let l = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime());
 		(n = (r = this.options).onPlaybackCommand) == null || n.call(r, {
 			type: "seek",
-			position: i,
-			serverTime: s
+			position: o,
+			serverTime: l
 		});
 	}
 	handleHostElect(e) {
@@ -604,7 +624,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	handleInfo(e) {
 		let t = e;
-		if (typeof t.member_id == "string" && typeof t.member_name == "string") {
+		if (this.group !== null && typeof t.member_id == "string" && typeof t.member_name == "string") {
 			var n, r;
 			(n = (r = this.options).onMemberJoined) == null || n.call(r, {
 				id: t.member_id,
@@ -645,11 +665,17 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	handlePlaybackQueueBroadcast(e) {
 		var n, r;
-		let i = e, a = t.normalizeQueue(i.queue);
-		if (a === void 0) {
-			var o, s;
-			(o = (s = this.options).onFrameDropped) == null || o.call(s, "malformed", e);
-		} else this.group !== null && (this.group = l(l({}, this.group), {}, { queue: a })), (n = (r = this.options).onQueueChanged) == null || n.call(r, a);
+		let i = this.group;
+		if (i === null) {
+			var a, o;
+			(a = (o = this.options).onFrameDropped) == null || a.call(o, "malformed", e);
+			return;
+		}
+		let s = e, c = t.normalizeQueue(s.queue);
+		if (c === void 0) {
+			var u, d;
+			(u = (d = this.options).onFrameDropped) == null || u.call(d, "malformed", e);
+		} else this.group = l(l({}, i), {}, { queue: c }), (n = (r = this.options).onQueueChanged) == null || n.call(r, c);
 	}
 	handleHostTransfer(e) {
 		var n, r;
@@ -661,14 +687,24 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	handlePlaybackSync(e) {
 		var n, r;
-		let i = typeof e.member_id == "string" ? e.member_id : void 0, a = this.positionOrDrop(e.position);
-		if (a === null) {
+		if (this.group === null) {
+			var i, a;
+			(i = (a = this.options).onFrameDropped) == null || i.call(a, "malformed", e);
+			return;
+		}
+		if (typeof e.member_id != "string") {
 			var o, s;
 			(o = (s = this.options).onFrameDropped) == null || o.call(s, "malformed", e);
 			return;
 		}
-		let c = typeof e.is_playing == "boolean" && e.is_playing, l = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime()), u = t.normalizeNudge(e.nudge);
-		(n = (r = this.options).onPlaybackSync) == null || n.call(r, i == null ? "" : i, a, c, l, u);
+		let c = e.member_id, l = this.positionOrDrop(e.position);
+		if (l === null) {
+			var u, d;
+			(u = (d = this.options).onFrameDropped) == null || u.call(d, "malformed", e);
+			return;
+		}
+		let f = typeof e.is_playing == "boolean" && e.is_playing, p = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime()), m = t.normalizeNudge(e.nudge);
+		(n = (r = this.options).onPlaybackSync) == null || n.call(r, c, l, f, p, m);
 	}
 	handleTimeSync(e) {
 		var t, n;

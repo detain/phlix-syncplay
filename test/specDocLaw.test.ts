@@ -665,3 +665,20 @@ describe('review-cure: no forward-dated stamps in live surfaces (minor 6)', () =
     expect(offenders).toEqual([]);
   });
 });
+
+describe('LW-042/LW-043/LW-044 law text on the contract surfaces (fix wave w02-L10)', () => {
+  it('SPEC §4 carries the state-fold clamping alignment with its §10.2 rationale (LW-042)', () => {
+    expect(SPEC).toContain('**State-fold alignment (LW-042).**');
+    expect(SPEC).toContain('CLAMPS instead of drops');
+  });
+
+  it('SPEC §4 carries the grouped-delivery law with its named exception list (LW-044)', () => {
+    expect(SPEC).toContain('**Grouped-delivery law (LW-044).**');
+    expect(SPEC).toContain('unattributable');
+  });
+
+  it('the onSyncDegraded contract names the no-usable-server_time class and the reset law (LW-043)', () => {
+    expect(CLIENT).toContain('no usable server_time');
+    expect(CLIENT).toContain('this.consecutiveSyncRejections = 0;');
+  });
+});

@@ -63,6 +63,16 @@ function makeClient(memberId = 'me') {
         nudge,
       }),
   });
+  // LW-044 (SPEC §4 Grouped-delivery law): playback_sync is room-scoped
+  // fan-out — honest producers broadcast to joined members. Seed the room
+  // with an UNKNOWN duration: this file pins position PASSTHROUGH, so no
+  // clamp ceiling may apply.
+  client.handleIncoming({
+    type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+    protocol_version: 1,
+    your_id: memberId,
+    group: { group_id: 'sp_nudge_room', host_id: 'host-1', members: [] },
+  });
   return { client, syncs };
 }
 
@@ -231,6 +241,13 @@ describe('M-SYNCPLAY-08 — the S446 nudge payload survives the library boundary
       // Exactly the pre-fix signature — typechecks against the widened hook.
       onPlaybackSync: (memberId, position, isPlaying, serverTime) =>
         seen.push([memberId, position, isPlaying, serverTime]),
+    });
+    // LW-044: grouped premise (see makeClient).
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'drifter-1',
+      group: { group_id: 'sp_nudge_room', host_id: 'host-1', members: [] },
     });
     feed(client, DIRECTED_NUDGE_BEHIND);
 

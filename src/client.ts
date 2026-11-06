@@ -206,17 +206,24 @@ export interface SyncPlayClientOptions {
   onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
   onSync?: (_status: TimeSyncStatus) => void;
   /**
-   * A matched pong completed its round trip but the sample was REJECTED by the
-   * NTP window (`rtt < 0 || rtt > MAX_ACCEPTABLE_RTT`, SPEC §5). Pre-fix every
-   * rejection was silent: a distant member (cellular / intercontinental RTT
-   * against a home server, realistic at `MAX_ACCEPTABLE_RTT = 1000`) watched
-   * `isStable()` sit `false` forever with no signal to explain it
-   * (W-min124 M-SYNCPLAY-14, review `syncplay__gameux` m3). Fires per
-   * rejection with the CURRENT consecutive-rejection streak; any accepted
-   * sample resets the streak to 0 and fires nothing. The library deliberately
-   * picks no "degraded" threshold — after N rejections is consumer policy
-   * (spinner copy, retry pacing, transport hint). Observes what was already
-   * true at the boundary; changes no sync math.
+   * A matched pong completed its round trip but the sample was REJECTED: by
+   * the NTP window (`rtt < 0 || rtt > MAX_ACCEPTABLE_RTT`, SPEC §5), or
+   * because the pong carries no usable server_time at all — absent or
+   * non-finite t2 measures nothing and now counts as a rejection too
+   * (LW-043, review `syncplay__asphp` #3; it used to return in silence).
+   * Pre-fix every rejection was silent: a distant member (cellular /
+   * intercontinental RTT against a home server, realistic at
+   * `MAX_ACCEPTABLE_RTT = 1000`) watched `isStable()` sit `false` forever
+   * with no signal to explain it (W-min124 M-SYNCPLAY-14, review
+   * `syncplay__gameux` m3). Fires per rejection with the CURRENT
+   * consecutive-rejection streak; any accepted sample resets the streak to 0
+   * and fires nothing, and {@link SyncPlayClient.onDisconnect} /
+   * {@link SyncPlayClient.destroy} reset it as well — the streak is
+   * per-connection measurement history (LW-043): the fresh connection after
+   * a reconnect starts honest at zero. The library deliberately picks no
+   * "degraded" threshold — after N rejections is consumer policy (spinner
+   * copy, retry pacing, transport hint). Observes what was already true at
+   * the boundary; changes no sync math.
    */
   onSyncDegraded?: (_consecutiveRejections: number) => void;
   onPlaybackCommand?: (_command: PlaybackCommand) => void;
@@ -444,8 +451,11 @@ export class SyncPlayClient {
   private lastPingSendTime: number | null = null;
   /**
    * M-SYNCPLAY-14: consecutive REJECTED (but matched-consumed) time-sync
-   * samples; reset by any accepted sample. Feeds `onSyncDegraded` so silence
-   * at the sync boundary becomes observable.
+   * rounds — RTT-window rejections and no-usable-server_time rounds
+   * (LW-043); reset by any accepted sample and by the per-connection
+   * teardowns (`onDisconnect` / `destroy` — the streak is measurement
+   * history of ONE connection). Feeds `onSyncDegraded` so silence at the
+   * sync boundary becomes observable.
    */
   private consecutiveSyncRejections = 0;
 
@@ -870,6 +880,10 @@ export class SyncPlayClient {
   onDisconnect(): void {
     this.cancelSeekCoalescing();
     this.timeSync.reset();
+    // LW-043: the rejection streak is per-connection measurement history —
+    // a fresh connection starts honest at zero (mirrors the timeSync.reset
+    // two lines above, same rationale).
+    this.consecutiveSyncRejections = 0;
     this.group = null;
     this.lastPingSendTime = null;
     this.options.onDisconnect?.();
@@ -888,6 +902,7 @@ export class SyncPlayClient {
   destroy(): void {
     this.cancelSeekCoalescing();
     this.timeSync.reset();
+    this.consecutiveSyncRejections = 0; // LW-043: same per-connection history reset as onDisconnect
     this.group = null;
     this.lastPingSendTime = null;
   }
@@ -1047,6 +1062,14 @@ export class SyncPlayClient {
         : null;
 
     if (t2 === null) {
+      // LW-043 (review syncplay__asphp #3): a matched pong without a usable
+      // t2 measures nothing — that is exactly the rejected-round class
+      // M-SYNCPLAY-14 made observable. The silent return let a server
+      // omitting (or corrupting) `server_time` look "still measuring"
+      // forever. The round is still consumed and the slot released above
+      // (M-SYNCPLAY-13 untouched); only the silence is cured.
+      this.consecutiveSyncRejections += 1;
+      this.options.onSyncDegraded?.(this.consecutiveSyncRejections);
       return;
     }
 
@@ -1342,6 +1365,29 @@ export class SyncPlayClient {
   }
 
   /**
+   * `group_state` fold position law (LW-042, review `syncplay__crossfe` #4):
+   * the SAME bounds {@link positionOrDrop} enforces on command frames — floor
+   * at 0, ceiling at the fold's duration — applied as CLAMPS instead of
+   * drops. Commands refuse garbage because a malformed command has no honest
+   * producer; the state fold repairs instead, because §10.2's join-adoption
+   * law feeds the folded `playback_position` verbatim to every player — a
+   * dropped state would freeze the whole room on an entry frame, while a
+   * clamped one is honest UX. Non-finite garbage keeps the ratified fallback 0
+   * (M-SYNCPLAY-19 law, re-pinned); an absent/non-finite duration invents no
+   * ceiling.
+   */
+  private static clampedPosition(value: unknown, duration: number | null): number {
+    const position = SyncPlayClient.finiteOr(value, 0);
+    if (position < 0) {
+      return 0;
+    }
+    if (duration !== null && duration > 0 && position > duration) {
+      return duration;
+    }
+    return position;
+  }
+
+  /**
    * Membership-check `playback_state` against the canonical four (SPEC §4,
    * `PlaybackState` in `messages.ts`); anything else degrades to `'stopped'`
    * (M-SYNCPLAY-19). A cast through this guard is the difference between a
@@ -1362,9 +1408,21 @@ export class SyncPlayClient {
       return;
     }
 
-    // M-SYNCPLAY-19: typed-coerce once, reuse below and in the room-change
+    // LW-041a (review syncplay__asphp #2): `group_id` IS the room's identity.
+    // Folding a non-string one to '' minted a nameless room in the model that
+    // every `group_id ===` derivation then shared — a garbage frame silently
+    // re-anchored the client into a phantom state. Both live servers mint
+    // `sp_*` strings, so a non-string group_id has NO honest producer: refuse
+    // the frame whole (the strOr fold below still serves every adjacent
+    // field); the cached group and onState stay untouched.
+    if (typeof group.group_id !== 'string') {
+      this.options.onFrameDropped?.('malformed', msg);
+      return;
+    }
+
+    // M-SYNCPLAY-19 + LW-041a: read once, reuse below and in the room-change
     // check so the comparison and the stored model can never disagree.
-    const groupId = SyncPlayClient.strOr(group.group_id, '');
+    const groupId = group.group_id;
     const hostId = SyncPlayClient.strOrNull(group.host_id);
 
     // Room change mid-window (R-SYNCPLAY-03): joinGroup(B) while a seek
@@ -1387,6 +1445,10 @@ export class SyncPlayClient {
     // host_id is authoritative).
     const members = SyncPlayClient.normalizeMembers(group.members, hostId);
 
+    // LW-042: one duration read feeds both model fields — the position clamp
+    // belongs to THIS fold's duration, not the stale cache.
+    const duration = SyncPlayClient.finiteOrNull(group.current_media_duration);
+
     this.group = {
       group_id: groupId,
       group_name: SyncPlayClient.strOr(group.group_name, ''),
@@ -1394,8 +1456,8 @@ export class SyncPlayClient {
       member_count: SyncPlayClient.finiteOrUndefined(group.member_count),
       host_id: hostId,
       current_media_id: SyncPlayClient.strOrNull(group.current_media_id),
-      current_media_duration: SyncPlayClient.finiteOrNull(group.current_media_duration),
-      playback_position: SyncPlayClient.finiteOr(group.playback_position, 0),
+      current_media_duration: duration,
+      playback_position: SyncPlayClient.clampedPosition(group.playback_position, duration),
       playback_state: SyncPlayClient.playbackState(group.playback_state),
       queue: SyncPlayClient.normalizeQueue(group.queue),
       created_at: SyncPlayClient.finiteOrUndefined(group.created_at),
@@ -1426,6 +1488,14 @@ export class SyncPlayClient {
   }
 
   private handlePlayback(type: 'play' | 'pause', msg: RawMessage): void {
+    // LW-044 (SPEC §4 Grouped-delivery law): command fan-out carries no
+    // group_id — membership is implicit in the broadcast. A client with no
+    // room receiving one is post-leave in-flight delivery: unattributable,
+    // refused whole like any other garbage identity frame.
+    if (this.group === null) {
+      this.options.onFrameDropped?.('malformed', msg);
+      return;
+    }
     const senderId = typeof msg.member_id === 'string' ? msg.member_id : undefined;
     // Ignore our own echoed command (the server excludes the sender, but be safe).
     // SECURITY (see SPEC §9.1): suppression keys on `member_id`, so this is safe
@@ -1455,6 +1525,11 @@ export class SyncPlayClient {
   }
 
   private handleSeek(msg: RawMessage): void {
+    // LW-044: grouped-delivery law — see handlePlayback for the rationale.
+    if (this.group === null) {
+      this.options.onFrameDropped?.('malformed', msg);
+      return;
+    }
     const senderId = typeof msg.member_id === 'string' ? msg.member_id : undefined;
     // SECURITY (see SPEC §9.1): same dependency as handlePlayback — keying
     // echo-suppression on `member_id` is safe ONLY because the server sets the
@@ -1535,7 +1610,18 @@ export class SyncPlayClient {
     const payload = msg as Partial<InfoPayload>;
     // A member JOIN arrives as INFO carrying member_id + member_name — the
     // server does NOT emit a dedicated member_joined type.
-    if (typeof payload.member_id === 'string' && typeof payload.member_name === 'string') {
+    // LW-044 (named exception pair, SPEC §4): a join announcement is
+    // room-scoped — an ungrouped receiver has no room to announce into, and
+    // the roster cannot be merged with a null group; the announcement is
+    // skipped (not drop-reported: the frame's message half may still be
+    // legitimately delivered below). The message branch has honest
+    // ungrouped producers (server maintenance/shutdown chatter) and stays
+    // live.
+    if (
+      this.group !== null &&
+      typeof payload.member_id === 'string' &&
+      typeof payload.member_name === 'string'
+    ) {
       this.options.onMemberJoined?.({ id: payload.member_id, name: payload.member_name });
     }
     if (typeof payload.message === 'string') {
@@ -1625,17 +1711,23 @@ export class SyncPlayClient {
    * per-carrier shape, and a frame whose `queue` is absent or not an array
    * is garbage the handleGroupList precedent drops — half-applied (or
    * fabricated-empty) queue state is exactly how next-up UIs start lying.
+   * LW-044 (SPEC §4 Grouped-delivery law): the broadcast is room-scoped
+   * fan-out — received while ungrouped it is refused like the command
+   * family, and the fold below needs no null branch anymore.
    */
   private handlePlaybackQueueBroadcast(msg: RawMessage): void {
+    const group = this.group;
+    if (group === null) {
+      this.options.onFrameDropped?.('malformed', msg);
+      return;
+    }
     const payload = msg as Partial<QueueBroadcastPayload>;
     const queue = SyncPlayClient.normalizeQueue(payload.queue);
     if (queue === undefined) {
       this.options.onFrameDropped?.('malformed', msg);
       return;
     }
-    if (this.group !== null) {
-      this.group = { ...this.group, queue };
-    }
+    this.group = { ...group, queue };
     this.options.onQueueChanged?.(queue);
   }
 
@@ -1652,7 +1744,21 @@ export class SyncPlayClient {
   }
 
   private handlePlaybackSync(msg: RawMessage): void {
-    const senderId = typeof msg.member_id === 'string' ? msg.member_id : undefined;
+    // LW-044: grouped-delivery law — see handlePlayback for the rationale.
+    if (this.group === null) {
+      this.options.onFrameDropped?.('malformed', msg);
+      return;
+    }
+    // LW-041b (review syncplay__secnet #2): the old `?? ''` fold minted an
+    // ANONYMOUS speaker — consumers key drift UI and member attribution on
+    // this id, and '' matches no honest producer (both servers stamp the
+    // authenticated sender). Refuse the frame, same law as handleChat /
+    // handleTyping face the identical non-string member_id.
+    if (typeof msg.member_id !== 'string') {
+      this.options.onFrameDropped?.('malformed', msg);
+      return;
+    }
+    const senderId = msg.member_id;
     // Frame-type decision (S294): playback_sync is a server-echoed STATE
     // REPORT, not a command. The server broadcasts it to EVERY group member —
     // stamped with the HOST id (SyncPlayManager::handlePlaybackSync excludes
@@ -1687,7 +1793,7 @@ export class SyncPlayClient {
     // 5th (additive, BREAKING-free) argument; `undefined` whenever the frame
     // carried none — the group echo and every hub-relay frame.
     const nudge = SyncPlayClient.normalizeNudge(msg.nudge);
-    this.options.onPlaybackSync?.(senderId ?? '', position, isPlaying, serverTime, nudge);
+    this.options.onPlaybackSync?.(senderId, position, isPlaying, serverTime, nudge);
   }
 
   private handleTimeSync(msg: RawMessage): void {

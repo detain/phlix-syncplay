@@ -259,6 +259,9 @@ describe('SyncPlayClient — host election, info (member joins), errors', () => 
 
   it('treats an INFO carrying member_id + member_name as a member join', () => {
     const h = makeHarness();
+    // LW-044: join announcements are room-scoped — seed the group the honest
+    // server fan-out presumes (ungrouped refusal pinned separately).
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.INFO,
       protocol_version: 1,
@@ -527,6 +530,7 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
         syncs.push({ memberId, position, isPlaying, serverTime }),
     });
 
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -561,6 +565,7 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
     // functions the transport layer uses — then decoded back through
     // handleIncoming. The stamp is UNIX seconds per the :8097 producer; the
     // host's re-anchor callback must still receive MILLISECONDS.
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming(
       serializeMessage(
         encodeMessage(
@@ -589,6 +594,7 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
   // self-echo guard was deleted for the wrong frame types and the AC is unmet.
   it('still drops a play command echoed back from ourselves (real wire frame)', () => {
     const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     h.client.handleIncoming(
       serializeMessage(
         encodeMessage(
@@ -603,6 +609,7 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
 
   it('still drops a pause command echoed back from ourselves (real wire frame)', () => {
     const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     h.client.handleIncoming(
       serializeMessage(
         encodeMessage(
@@ -617,6 +624,7 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
 
   it('still drops a seek command echoed back from ourselves (real wire frame)', () => {
     const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     h.client.handleIncoming(
       serializeMessage(
         encodeMessage(
@@ -1165,6 +1173,7 @@ describe('SyncPlayClient.serverTimeToMs — per-carrier wire-unit normalization 
     });
 
     // hub carrier — ms echo must arrive untouched
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -1203,6 +1212,7 @@ describe('SyncPlayClient.serverTimeToMs — per-carrier wire-unit normalization 
     // echoed verbatim by Messages::timePong()).
     client.pingTime();
     clock.t = 1761900000002;
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
       protocol_version: 1,
@@ -1263,6 +1273,7 @@ describe('SyncPlayClient — playback_sync echo carrier-pair scale law (M-SYNCPL
     });
 
     // Carrier 1 — `:8097`: the group echo stamps UNIX SECONDS.
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -1313,6 +1324,7 @@ describe('SyncPlayClient — playback_sync echo carrier-pair scale law (M-SYNCPL
     // Stripped frame (hand-built / legacy relay): no `server_time` — the
     // handler substitutes `getSynchronizedTime()`, ALREADY ms; the ×1000
     // promotion must not touch it.
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -1445,6 +1457,7 @@ describe('SyncPlayClient — handlePlaybackSync type coercion defaults', () => {
         syncs.push({ memberId, position, isPlaying, serverTime }),
     });
 
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -1469,6 +1482,7 @@ describe('SyncPlayClient — handlePlaybackSync type coercion defaults', () => {
         syncs.push({ memberId, position, isPlaying, serverTime }),
     });
 
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -1491,6 +1505,7 @@ describe('SyncPlayClient — handlePlaybackSync type coercion defaults', () => {
         syncs.push({ memberId, position, isPlaying, serverTime }),
     });
 
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -1568,6 +1583,7 @@ describe('SyncPlayClient — malformed position drops (W-min123 M-SYNCPLAY-12, r
 
   it('drops a playback_sync whose position is NaN', () => {
     const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -2235,7 +2251,7 @@ describe('SyncPlayClient — degraded time-sync is observable (W-min124 M-SYNCPL
     expect(h.sent).toHaveLength(1);
   });
 
-  it('a NON-FINITE pong server_time samples nothing and degrades nothing (round consumed)', () => {
+  it('a NON-FINITE pong server_time samples nothing and counts as a rejection (round consumed; LW-043)', () => {
     const h = makeHarness();
     h.client.pingTime();
     h.clock.set(1001);
@@ -2246,7 +2262,10 @@ describe('SyncPlayClient — degraded time-sync is observable (W-min124 M-SYNCPL
       server_time: Number.POSITIVE_INFINITY,
     });
     expect(h.syncs).toHaveLength(0);
-    expect(h.degraded).toHaveLength(0);
+    // LW-043 (review syncplay__asphp #3): no usable server_time measures
+    // nothing — the same rejected-round class the RTT bound produces, so it
+    // now rides onSyncDegraded instead of the old silence.
+    expect(h.degraded).toEqual([1]);
     expect(h.client.getTimeSync().getOffset()).toBe(0);
     h.sent.length = 0;
     h.client.pingTime(); // slot was released before the t2 gate (M-SYNCPLAY-13 law)
@@ -2301,12 +2320,15 @@ describe('SyncPlayClient — onMemberLeft roster diff (W-min124 M-SYNCPLAY-16, r
 describe('SyncPlayClient — typed boundary guards (W-min124 M-SYNCPLAY-19, review syncplay__secnet MINOR-3)', () => {
   it('group_state fields that are not their declared type fall back like absent ones', () => {
     const h = makeHarness();
+    // LW-041a moved a NON-STRING group_id to whole-frame refusal (pinned in
+    // the LW-041..044 block), so this adjacent-field sweep keeps its premise
+    // with a valid room id and pins the per-field fallbacks around it.
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
       protocol_version: 1,
       your_id: 'me',
       group: {
-        group_id: { nested: true },
+        group_id: 'sp_abc',
         group_name: 7,
         host_id: 123,
         current_media_id: [],
@@ -2319,11 +2341,13 @@ describe('SyncPlayClient — typed boundary guards (W-min124 M-SYNCPLAY-19, revi
       },
     });
     const group = h.states[0]?.group;
-    expect(group?.group_id).toBe('');
+    expect(group?.group_id).toBe('sp_abc');
     expect(group?.group_name).toBe('');
     expect(group?.host_id).toBeNull();
     expect(group?.current_media_id).toBeNull();
     expect(group?.current_media_duration).toBeNull();
+    // M-SYNCPLAY-19 ratified fallback, re-pinned through the LW-042 clamp
+    // fold: non-finite position → 0 (no ceiling invented for null duration).
     expect(group?.playback_position).toBe(0);
     expect(group?.playback_state).toBe('stopped');
     expect(group?.member_count).toBeUndefined();
@@ -2357,6 +2381,7 @@ describe('SyncPlayClient — typed boundary guards (W-min124 M-SYNCPLAY-19, revi
 
   it('playback commands with non-finite server_time take the clock-estimate fallback', () => {
     const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY,
       protocol_version: 1,
@@ -2398,6 +2423,7 @@ describe('SyncPlayClient — typed boundary guards (W-min124 M-SYNCPLAY-19, revi
       memberId: 'me',
       onPlaybackSync: (_m, position, _p, _s, nudge) => syncs.push({ position, nudge }),
     });
+    client.handleIncoming(groupStateMessage('host1', 'me')); // LW-044: seed the room the honest fan-out producer broadcasts into
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,
@@ -2415,5 +2441,199 @@ describe('SyncPlayClient — typed boundary guards (W-min124 M-SYNCPLAY-19, revi
       tolerance_ms: undefined,
       cooldown_ms: undefined,
     });
+  });
+});
+
+// ------------------------------------------------ LW-041..LW-044 (fix wave w02-L10, 2026-11-06)
+
+describe('SyncPlayClient — identity refusal, state clamps, streak reset, grouped delivery (LW-041..LW-044)', () => {
+  function guardGroupState(overrides: Record<string, unknown>): RawMessage {
+    return {
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: {
+        group_id: 'sp_abc',
+        host_id: 'host1',
+        current_media_duration: 100000,
+        playback_position: 4000,
+        members: [{ id: 'host1', name: 'Host', is_host: true, joined_at: 1 }],
+        ...overrides,
+      },
+    };
+  }
+
+  function guardHarness(grouped: boolean) {
+    const drops: Array<{ reason: string; frame: unknown }> = [];
+    const states: SyncPlayGroup[] = [];
+    const commands: PlaybackCommand[] = [];
+    const syncs: Array<{ memberId: string; position: number }> = [];
+    const queues: unknown[] = [];
+    const joined: Array<{ id: string; name: string }> = [];
+    const infos: string[] = [];
+    const errors: string[] = [];
+    const hostChanges: Array<string | null> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      memberName: 'Tester',
+      onFrameDropped: (reason, frame) => drops.push({ reason, frame }),
+      onState: (group) => states.push(group),
+      onPlaybackCommand: (c) => commands.push(c),
+      onPlaybackSync: (memberId, position) => syncs.push({ memberId, position }),
+      onQueueChanged: (q) => queues.push(q),
+      onMemberJoined: (m) => joined.push(m),
+      onInfo: (message) => infos.push(message),
+      onError: (code) => errors.push(code),
+      onHostChanged: (h) => hostChanges.push(h),
+    });
+    if (grouped) client.handleIncoming(guardGroupState({}));
+    return { client, drops, states, commands, syncs, queues, joined, infos, errors, hostChanges };
+  }
+
+  it('LW-041a: group_state with a non-string group_id is refused whole — cached group and onState untouched', () => {
+    const h = guardHarness(true);
+    h.client.handleIncoming(guardGroupState({ group_id: { nested: true }, playback_position: 77777 }));
+    expect(h.drops.map((d) => d.reason)).toEqual(['malformed']);
+    expect(h.states).toHaveLength(1);
+    expect(h.client.getGroup()?.group_id).toBe('sp_abc');
+    expect(h.client.getGroup()?.playback_position).toBe(4000);
+  });
+
+  it('LW-041b: playback_sync without a string member_id is refused, never delivered as the empty speaker', () => {
+    const h = guardHarness(true);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC, protocol_version: 1,
+      position: 5000, is_playing: true, server_time: 1000,
+    });
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC, protocol_version: 1,
+      member_id: 42, position: 5000, is_playing: true, server_time: 1000,
+    });
+    expect(h.syncs).toHaveLength(0);
+    expect(h.drops.map((d) => d.reason)).toEqual(['malformed', 'malformed']);
+  });
+
+  it('LW-042: the group_state fold CLAMPS playback_position (floor 0, ceiling the same fold\'s duration)', () => {
+    const h = guardHarness(false);
+    h.client.handleIncoming(guardGroupState({ playback_position: 47_000_000 }));
+    expect(h.states[0]?.playback_position).toBe(100000);
+    h.client.handleIncoming(guardGroupState({ playback_position: -5000 }));
+    expect(h.states[1]?.playback_position).toBe(0);
+  });
+
+  it('LW-043a: a matched pong with a missing or non-finite server_time counts as a rejection (streak; slot still released)', () => {
+    const h = makeHarness();
+    h.client.pingTime();
+    h.clock.set(1001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG, protocol_version: 1, client_time: 1000,
+    });
+    expect(h.degraded).toEqual([1]);
+    expect(h.syncs).toHaveLength(0);
+    expect(h.client.getTimeSync().getOffset()).toBe(0);
+    h.sent.length = 0;
+    h.client.pingTime(); // M-SYNCPLAY-13 slot release stays: consumed at match, before the gate
+    expect(h.sent).toHaveLength(1);
+    h.clock.set(4001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG, protocol_version: 1,
+      client_time: 1001, server_time: Number.POSITIVE_INFINITY,
+    });
+    expect(h.degraded).toEqual([1, 2]); // a `1e999` t2 is the same no-measurement class
+  });
+
+  it('LW-043b: onDisconnect resets the rejection streak — it is per-connection measurement history', () => {
+    const h = makeHarness();
+    h.client.pingTime();
+    h.clock.set(3000);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG, protocol_version: 1, client_time: 1000, server_time: 2000,
+    });
+    expect(h.degraded).toEqual([1]); // rtt 2000 > bound: rejected
+    h.client.onDisconnect();
+    h.client.pingTime();
+    h.clock.set(5000);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG, protocol_version: 1, client_time: 3000, server_time: 4000,
+    });
+    expect(h.degraded).toEqual([1, 1]); // NOT [1, 2] — the fresh connection starts honest at zero
+  });
+
+  it('LW-043c: destroy() clears the streak alongside the rest of the teardown', () => {
+    const h = makeHarness();
+    h.client.pingTime();
+    h.clock.set(3000);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG, protocol_version: 1, client_time: 1000, server_time: 2000,
+    });
+    expect(h.degraded).toEqual([1]);
+    h.client.destroy();
+    h.client.pingTime();
+    h.clock.set(5000);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG, protocol_version: 1, client_time: 3000, server_time: 4000,
+    });
+    expect(h.degraded).toEqual([1, 1]);
+  });
+
+  it('LW-044a: an ungrouped client refuses room-scoped fan-out as malformed — no state without a room', () => {
+    const h = guardHarness(false);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY, protocol_version: 1, member_id: 'host1', position: 5000, server_time: 1000,
+    });
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK, protocol_version: 1, member_id: 'host1', to_position: 6000, server_time: 1000,
+    });
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC, protocol_version: 1, member_id: 'host1', position: 7000, server_time: 1000,
+    });
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_QUEUE, protocol_version: 1, queue: [{ media_id: 'm1' }],
+    });
+    expect(h.commands).toHaveLength(0);
+    expect(h.syncs).toHaveLength(0);
+    expect(h.queues).toHaveLength(0);
+    expect(h.drops.map((d) => d.reason)).toEqual(['malformed', 'malformed', 'malformed', 'malformed']);
+
+    // Per-frame refusal, not a poisoned client: after joining, the same shapes deliver.
+    h.client.handleIncoming(guardGroupState({}));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_PLAY, protocol_version: 1, member_id: 'host1', position: 5000, server_time: 1000,
+    });
+    expect(h.commands).toHaveLength(1);
+    expect(h.drops).toHaveLength(4);
+  });
+
+  it('LW-044b: the named ungrouped exceptions keep firing — host_elect, INFO message, ERROR', () => {
+    const h = guardHarness(false);
+    h.client.handleIncoming({ type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT, protocol_version: 1, elected_id: 'host2' });
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.INFO, protocol_version: 1, message: 'Server is going down for maintenance',
+    });
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.ERROR, protocol_version: 1, error_code: 'ERR_X', message: 'm',
+    });
+    expect(h.hostChanges).toEqual(['host2']);
+    expect(h.infos).toEqual(['Server is going down for maintenance']);
+    expect(h.errors).toEqual(['ERR_X']);
+    expect(h.drops).toHaveLength(0);
+  });
+
+  it('LW-044c: a join announcement received while ungrouped names nobody; the message part still rides', () => {
+    const h = guardHarness(false);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.INFO, protocol_version: 1,
+      member_id: 'newbie', member_name: 'New Bie', message: 'Newbie joined',
+    });
+    expect(h.joined).toHaveLength(0);
+    expect(h.infos).toEqual(['Newbie joined']);
+
+    const g = guardHarness(true);
+    g.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.INFO, protocol_version: 1, member_id: 'newbie', member_name: 'New Bie',
+    });
+    expect(g.joined).toEqual([{ id: 'newbie', name: 'New Bie' }]);
   });
 });

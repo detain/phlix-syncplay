@@ -232,6 +232,14 @@ describe('the documented delivery policy is the actual parse behavior', () => {
       memberId: 'me',
       onPlaybackSync: (_m, _p, _i, serverTime) => seen.push(serverTime),
     });
+    // LW-044 (SPEC §4 Grouped-delivery law): playback_sync is room-scoped —
+    // the unit law is measured on a frame a joined member would receive.
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: { group_id: 'sp_abc', host_id: 'host1', members: [] },
+    });
     client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SYNC,
       protocol_version: 1,

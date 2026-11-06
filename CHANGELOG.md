@@ -5,6 +5,61 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Fix lane w02-L10 (plan_review register `LW-041`–`LW-044`; reviews
+  `syncplay__asphp` #2/#3, `syncplay__crossfe` #2–#5, `syncplay__secnet` #2;
+  `LW-099-b` attestation + `LW-100` owner-gate park, 2026-11-06) — inbound
+  identity refusals, state-fold position clamps, degradation-streak honesty,
+  grouped-delivery law. New wire SEMANTICS at the client boundary; zero
+  error-code-union change.**
+  - **LW-041 (src):** garbage identity folds retired. A `group_state` whose
+    `group.group_id` is not a string is now refused WHOLE
+    (`onFrameDropped('malformed')`) instead of folding into a `''`-named
+    phantom room every `group_id ===` derivation would share; a
+    `playback_sync` without a string `member_id` is refused instead of
+    delivered as the anonymous `''` speaker. Cached group + `onState` stay
+    untouched on refusal (refuse-garbage precedent: handleChat/handleTyping).
+  - **LW-042 (src + SPEC §4):** the `group_state` fold applies the
+    `positionOrDrop` bounds to `playback_position` as CLAMPS — floor 0,
+    ceiling the fold's own `current_media_duration` (absent/non-finite
+    duration invents no ceiling; the ratified non-finite→0 fallback stays) —
+    because §10.2's adoption law feeds the folded value verbatim to every
+    player. New SPEC §4 "State-fold alignment (LW-042)" block; commands keep
+    the drop law.
+  - **LW-043 (src):** a matched pong whose `server_time` is absent or
+    non-finite now COUNTS as a rejection on `onSyncDegraded` (it measured
+    nothing; the silent arm made a broken server look like steady measuring),
+    and the streak resets in `onDisconnect()` / `destroy()` — it is
+    per-connection measurement history. M-SYNCPLAY-13 slot release untouched.
+    Golden moved (disclosed): the "NON-FINITE pong ... degrades nothing" pin
+    flipped to `degrades [1]` with its title rewritten.
+  - **LW-044 (src + SPEC §4 + tests):** Grouped-delivery law — play/pause/
+    seek/sync/queue-broadcast fan-out is room-scoped and carries no
+    attributable room for a client with no group; such frames are refused
+    whole (`'malformed'`, zero union change — the reason already documents
+    non-string ids). Named exceptions with honest ungrouped producers stay
+    live: `error`, `time_sync`/`time_pong`, `group_list`, `chat`, `typing`,
+    `host_elect`, INFO message-frames; a join-announcement INFO names nobody
+    ungrouped (its message half still rides). New SPEC §4 blockquote.
+    Goldens moved (disclosed): the "queue frame outside a group still
+    surfaces" wire-truth pin is RETIRED and flipped to refusal; the
+    leaveGroup-stray-frames teardown pin expects the queue refusal (chat
+    still fires); ~25 playback_sync/queue/command pins across
+    `consolidatedGuards`, `playbackSyncNudge`, `chatQueueFrames`,
+    `specUnitLaw`, `client.test` were seeded with a group so they keep
+    measuring their own law instead of the new gate (self-echo-suppression
+    controls seeded for honesty though they stayed green).
+  - **LW-099-b (attestation, zero touch):** `src/time-sync.ts` NTP offset
+    sign matches the estate law — `offset = serverRecv − clientSend +
+    trunc(oneWay)` byte-parallels phlix-server `TimeSync.php:152` and SPEC
+    §5's `t2 − t1 + oneWay`; already pinned in `time-sync.test`. No change
+    made (owner-ruling territory; crossfe #10 concurs: correct-to-law).
+  - **LW-100 (PARKED, owner-gated):** the hub-relay identity seam
+    (`adoptIdentity`, README "Relay mode") is NOT touched — implementation
+    awaits the owner ruling; recorded in the lane report.
+  - Gates: vitest serial 13f/382P/0F (baseline measured 13f/370P; +12 pins
+    red-first, evidence `/tmp/opencode/w02-L10-red-parent.log`), typecheck
+    and eslint 0, dual-recipe build deterministic ×2 (dist aggregate md5
+    f796fa8b24baac0f818d85d7183c7f78), dist committed fresh.
 - **Fix lane L10 (plan_review register `LW-021`–`LW-026`; reviews
   `syncplay__asphp` #1/#4/#8, `syncplay__crossfe` #1/#6/#9/#11,
   `syncplay__docmaint` #1/#3/#5/#6/#7, 2026-11-03) — README reconnect recipe

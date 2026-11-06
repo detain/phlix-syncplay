@@ -221,6 +221,7 @@ describe('M-SYNCPLAY-11 — inbound syncplay_chat fires onChat', () => {
 describe('M-SYNCPLAY-11 — inbound syncplay_playback_queue fires onQueueChanged', () => {
   it('a server-byte queue broadcast delivers full four-field items verbatim', () => {
     const h = makeHarness();
+    feedGroupState(h, []); // LW-044: room-scoped fan-out — seeded room, empty prior queue
     h.client.handleIncoming(SERVER_QUEUE_FRAME);
 
     // RED before the fix: the PLAYBACK_QUEUE arm shared the silent `break;`.
@@ -242,6 +243,7 @@ describe('M-SYNCPLAY-11 — inbound syncplay_playback_queue fires onQueueChanged
 
   it('hub-relay items keep per-carrier truth: media_id + media_info only, added_* absent', () => {
     const h = makeHarness();
+    feedGroupState(h, []); // LW-044: seeded room
     h.client.handleIncoming(HUB_QUEUE_FRAME);
 
     expect(h.queues[0]).toHaveLength(2);
@@ -314,11 +316,15 @@ describe('M-SYNCPLAY-11 — inbound syncplay_playback_queue fires onQueueChanged
     expect(h.client.getGroup()!.queue![0]!.media_id).toBe('media_43');
   });
 
-  it('a queue frame outside a group still surfaces (wire truth) without a cached fold', () => {
+  it('LW-044: a queue frame outside a group is REFUSED — no event without a room', () => {
     const h = makeHarness();
     h.client.handleIncoming(SERVER_QUEUE_FRAME);
 
-    expect(h.queues).toHaveLength(1);
+    // The old law surfaced the items anyway ("wire truth"). LW-044's
+    // Grouped-delivery law (SPEC §4) retires it: the broadcast is room-scoped
+    // fan-out, and an ungrouped receipt is post-leave in-flight delivery —
+    // unattributable, refused whole like the command family.
+    expect(h.queues).toHaveLength(0);
     expect(h.client.getGroup()).toBeNull();
   });
 });
@@ -388,7 +394,10 @@ describe('M-SYNCPLAY-11 — sendChat / sendTyping reach the wire', () => {
       h.client.handleIncoming(SERVER_CHAT_FRAME);
       h.client.handleIncoming(SERVER_QUEUE_FRAME);
       expect(h.chats).toHaveLength(1);
-      expect(h.queues).toHaveLength(1);
+      // LW-044: chat has honest ungrouped producers and still rides; the
+      // room-scoped queue broadcast is now refused post-teardown — the
+      // no-resurrection law gained teeth (previously it surfaced anyway).
+      expect(h.queues).toHaveLength(0);
       expect(h.client.getGroup()).toBeNull();
       vi.advanceTimersByTime(10_000);
       expect(vi.getTimerCount()).toBe(0);

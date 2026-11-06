@@ -237,6 +237,28 @@ All field names are **snake_case**.
 > field's "useful for clamping" note in §4.1 is now enforced, not advisory).
 > The as-of reference for a `group_state` position remains unstamped — that
 > half is §10.2's join catch-up clause, an OPEN decision.
+>
+> **State-fold alignment (LW-042).** The `group_state` fold applies the same
+> bounds to `playback_position` with CLAMPS instead of drops: floor at 0,
+> ceiling at the fold's own `current_media_duration` (absent or non-finite
+> duration → the ratified fallback 0 stays; no ceiling is invented). Commands
+> drop because a malformed command frame has no honest producer; the state
+> fold clamps because §10.2's adoption law feeds the folded value verbatim to
+> every player — a clamped entry position is honest UX where a dropped state
+> would freeze the whole room.
+>
+> **Grouped-delivery law (LW-044).** `syncplay_playback_play`,
+> `syncplay_playback_pause`, `syncplay_playback_seek`, `syncplay_playback_sync`
+> and `syncplay_playback_queue` are room-scoped fan-out whose frames carry no
+> group the receiver must not already have — the echo shapes above omit
+> `group_id`, membership is implicit in the broadcast. A client with no group
+> refuses them whole through `onFrameDropped('malformed')`: post-leave
+> in-flight delivery is unattributable, and applying it (or defaulting its
+> identity to empty) mints state for a room the client is not in. Named
+> exceptions with honest ungrouped producers stay live: `error`,
+> `time_sync`/`time_pong`, `group_list`, `chat`, `typing`, `host_elect`, and
+> INFO message-frames; a join-announcement INFO names nobody until the
+> receiver has a group (its message half still rides).
 
 ### 4.1 Group management
 
