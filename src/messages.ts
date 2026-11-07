@@ -261,16 +261,18 @@ export interface PlaybackSeekPayload {
  * One playback-queue entry, exactly as the live producers emit it.
  *
  * `:8097` `phlix-server`: `GroupState::getState()` nests `$this->playbackQueue`
- * under `group_state.group.queue` (`GroupState.php:970`) and
- * `SyncPlayManager.php:1271-1273` broadcasts the same array under
- * `syncplay_playback_queue`; items are built by `GroupState::addToQueue()`
- * (`GroupState.php:812-817`): `media_id` + `media_info` (title, thumbnail, …)
+ * under `group_state.group.queue` (`GroupState.php:1081`, inside `getState()`
+ * from :1059, @c904aa4d), and `SyncPlayManager.php:1295-1297` (@c904aa4d)
+ * broadcasts the same array under `syncplay_playback_queue`; items are built
+ * by `GroupState::addToQueue()` (`GroupState.php:921-926`, @c904aa4d):
+ * `media_id` + `media_info` (title, thumbnail, …)
  * + `added_at` (UNIX seconds, `time()`) + `added_by` (the host member id at
  * enqueue time, nullable — `hostId` may be null).
  *
  * `:8804` `phlix-hub` relay: items are narrowed to `media_id` + `media_info`
- * ONLY (`SyncPlayRelayWorker.php:1713-1747`, emitted at :1401 and :1764) — on
- * that carrier `added_at`/`added_by` are ABSENT, never zeroed.
+ * ONLY (`SyncPlayRelayWorker.php:2319-2347`, @8913ae11; the narrowed array is
+ * emitted at :1959 and :2367-2369) — on that carrier `added_at`/`added_by`
+ * are ABSENT, never zeroed.
  */
 export interface PlaybackQueueItem {
   media_id: string;
@@ -320,20 +322,21 @@ export interface PlaybackSyncNudge {
   direction?: PlaybackSyncNudgeDirection;
   /**
    * Recommended playRate correction: `1 ± GroupState::NUDGE_RATE_STEP`
-   * (step 0.1, phlix-server `GroupState.php:167`), i.e. 1.1 when behind,
+   * (step 0.1, phlix-server `GroupState.php:179` @c904aa4d), i.e. 1.1 when behind,
    * 0.9 when ahead (:1579-1581).
    */
   suggested_rate?: number;
   /**
    * The group's position tolerance the in-sync verdict was judged
    * against (:1582 → `GroupState::getPositionTolerance()`; default
-   * `POSITION_TOLERANCE` = 2000 ms, `GroupState.php:124`).
+   * `POSITION_TOLERANCE` = 2000 ms, `GroupState.php:136` @c904aa4d).
    */
   tolerance_ms?: number;
   /**
    * Minimum spacing before the SAME member can be nudged again —
-   * `GroupState::NUDGE_COOLDOWN_MS` = 1000 ms (`GroupState.php:145`,
-   * slot claim `SyncPlayManager.php:1561`, consumed on the wire at :1583).
+   * `GroupState::NUDGE_COOLDOWN_MS` = 1000 ms (`GroupState.php:157`,
+   * @c904aa4d; slot claim `SyncPlayManager.php:1561`, consumed on the
+   * wire at :1583).
    */
   cooldown_ms?: number;
 }
@@ -424,7 +427,8 @@ export interface ChatBroadcastPayload {
  * payload carries EXACTLY ONE key beyond the envelope:
  *  - `:8097` phlix-server `SyncPlayManager::handlePlaybackQueue` broadcast
  *    :1271-1273 (@84e55800): `queue` = `GroupState::getPlaybackQueue()` —
- *    full four-field items per `addToQueue()` (`GroupState.php:812-817`:
+ *    full four-field items per `addToQueue()` (`GroupState.php:921-926`,
+ *    @c904aa4d:
  *    `media_id`, `media_info`, `added_at` UNIX seconds, `added_by` nullable).
  *  - `:8804` phlix-hub relay `handleCanonicalPlaybackQueue` broadcast
  *    :1763-1765 (@5731fc79): `queue` with items narrowed to `media_id` +

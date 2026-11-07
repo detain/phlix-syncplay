@@ -54,9 +54,12 @@
  * the audit already proved, verified here at sibling tips phlix-server
  * `c904aa4d3b3dff1dffa7cb4486b3e7511301d3dd` and phlix-hub
  * `8913ae11662810b3ce41f08ea0102e3864d641a4` (window 2026-11-07). Its teeth
- * were proven by executed mutation probes instead: renaming one server const,
- * one hub literal, one SPEC row, or one src entry each reddens exactly its
- * leg — and the vacuity fixtures red at any parser-shape regression.
+ * were proven by executed mutation probes instead: renaming one server const
+ * reddens leg 2, one hub literal reddens leg 3, one SPEC row reddens leg 1,
+ * and a src-entry rename reddens leg 1 ALWAYS — plus legs 2 and 3 whenever
+ * those checkouts are visible (off-estate single-repo CI, where the siblings
+ * skip, sees a src-entry rename in leg 1 only). The vacuity fixtures red at
+ * any parser-shape regression.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  */
@@ -119,8 +122,10 @@ function readTarget(checkout: Checkout, rel: string): string {
 /** Server values: anchored on the const declaration — prose cannot leak in. */
 function serverTypeValues(text: string): string[] {
   return [
-    ...text.matchAll(/public const TYPE_[A-Z][A-Z0-9_]*\s*=\s*'(syncplay_[a-z0-9_]+)'/g),
-  ].map((m) => m[1] as string);
+    ...text.matchAll(
+      /public const TYPE_[A-Z][A-Z0-9_]*\s*=\s*(['"])(syncplay_[a-z0-9_]+)\1/g,
+    ),
+  ].map((m) => m[2] as string);
 }
 
 /** Deterministic PHP comment strip for the hub literal scan (see header). */
@@ -242,6 +247,28 @@ describe('leg 4 — parser vacuity guards (always on)', () => {
       '}',
     ].join('\n');
     expect(serverTypeValues(fixture)).toEqual(['syncplay_group_create', 'syncplay_error']);
+  });
+
+  it('the server parser takes double-quoted const values too — invented consts cannot evade', () => {
+    // w20L6 review Minor: the parser was single-quote-only, so a server const
+    // invented as `public const TYPE_X = "syncplay_x";` was INVISIBLE to leg
+    // 2 — an added constant with no catalog twin then passed the both-
+    // direction set equality it exists to enforce. Double-quoted prose is
+    // still no leak vector: the regex anchors on the const declaration.
+    const fixture = [
+      '<?php',
+      "final class Messages {",
+      '    /** docblock "syncplay_in_docblock" is prose */',
+      '    public const TYPE_GROUP_CREATE = "syncplay_group_create";',
+      "    public const TYPE_ERROR = 'syncplay_error';",
+      '    public const TYPE_UNDELETE = "syncplay_undelete"; // trailing "syncplay_in_line_comment" is prose',
+      '}',
+    ].join('\n');
+    expect(serverTypeValues(fixture)).toEqual([
+      'syncplay_group_create',
+      'syncplay_error',
+      'syncplay_undelete',
+    ]);
   });
 
   it('the hub parser strips comments and takes both quote styles', () => {

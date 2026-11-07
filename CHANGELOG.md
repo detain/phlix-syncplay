@@ -5,6 +5,52 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Review-fix lane w21-L3 (registers `.reviews/2026-11-04/syncplay__docmaint.md`
+  finding 2 = LW-051, + `.reviews/2026-11-08/REVIEW-w20L6syncplay.md` Minors;
+  2026-11-08) — shipped docblock sibling-coordinate re-anchors + dialect-guard
+  hardening; zero wire-semantics change.** (a) LW-051: the `memberId` docblock
+  (`src/client.ts`) and the `PlaybackQueueItem`/queue-broadcast/`PlaybackSyncNudge`
+  docblocks (`src/messages.ts`) cited phlix-server/phlix-hub coordinates that
+  were un-stamped and stale since the register era (measured there at server
+  `9d2a55d3`/hub `c511395d`, drifting ever since). Re-verified every cite line
+  by line against the CURRENT sibling tips and re-anchored with era stamps:
+  server cites at `c904aa4d` (getUserId re-derive sites :1080/:1132/:1178/:1228/:1321,
+  your_id acks :1853/:1909, play rebroadcast :1108-1117, seek :1206-1211,
+  queue broadcast :1295-1297, `GroupState` :1081/:921-926 and the nudge-field
+  consts :179 RATE_STEP / :136 POSITION_TOLERANCE / :157 COOLDOWN — the
+  :145 slot had for two eras been pointing at `SYNC_NUDGE_POLICY_ID`, not the
+  cooldown), hub cites at `8913ae11` (per-connection uuid :694,
+  `generateClientId()` :2766-2779, join-ack `your_id` :2059-2061, later-frame
+  stamps :1954/:2186, queue narrowing :2319-2347 emitted :1959/:2367-2369);
+  the `SyncPlayController.php:173`/`:267`/`:305` numbers still measured true
+  and were kept, with the wording cured (`$memberId = $userId` derived from
+  `$request->userId`, not assigned directly). Era-stamped cites elsewhere (the
+  `@84e55800`/`@5731fc79`/`@f85f48ec` nudge and broadcast clusters) are
+  era-promises and were left verbatim. Residual measured-but-out-of-scope
+  cites named for a future lane: the `sendSeek` throttle docblock's
+  `queue_limit_exceeded` `:1256` (measured today: cap-check :1276, sendError
+  :1280) and `handleSeek` `:1182` (today that range is the auth-guard area;
+  the broadcast sits at :1206-1211), both server `SyncPlayManager.php` @c904aa4d.
+  (b) Guard hardening: the `test/dialectSsot.test.ts` server parser was
+  single-quote-only, so an invented double-quoted `TYPE_*` const in
+  `Messages.php` was invisible to leg 2 — added-constant drift would have
+  passed the both-direction set equality the leg exists to enforce. Cured with
+  a matching-quote backreference; red-first proved by a planted fixture (the
+  pre-cure parser captured 1 of 3 consts). (c) Forward correction, register
+  M5: the w20-L6 bullet's claim that renaming "one src entry ... reddens
+  exactly its leg" overclaimed — src-entry mutations are NOT mode-independent:
+  leg 1 reddens always, and with sibling checkouts visible legs 2 and 3 redden
+  too (off-estate CI sees only leg 1). The guard header prose now says exactly
+  that; the historical bullet stands verbatim per append-only law. Battery:
+  parent 15f/433P+3skip (clean clone at `fd1255c6`) → 15f/434P+3skip
+  (+1 = the new vacuity test, exact), strict 435P+2skip; lint/tsc clean.
+  Shipped-docblock mirror moved the committed dist: deterministic build ×2,
+  all-files aggregate `7a23256d1f23c8f34949dcace4e21c81` →
+  `637c69fc5333e5a9403c79e1a3eccd76` (moved golden, permanent re-pin; the
+  S253-style parity leg re-proves it CI-side); payload
+  `phlix-syncplay.js`/`.umd.cjs` bytes UNMOVED (`f7e19892844ef0a1397a381910a3cd41`
+  / `bfbdc58c60dcc6a8892eed2e3596e573`). Wire union untouched, no new codes,
+  no version bump, no tag.
 - **Drift-guard lane w20-L6 (register `.reviews/2026-11-04/wiring-hub.md`
   I7, 2026-11-07) — syncplay dialect catalog triplication SSOT hardening,
   JS-side live comparator; zero wire-semantics change.** The 19 canonical

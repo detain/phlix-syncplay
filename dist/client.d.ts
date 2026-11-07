@@ -79,7 +79,8 @@ export interface SyncPlayClientOptions {
      * Why two roles collapse into one value: the outbound `member_id` this
      * id stamps on frames is convenience/echo only — a correct server ignores
      * it for identity (phlix-server `SyncPlayManager.php` re-derives
-     * everything from `$connection->getUserId()`, e.g. :1056/:1154/:1297).
+     * everything from `$connection->getUserId()`; e.g. :1080 play, :1132
+     * pause, :1178 seek, :1228 queue, :1321 chat, @c904aa4d).
      * But three LOCAL decisions compare this constructor value against
      * SERVER-STAMPED ids: {@link SyncPlayClient.isHost}
      * (`group.host_id === memberId`) and the play/pause/seek echo
@@ -90,19 +91,21 @@ export interface SyncPlayClientOptions {
      * What the server stamps, per carrier (both-sides verified):
      *  - Direct `:8097` (server WS + REST): the authenticated user id — the
      *    JWT subject. The create/join acks echo it as `your_id` on
-     *    `syncplay_group_state` (`SyncPlayManager.php:1799`, `:1855` —
-     *    `$connection->getUserId()`); REST mutations set
-     *    `$memberId = $request->userId` (`SyncPlayController.php:173`, `:267`,
-     *    `:305` — S289 "identity is the authenticated JWT subject ONLY");
-     *    rebroadcast commands carry the same derived sender id
-     *    (`SyncPlayManager.php:1084-1093` play, `:1182-1187` seek).
+     *    `syncplay_group_state` (`SyncPlayManager.php:1853`, `:1909` —
+     *    `$connection->getUserId()`, @c904aa4d); REST mutations set
+     *    `$memberId = $userId` from `$request->userId`
+     *    (`SyncPlayController.php:173`, `:267`, `:305` @c904aa4d — S289
+     *    "identity is the authenticated JWT subject ONLY"); rebroadcast
+     *    commands carry the same derived sender id
+     *    (`SyncPlayManager.php:1108-1117` play, `:1206-1211` seek, @c904aa4d).
      *    The consumer knows this id BEFORE dialing — it is what the login /
      *    auth layer holds.
      *  - Hub relay `:8804`: a hub-generated PER-CONNECTION uuid
-     *    (phlix-hub `SyncPlayRelayWorker.php:423`, `generateClientId()`
-     *    `:2107-2120`), surfaced as `your_id` on the join ack (`:1486-1491`)
-     *    and used as `member_id`/`host_id` on every later frame (`:1615`,
-     *    `:1796`). It is NOT knowable before the first `group_state` —
+     *    (phlix-hub `SyncPlayRelayWorker.php:694`, `generateClientId()`
+     *    `:2766-2779` @8913ae11), surfaced as `your_id` on the join ack
+     *    (`:2059-2061`) and used as `member_id`/`host_id` on every later
+     *    frame (`:1954` host_id, `:2186` member_id). It is NOT knowable
+     *    before the first `group_state` —
      *    adopt it from `onState`'s `yourId` (the mobile wrapper reconciles
      *    exactly this way: `your_id` is "authoritative for host comparisons",
      *    ctor id is "only the pre-join placeholder claim" — phlix-mobile-client
