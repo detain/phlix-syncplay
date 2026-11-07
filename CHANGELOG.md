@@ -5,6 +5,30 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-08
+
+Release cut for the cascade gate (LW-068). The review→fix campaign since
+v0.1.7 lands seven lanes on master: the SPEC-truth cure wave (`49f11c0`,
+REVIEW-CHANGES Majors 1–2 + minors 3–6), the L10 hygiene wave (`3a52b2b`,
+LW-021–026), w02-L10 (`9268b66`, LW-041–044), w11-L10 plus its fix-forward
+(`930a0d4`/`dfa1fe8`, LW-045–050 — password-hash shape gate, terminal
+`destroy()`, `protocol_version` value mirror, `server_time` trust bound,
+coercion-safe refusal), the dialect-catalog drift guard (`fd1255c6`,
+LW-082-d) and its coordinate-currency follow-through (`c761ab77`, LW-051).
+Zero wire-semantics change across the whole range — no new frame types, no
+new error codes — so the SPEC wire-era stamp (v0.1.6) is deliberately held.
+Unlike v0.1.7's byte-identical-dist premise, the shipped bundle payload
+moved four times inside this range (the `client.ts` guard waves, each
+disclosed by its lane's rebuild row in the entries below); the final era is
+`phlix-syncplay.js` `f7e19892844ef0a1397a381910a3cd41` / `.umd.cjs`
+`bfbdc58c60dcc6a8892eed2e3596e573`. The version literal itself is not baked
+into `dist/` (grep-proven at this commit), so `npm run build` here
+re-proves the committed `dist/` byte-faithful ×2 with zero git-diff — no
+dist-refresh commit. Dual-recipe pins at this line: all-files
+`637c69fc5333e5a9403c79e1a3eccd76`, non-map
+`9ee3a95234580770f21a7e3a4c15347a`. Consumers pinning `#v0.1.7` re-pin to
+`#v0.1.8` in the wave's consumer step, not by this tag.
+
 - **Review-fix lane w21-L3 (registers `.reviews/2026-11-04/syncplay__docmaint.md`
   finding 2 = LW-051, + `.reviews/2026-11-08/REVIEW-w20L6syncplay.md` Minors;
   2026-11-08) — shipped docblock sibling-coordinate re-anchors + dialect-guard

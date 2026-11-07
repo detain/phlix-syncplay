@@ -57,7 +57,7 @@ npm). Pin an exact tag:
 // package.json
 {
   "dependencies": {
-    "@phlix/syncplay": "github:detain/phlix-syncplay#v0.1.7"
+    "@phlix/syncplay": "github:detain/phlix-syncplay#v0.1.8"
   }
 }
 ```
