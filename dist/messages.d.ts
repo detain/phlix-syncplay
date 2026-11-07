@@ -540,11 +540,29 @@ export interface GroupListResponsePayload {
     /** Integer row count, emitted alongside `groups` by both producers. */
     count: number;
 }
+/**
+ * The wire's typed error-name union, re-exported from `@phlix/contracts`
+ * (LW-081, review `syncplay__crossfe` finding 12). The contracts source is
+ * the single definition — `src/errors.ts` `SyncPlayErrorCode` = legacy
+ * SCREAMING 12 ∪ dotted twins 8 = 20 names measured at `#v0.5.7` — and this
+ * line is a pure TYPE re-export: it is erased at build (both JS bundles stay
+ * byte-identical; `test/errorCodeUnion.test.ts` L1/L2/L3 pin that lineage,
+ * the catalogue equality and the shipped `dist/messages.d.ts`). It exists so
+ * consumers type-switch on `error_code` while importing only this package.
+ * `error_code` itself deliberately keeps the free-`string` wire typing below
+ * and in `SyncPlayClientOptions.onError` (parse-don't-validate on an external
+ * wire; the client's `'UNKNOWN'` fallback sentinel is intentionally NOT a
+ * union member).
+ */
+export type { SyncPlayErrorCode } from '@phlix/contracts';
 /** ERROR message (Messages::error). */
 export interface ErrorPayload {
     /** Live emitters set ONLY `error_code` (`Messages::error` delegates even
      *  `SyncPlayManager::sendError` to it); `code` below is the RETIRED
-     *  historical field name — read last, for tolerance of stale senders. */
+     *  historical field name — read last, for tolerance of stale senders.
+     *  The advertised names are typed by {@link SyncPlayErrorCode} (re-export
+     *  above); the field stays `string` because the wire must tolerate any
+     *  future server-emitted code. */
     error_code?: string;
     code?: string;
     message: string;

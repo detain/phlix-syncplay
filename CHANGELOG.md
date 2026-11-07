@@ -5,6 +5,41 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- LW-081 (review `syncplay__crossfe` finding 12; lane w23-L1): `messages.ts`
+  now re-exports the contracts wire union `SyncPlayErrorCode`
+  (`@phlix/contracts#v0.5.7` `src/errors.ts`: legacy SCREAMING 12 ∪ dotted
+  twins 8 = 20 names measured at the tag — the finding's "19" is the stale
+  v0.5.3-era count, `queue_limit_exceeded` made it 20) as a pure TYPE
+  re-export, so consumers type-switch on `error_code` while importing only
+  this package. `ErrorPayload.error_code` and `SyncPlayClientOptions.onError`
+  docblocks state the lineage; both fields STAY free-`string`
+  (parse-don't-validate on an external wire; the client `'UNKNOWN'` fallback
+  sentinel is deliberately outside the union). `@phlix/contracts` is a DEV
+  dependency only (`github:detain/phlix-contracts#v0.5.7`, resolves to tag
+  peel `bedfe69b`): the shipped artifact keeps its zero-runtime-dependency
+  identity and the CI `npm audit --omit=dev` leg measures 0 vulnerabilities.
+  New `test/errorCodeUnion.test.ts` (3 cases): L1 package-name ↔ direct
+  contracts union equality, compile-time only — the self-reference resolves
+  through the COMMITTED `dist/*.d.ts`, so a removed or never-rebuilt
+  re-export reddens `npm run typecheck`; L2 runtime equality of the contracts
+  catalogue `SYNCPLAY_ERROR_CODES` against the 20-name era pin (drift reddens
+  both directions); L3 the committed `dist/messages.d.ts` ships the
+  re-export and `dist/index.d.ts` keeps the `export * from './messages'`
+  carrier. Runtime payload UNMOVED — `phlix-syncplay.js`
+  `f7e19892844ef0a1397a381910a3cd41` / `.umd.cjs`
+  `bfbdc58c60dcc6a8892eed2e3596e573` byte-identical (the re-export is erased
+  at build). Declaration files and their source-maps moved, so both
+  dual-recipe aggregates move — PERMANENT re-pin, determinism ×2 measured at
+  this line: all-files `09bda2def591101a8c0327909cf75539` (was
+  `637c69fc5333e5a9403c79e1a3eccd76`), non-map
+  `b2a95718f9ac1f8cd5a4046690990f98` (was `9ee3a95234580770f21a7e3a4c15347a`).
+  Battery 15f/434P+3skip → 16f/437P+3skip (strict 435P+2skip → 438P+2skip);
+  +1 file / +3 cases, all attributed to this lane. Folded `w20-L6` banked
+  rows re-attested already-cured at `c761ab77` (matching-quote parser
+  `test/dialectSsot.test.ts:123-129`; mode-qualified probe prose :56-62) —
+  zero new change. SPEC wire-era stamp (v0.1.6) held: no wire-semantics
+  change, no new error codes.
+
 ## [0.1.8] - 2026-11-08
 
 Release cut for the cascade gate (LW-068). The review→fix campaign since

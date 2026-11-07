@@ -253,6 +253,11 @@ export interface SyncPlayClientOptions {
    * structured "by how much / what limit" context used to die at this
    * boundary). `undefined` when the frame carried none or the value was not a
    * plain object (drop-the-garbage law; an array reads as garbage).
+   * `_code` is typed `string` on the wire-tolerance law (see
+   * `ErrorPayload.error_code`); the advertised names are the
+   * {@link SyncPlayErrorCode} union re-exported from `messages.ts`
+   * (LW-081) — consumers may narrow with it, but `handleError`'s `'UNKNOWN'`
+   * fallback sentinel stays outside the union by design.
    */
   onError?: (
     _code: string,
