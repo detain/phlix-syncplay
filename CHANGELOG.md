@@ -5,6 +5,41 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Drift-guard lane w20-L6 (register `.reviews/2026-11-04/wiring-hub.md`
+  I7, 2026-11-07) — syncplay dialect catalog triplication SSOT hardening,
+  JS-side live comparator; zero wire-semantics change.** The 19 canonical
+  `syncplay_*` names are transcribed three times (this repo's `src/messages.ts`
+  + SPEC §3 table, phlix-server `Messages::TYPE_*`, phlix-hub quoted literals
+  under `src/SyncPlay/`); the audit proved the three-way set diff EMPTY but
+  nothing compared the legs mechanically — a rename on any leg surfaced as a
+  runtime mismatch, not a red test (contrast the settings ALLOWED_KEYS and
+  MCP-scopes live comparators). New `test/dialectSsot.test.ts` ships the
+  missing comparator: leg 1 pins SPEC §3 ↔ catalog as a SET always (previously
+  row-by-row only); legs 2/3 parse the sibling PHP checkouts live
+  (`PHLIX_SERVER_REPO`/`PHLIX_HUB_REPO`, else estate `../` siblings) with
+  const-anchored server capture, comment-stripped hub capture, both-direction
+  set equality, zero-capture vacuity reds, and a moved-target fail-loud; a set
+  but invalid env path throws at collection. Off-estate the legs skip LOUDLY
+  (self-named skip tests; repo CI never claims cross-repo verification) and
+  `PHLIX_DIALECT_GUARD_STRICT=1` flips invisible checkouts red for one-machine
+  estate sweeps. Parser self-tests on synthetic fixtures guard the guards.
+  Teeth proven by executed mutation probes: a server rename+invention reddened
+  exactly the server leg; a hub rename exactly the hub leg; a SPEC row mutation
+  and a catalog deletion each reddened exactly leg 1; const-shape rot tripped
+  the vacuity assert; a moved target threw the guidance error; strict mode with
+  both checkouts absent went red listing them. Battery: parent 14f/427P (clean
+  clone at `dfa1fe85`) → 15f/433P+3skip in both modes (CI-emulation clone =
+  always-legs + loud skips; estate tree = cross-repo legs genuinely ran green
+  at server tip `c904aa4d` / hub tip `8913ae11`). `src/messages.ts` gains the
+  docblock note naming the mechanical pin — the shipped `dist/messages.d.ts`
+  and the two maps carry it, payload `phlix-syncplay.js`/`.umd.cjs` bytes
+  UNMOVED; committed dist re-vendored, deterministic build ×2 aggregate md5
+  `7a23256d1f23c8f34949dcace4e21c81` (moved golden, permanent re-pin from the
+  `0bacb877a82446ca5a28669a92c5c7b0` parent-era aggregate — the S253-style
+  parity leg re-proves it CI-side). Wire union untouched, no new codes, no
+  version bump, no tag; the PHP-side half of this family (shared canonical
+  catalog module + hub live import + server cite comments) lands in the same
+  commit group in its sibling lanes.
 - **Fix-forward lane w11-L10-R (register `.reviews/2026-11-07/
   REVIEW-w11L10syncplay.md`, verdict PATCH-FIRST; 2026-11-07) — forward
   correction of the LW-045 case-fold claim + two hygiene cures; zero

@@ -8,7 +8,11 @@
  *
  * This is the SHARED, CANONICAL mirror of the PHP server's
  * `src/Session/SyncPlay/Messages.php`. Every message type string and every
- * wire field name (snake_case) must match the server byte-for-byte.
+ * wire field name (snake_case) must match the server byte-for-byte — and the
+ * match is mechanically pinned: `test/dialectSsot.test.ts` set-compares this
+ * catalog against the SPEC §3 table and, whenever the sibling checkouts are
+ * visible, against the server's `TYPE_*` constants and the hub relay's wire
+ * literals (strict mode `PHLIX_DIALECT_GUARD_STRICT=1`).
  *
  * Canonical decisions (see SPEC.md for the full rationale):
  * - Every message `type` is prefixed `syncplay_` with an UNDERSCORE separator.
