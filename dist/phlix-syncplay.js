@@ -229,17 +229,17 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	static parseSeekThrottleMs(e) {
 		if (e === void 0) return x;
-		if (typeof e != "number" || !Number.isFinite(e) || e < 0) throw TypeError(`SyncPlayClient: seekThrottleMs must be a finite number >= 0 (0 disables the seek coalescing throttle), got ${String(e)}`);
+		if (typeof e != "number" || !Number.isFinite(e) || e < 0 || e > 2147483647) throw TypeError(`SyncPlayClient: seekThrottleMs must be a finite number in [0, 2147483647] (0 disables the seek coalescing throttle), got ${String(e)}`);
 		return e;
 	}
 	static parsePasswordHash(e) {
 		if (e !== void 0) {
-			if (typeof e != "string" || !/^([0-9a-f]{64})$/.test(e)) {
-				let t = typeof e == "string" ? ` of length ${e.length}` : "";
-				throw TypeError(`SyncPlayClient: passwordHash must be undefined or 64 lowercase hex characters (unsalted SHA-256 hex; SPEC §4/§8.2, canonical form of the server gate SyncPlayManager::groupPasswordGate) — this library ships canonical form only: a present-but-malformed value is refused as a local fail-fast (stricter than the server, whose gate case-folds before matching) and is never shipped or coerced. Got a ${typeof e}${t}.`);
-			}
+			if (typeof e != "string" || !/^([0-9a-f]{64})$/.test(e)) throw TypeError(`SyncPlayClient: passwordHash must be undefined or 64 lowercase hex characters (unsalted SHA-256 hex; SPEC §4/§8.2, canonical form of the server gate SyncPlayManager::groupPasswordGate) — this library ships canonical form only: a present-but-malformed value is refused as a local fail-fast (stricter than the server, whose gate case-folds before matching) and is never shipped or coerced. Got a ${typeof e}.`);
 			return e;
 		}
+	}
+	static assertPosition(e, t) {
+		if (typeof t != "number" || !Number.isFinite(t) || t < 0) throw TypeError(`SyncPlayClient: ${e} must be a finite number >= 0, got ${typeof t == "number" ? String(t) : typeof t}`);
 	}
 	getTimeSync() {
 		return this.timeSync;
@@ -285,27 +285,27 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			member_id: this.memberId
 		}), !0;
 	}
-	sendPlay(t) {
-		return this.group !== null && (this.dispatch(e.PLAYBACK_PLAY, {
+	sendPlay(n) {
+		return t.assertPosition("position", n), this.group !== null && (this.dispatch(e.PLAYBACK_PLAY, {
 			group_id: this.group.group_id,
 			member_id: this.memberId,
-			position: t,
+			position: n,
 			server_time: this.getSynchronizedTime()
 		}), !0);
 	}
-	sendPause(t) {
-		return this.group !== null && (this.dispatch(e.PLAYBACK_PAUSE, {
+	sendPause(n) {
+		return t.assertPosition("position", n), this.group !== null && (this.dispatch(e.PLAYBACK_PAUSE, {
 			group_id: this.group.group_id,
 			member_id: this.memberId,
-			position: t,
+			position: n,
 			server_time: this.getSynchronizedTime()
 		}), !0);
 	}
-	sendSeek(e, t) {
-		return this.group === null ? !1 : this.seekWindowOpen ? (this.pendingSeek = {
+	sendSeek(e, n) {
+		return t.assertPosition("fromPosition", e), t.assertPosition("toPosition", n), this.group === null ? !1 : this.seekWindowOpen ? (this.pendingSeek = {
 			from: e,
-			to: t
-		}, !0) : (this.dispatchSeek(e, t), this.seekThrottleMs > 0 && !this.seekWindowOpen && this.openSeekWindow(), !0);
+			to: n
+		}, !0) : (this.dispatchSeek(e, n), this.seekThrottleMs > 0 && !this.seekWindowOpen && this.openSeekWindow(), !0);
 	}
 	dispatchSeek(t, n) {
 		this.group !== null && this.dispatch(e.PLAYBACK_SEEK, {
@@ -321,8 +321,10 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			try {
 				this.closeSeekWindow();
 			} catch (n) {
-				var e, t;
-				(e = (t = this.options).onFrameDropped) == null || e.call(t, "send-failed", null);
+				try {
+					var e, t;
+					(e = (t = this.options).onFrameDropped) == null || e.call(t, "send-failed", null);
+				} catch (e) {}
 			}
 		}, this.seekThrottleMs);
 	}
@@ -334,12 +336,12 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	cancelSeekCoalescing() {
 		this.pendingSeek = null, this.seekFlushTimer !== null && (clearTimeout(this.seekFlushTimer), this.seekFlushTimer = null), this.seekWindowOpen = !1;
 	}
-	reportPosition(t, n) {
-		return this.group !== null && (this.dispatch(e.PLAYBACK_SYNC, {
+	reportPosition(n, r) {
+		return t.assertPosition("position", n), this.group !== null && (this.dispatch(e.PLAYBACK_SYNC, {
 			group_id: this.group.group_id,
 			member_id: this.memberId,
-			position: t,
-			is_playing: n,
+			position: n,
+			is_playing: r,
 			server_time: this.getSynchronizedTime()
 		}), !0);
 	}
@@ -582,7 +584,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 				});
 			}
 		}
-		(n = (r = this.options).onState) == null || n.call(r, this.group, i.your_id);
+		(n = (r = this.options).onState) == null || n.call(r, this.group, typeof i.your_id == "string" ? i.your_id : void 0);
 	}
 	handlePlayback(e, n) {
 		var r, i;

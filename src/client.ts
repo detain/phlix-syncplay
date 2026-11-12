@@ -509,9 +509,11 @@ export class SyncPlayClient {
     if (raw === undefined) {
       return DEFAULT_SEEK_THROTTLE_MS;
     }
-    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+    // SPY-15: ceiling = 2^31-1 ms — setTimeout coerces larger delays to 1ms
+    // (a tight loop instead of a throttle), so refuse them at the boundary.
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > 2147483647) {
       throw new TypeError(
-        `SyncPlayClient: seekThrottleMs must be a finite number >= 0 ` +
+        `SyncPlayClient: seekThrottleMs must be a finite number in [0, 2147483647] ` +
           `(0 disables the seek coalescing throttle), got ${String(raw)}`,
       );
     }
@@ -553,7 +555,8 @@ export class SyncPlayClient {
       // fabricated shape fact. Length is a property of strings, so only the
       // string arm states it; every other runtime value is disclosed by
       // typeof alone, never coerced.
-      const lengthFact = typeof raw === 'string' ? ` of length ${raw.length}` : '';
+      // SPY-14: the string arm no longer states its length either — a
+      // near-miss credential's length is a secret-shape fact; typeof only.
       throw new TypeError(
         'SyncPlayClient: passwordHash must be undefined or 64 lowercase hex ' +
           'characters (unsalted SHA-256 hex; SPEC §4/§8.2, canonical form of ' +
@@ -561,10 +564,24 @@ export class SyncPlayClient {
           'ships canonical form only: a present-but-malformed value is ' +
           'refused as a local fail-fast (stricter than the server, whose gate ' +
           'case-folds before matching) and is never shipped or coerced. Got a ' +
-          `${typeof raw}${lengthFact}.`,
+          `${typeof raw}.`,
       );
     }
     return raw;
+  }
+
+  /**
+   * SPY-16: outbound position guard (mirror of the inbound finite law) —
+   * a position that is not a finite number >= 0 is a caller bug that would
+   * serialize to `null` (NaN/Infinity) or a negative on the wire. Throw
+   * before any state change or dispatch.
+   */
+  private static assertPosition(name: string, value: number): void {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new TypeError(
+        `SyncPlayClient: ${name} must be a finite number >= 0, got ${typeof value === 'number' ? String(value) : typeof value}`,
+      );
+    }
   }
 
   // --- Accessors -----------------------------------------------------------
@@ -707,6 +724,7 @@ export class SyncPlayClient {
    * that the server accepted it — the receipt story is the echo/error lane.
    */
   sendPlay(position: number): boolean {
+    SyncPlayClient.assertPosition('position', position);
     if (this.group === null) {
       return false;
     }
@@ -721,6 +739,7 @@ export class SyncPlayClient {
 
   /** Host command: pause at `position` (ms). Boolean law per {@link sendPlay}. */
   sendPause(position: number): boolean {
+    SyncPlayClient.assertPosition('position', position);
     if (this.group === null) {
       return false;
     }
@@ -752,6 +771,8 @@ export class SyncPlayClient {
    * `'send-failed'` on {@link SyncPlayClientOptions.onFrameDropped}).
    */
   sendSeek(fromPosition: number, toPosition: number): boolean {
+    SyncPlayClient.assertPosition('fromPosition', fromPosition);
+    SyncPlayClient.assertPosition('toPosition', toPosition);
     if (this.group === null) {
       return false;
     }
@@ -800,7 +821,13 @@ export class SyncPlayClient {
       try {
         this.closeSeekWindow();
       } catch {
-        this.options.onFrameDropped?.('send-failed', null);
+        // SPY-20: the report seam is consumer code on a bare timer — a throw
+        // from it must not escape as an uncaught setTimeout exception.
+        try {
+          this.options.onFrameDropped?.('send-failed', null);
+        } catch {
+          // swallowed by design: nowhere left to report.
+        }
       }
     }, this.seekThrottleMs);
   }
@@ -854,6 +881,7 @@ export class SyncPlayClient {
    * pacing is an integration convention, never an authorization precondition.
    */
   reportPosition(position: number, isPlaying: boolean): boolean {
+    SyncPlayClient.assertPosition('position', position);
     if (this.group === null) {
       return false;
     }
@@ -1671,7 +1699,10 @@ export class SyncPlayClient {
     // naming it (SPEC §9; coupling law + mismatch UX documented on
     // {@link SyncPlayClientOptions.memberId}). Consumers own the
     // `yourId === getMemberId()` assertion.
-    this.options.onState?.(this.group, payload.your_id);
+    this.options.onState?.(
+      this.group,
+      typeof payload.your_id === 'string' ? payload.your_id : undefined,
+    );
   }
 
   private handlePlayback(type: 'play' | 'pause', msg: RawMessage): void {

@@ -590,3 +590,68 @@ describe('m22 — a backward wall-clock step cannot wedge the single-flight slot
     expect(h.sent.filter((m) => m.type === 'syncplay_time_ping')).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------- SPY-S11
+
+describe('SPY-S11 — boundary coercion sweep', () => {
+  const base = () => ({ send: () => {}, memberId: 'me', now: () => 1000 });
+
+  it('SPY-13: non-string your_id folds to undefined (absent-semantic)', () => {
+    const states: Array<string | undefined> = [];
+    const c = new SyncPlayClient({ ...base(), onState: (_g, id) => states.push(id) });
+    c.handleIncoming({ ...JOINED_GROUP, your_id: 42 } as unknown as RawMessage);
+    expect(states).toEqual([undefined]);
+  });
+
+  it('SPY-14: password refusal never states a length', () => {
+    let msg = '';
+    try {
+      new SyncPlayClient(base()).createGroup('G', 'abc');
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain('Got a string.');
+    expect(msg).not.toContain('length');
+  });
+
+  it('SPY-15: seekThrottleMs ceiling 2^31-1 (dataset rows)', () => {
+    for (const v of [2147483648, 1e12]) {
+      expect(() => new SyncPlayClient({ ...base(), seekThrottleMs: v })).toThrow(TypeError);
+    }
+    expect(() => new SyncPlayClient({ ...base(), seekThrottleMs: 2147483647 })).not.toThrow();
+  });
+
+  it('SPY-20: onFrameDropped throwing inside the flush timer is swallowed', async () => {
+    let sends = 0;
+    const c = new SyncPlayClient({
+      send: () => {
+        sends += 1;
+        if (sends > 1) throw new Error('x');
+      },
+      memberId: 'me',
+      now: () => 1000,
+      seekThrottleMs: 5,
+      onFrameDropped: () => {
+        throw new Error('report exploded');
+      },
+    });
+    c.handleIncoming(JOINED_GROUP);
+    c.sendSeek(0, 1);
+    c.sendSeek(1, 2);
+    await new Promise((r) => setTimeout(r, 25)); // an escape would fail the run
+    expect(sends).toBe(2);
+  });
+
+  it('SPY-16: outbound positions must be finite and >= 0', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(JOINED_GROUP);
+    for (const bad of [NaN, Infinity, -1, '5' as unknown as number]) {
+      expect(() => h.client.sendPlay(bad)).toThrow(TypeError);
+      expect(() => h.client.sendPause(bad)).toThrow(TypeError);
+      expect(() => h.client.sendSeek(0, bad)).toThrow(TypeError);
+      expect(() => h.client.sendSeek(bad, 0)).toThrow(TypeError);
+      expect(() => h.client.reportPosition(bad, true)).toThrow(TypeError);
+    }
+    expect(h.sent.filter((m) => m.type !== 'syncplay_time_ping')).toHaveLength(0);
+  });
+});

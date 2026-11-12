@@ -465,6 +465,13 @@ export declare class SyncPlayClient {
      * must not be echoed into logs.
      */
     private static parsePasswordHash;
+    /**
+     * SPY-16: outbound position guard (mirror of the inbound finite law) —
+     * a position that is not a finite number >= 0 is a caller bug that would
+     * serialize to `null` (NaN/Infinity) or a negative on the wire. Throw
+     * before any state change or dispatch.
+     */
+    private static assertPosition;
     /** The TimeSync instance (for status/offset queries). */
     getTimeSync(): TimeSync;
     /** The current group, or null if not in one. */
