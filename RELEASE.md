@@ -25,6 +25,10 @@ artifact, so the ritual below is not optional.
    `git push origin refs/tags/vX.Y.Z` (plain single-refname tag push; never
    `--tags`), then `git ls-remote --tags origin | grep vX.Y.Z` to confirm the
    tag object and its peel.
+   Manifest note: `peerDependencies` (`@phlix/contracts: "*"`, optional) and the
+   absence of `engines` are deliberate — see README "Install". `files: ["dist"]`
+   keeps the manifest independent of the build; verify with
+   `npm pack --dry-run`.
 7. **Consumer cascade**: ui re-pins, then mobile/tizen/windows rotate their
    contract pins per each repo's era-test law; server/hub rotate the
    `@phlix/contracts`-embedded fixtures only if error codes moved. The README

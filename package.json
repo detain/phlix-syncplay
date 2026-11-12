@@ -37,9 +37,14 @@
     "vite": "^8.0.16",
     "vitest": "^5.0.1"
   },
-  "//engines": "The published dist is dependency-free ES for browser + Node WebSocket consumers; this floor tracks the dev/test toolchain — vitest ^5 requires node ^22.12.0 || ^24.0.0 || >=26.0.0 and vite ^8 requires ^20.19.0 || >=22.12.0, so 22.12.0 is their common floor (measured from the installed manifests, 2026-11-06).",
-  "engines": {
-    "node": ">=22.12.0"
+  "//peerDependencies": "dist/index.d.ts re-exports types from @phlix/contracts, so type-checking consumers need it installed. The range is \"*\" because contracts is distributed via the github: protocol (github:detain/phlix-contracts#vX.Y.Z), which semver ranges cannot match; each consumer pins the exact contracts tag directly. Optional: the runtime bundle never imports it.",
+  "peerDependencies": {
+    "@phlix/contracts": "*"
+  },
+  "peerDependenciesMeta": {
+    "@phlix/contracts": {
+      "optional": true
+    }
   },
   "repository": {
     "type": "git",

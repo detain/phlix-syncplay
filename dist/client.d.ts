@@ -193,8 +193,8 @@ export interface SyncPlayClientOptions {
      * {@link SyncPlayClient.destroy} does NOT reset it (every reader sits
      * behind the terminal latch, so a reset there would be unreadable). The
      * library deliberately picks no "degraded" threshold — after N rejections
-     * is consumer policy (spinner copy, retry pacing, transport hint). Observes what was already true at
-     * the boundary; changes no sync math.
+     * is consumer policy (spinner copy, retry pacing, transport hint).
+     * Observes what was already true at the boundary; changes no sync math.
      */
     onSyncDegraded?: (_consecutiveRejections: number) => void;
     onPlaybackCommand?: (_command: PlaybackCommand) => void;
