@@ -296,6 +296,29 @@ per-intent, not per-key-event.** How that is met per sender:
   carried no array (dropped whole). Refusals (`syncplay.queue_limit_exceeded`,
   `NOT_HOST`) come through `onError`, never here.
 
+### Computing `password_hash`
+
+You hash the group password **client-side** and pass the digest to
+`createGroup` / `joinGroup` as `password_hash`. The recipe is fixed by
+[`SPEC.md` §8.2](./SPEC.md): **unsalted SHA-256** of the password's **UTF-8**
+bytes, encoded as **64 lowercase hex characters**. The server compares the
+digest verbatim and rejects anything that is not `^[0-9a-f]{64}$` (it does not
+re-hash or case-fold), so an uppercase or base64 digest will never match. It is
+a replayable weak group gate, never an identity (SPEC §8.2).
+
+```ts
+// Browser / any runtime with Web Crypto
+async function passwordHash(password: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Node
+import { createHash } from 'node:crypto';
+const passwordHashNode = (password: string): string =>
+  createHash('sha256').update(password, 'utf8').digest('hex');
+```
+
 ### Reconnect recovery
 
 This library owns **no socket and no periodic timers** — your transport opens,
