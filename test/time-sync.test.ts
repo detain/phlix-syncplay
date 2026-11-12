@@ -704,6 +704,15 @@ describe('TimeSync.getSampleAgeMs — sample freshness (W-min124 M-SYNCPLAY-14, 
     expect(ts.getSampleAgeMs()).toBe(0);
   });
 
+  it('clamps at 0 across a BACKWARD clock step (never a negative age; m22 precedent)', () => {
+    const clock = makeClock(10000);
+    const ts = new TimeSync(clock.now);
+    ts.addSample(10000, 10100, 10100, 10001);
+    clock.set(4000); // wall clock stepped back 6s
+    expect(ts.getSampleAgeMs()).toBeGreaterThanOrEqual(0);
+    expect(ts.getSampleAgeMs()).toBe(0);
+  });
+
   it('a rejected addSample refreshes nothing (garbage earns no timestamp)', () => {
     const clock = makeClock(1000);
     const ts = new TimeSync(clock.now);

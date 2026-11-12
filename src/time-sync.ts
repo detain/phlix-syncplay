@@ -413,13 +413,18 @@ export class TimeSync {
    * Scale note: `OffsetSample.timestamp` stores SECONDS (the `now() / 1000`
    * drift bridge, see {@link addSample}); this accessor converts back, so
    * its output is ms like every other public number here.
+   *
+   * Clamped at 0: a BACKWARD wall-clock step (NTP correction, manual clock
+   * change) would otherwise yield a negative age, which consumers comparing
+   * against a freshness bound read as "fresher than fresh". Same discipline
+   * as the CONSOLIDATED m22 backward-step clamp in `client.ts`.
    */
   getSampleAgeMs(): number | null {
     const last = this.samples[this.samples.length - 1];
     if (last === undefined) {
       return null;
     }
-    return this.now() - last.timestamp * 1000;
+    return Math.max(0, this.now() - last.timestamp * 1000);
   }
 
   /** Snapshot of current sync state (parallels TimeSync::getStatus). */

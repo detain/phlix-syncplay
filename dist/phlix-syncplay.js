@@ -211,7 +211,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	getSampleAgeMs() {
 		let e = this.samples[this.samples.length - 1];
-		return e === void 0 ? null : this.now() - e.timestamp * 1e3;
+		return e === void 0 ? null : Math.max(0, this.now() - e.timestamp * 1e3);
 	}
 	getStatus() {
 		return {
