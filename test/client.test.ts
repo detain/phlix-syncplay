@@ -1097,6 +1097,28 @@ describe('SyncPlayClient — handleTimePong edge cases', () => {
     expect(h.syncs[0].offset).toBe(100);
   });
 
+  it('SPY-S7: refuses a non-echo pong whose send time is from an older connection generation; accepts within-epoch legacy shape', () => {
+    const h = makeHarness();
+    h.clock.set(1000);
+    h.client.pingTime();
+    h.client.onDisconnect();
+    // Force a cross-generation outstanding slot (stamp from generation 0).
+    const priv = h.client as unknown as { lastPingSendTime: number | null };
+    priv.lastPingSendTime = 1000;
+    h.clock.set(1050);
+    h.client.handleIncoming({ type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG, protocol_version: 1, server_time: 1100 });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(priv.lastPingSendTime).toBe(1000);
+
+    // Within-epoch legacy shape (no echo) still accepted.
+    h.client.onDisconnect();
+    h.clock.set(2000);
+    h.client.pingTime();
+    h.clock.set(2001);
+    h.client.handleIncoming({ type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG, protocol_version: 1, server_time: 2100 });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+  });
+
   it('rejects a dead-connection straggler arriving while a fresh ping is outstanding, then still accepts the matching pong', () => {
     // Fast-reconnect regime (SPEC §10.2 recovery: onDisconnect → reconnect →
     // resume pingTime). A new ping is already outstanding on connection B when

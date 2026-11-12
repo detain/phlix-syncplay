@@ -1328,6 +1328,9 @@ become stale and MUST be discarded before reconnecting:
    `syncplay_group_state` arrives.
 3. **The outstanding ping** — a late `time_pong` from the dead connection MUST
    NOT seed a sample, so the recorded send time (`lastPingSendTime`) is dropped.
+   `onDisconnect()` also bumps a connection-generation counter; a `time_pong`
+   without an echoed `client_time` is accepted only against a ping sent in the
+   current generation (the pre-echo legacy shape stays valid within-epoch).
 
 Pacing while connected is likewise client law, not wire shape: `pingTime()`
 with a ping outstanding MUST be ignored — a pong can only be attributed to the

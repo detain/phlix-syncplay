@@ -470,6 +470,10 @@ export class SyncPlayClient {
   private destroyed = false;
   /** Local t1 of the most recent outstanding ping, ms. */
   private lastPingSendTime: number | null = null;
+  /** SPY-S7: connection generation; bumped by onDisconnect. */
+  private connectionEpoch = 0;
+  /** SPY-S7: the generation `lastPingSendTime` was stamped in. */
+  private pingEpoch = 0;
   /**
    * M-SYNCPLAY-14: consecutive REJECTED (but matched-consumed) time-sync
    * rounds — RTT-window rejections and no-usable-server_time rounds
@@ -963,6 +967,7 @@ export class SyncPlayClient {
       }
     }
     this.lastPingSendTime = t1;
+    this.pingEpoch = this.connectionEpoch;
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.TIME_PING, { client_time: t1 });
   }
 
@@ -993,6 +998,9 @@ export class SyncPlayClient {
       return;
     }
     this.cancelSeekCoalescing();
+    // SPY-S7: a new connection generation begins; any send time stamped in an
+    // older one is no longer attributable by a non-echo pong.
+    this.connectionEpoch += 1;
     this.timeSync.reset();
     // LW-043: the rejection streak is per-connection measurement history —
     // a fresh connection starts honest at zero (mirrors the timeSync.reset
@@ -1192,6 +1200,14 @@ export class SyncPlayClient {
     // connection). Refuse it and LEAVE the outstanding ping untouched: its real
     // pong may still arrive.
     if (echoed !== null && echoed !== outstanding) {
+      return;
+    }
+
+    // SPY-S7: a NON-echo pong carries no t1 of its own, so it is attributable
+    // only to a ping stamped in the CURRENT connection generation. A send time
+    // from an older generation is refused (slot untouched); the pre-echo legacy
+    // shape stays accepted within-epoch.
+    if (echoed === null && this.pingEpoch !== this.connectionEpoch) {
       return;
     }
 

@@ -417,6 +417,10 @@ export declare class SyncPlayClient {
     private destroyed;
     /** Local t1 of the most recent outstanding ping, ms. */
     private lastPingSendTime;
+    /** SPY-S7: connection generation; bumped by onDisconnect. */
+    private connectionEpoch;
+    /** SPY-S7: the generation `lastPingSendTime` was stamped in. */
+    private pingEpoch;
     /**
      * M-SYNCPLAY-14: consecutive REJECTED (but matched-consumed) time-sync
      * rounds — RTT-window rejections and no-usable-server_time rounds
