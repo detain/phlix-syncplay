@@ -191,8 +191,8 @@ export interface SyncPlayClientOptions {
      * resets it as well — the streak is per-connection measurement history
      * (LW-043): the fresh connection after a reconnect starts honest at zero.
      * {@link SyncPlayClient.destroy} does NOT reset it (every reader sits
-     * behind the terminal latch, so a reset there would be unreadable). The library deliberately picks no
-     * "degraded" threshold — after N rejections is consumer policy (spinner
+     * behind the terminal latch, so a reset there would be unreadable). The
+     * library deliberately picks no "degraded" threshold — after N rejections is consumer policy (spinner
      * copy, retry pacing, transport hint). Observes what was already true at
      * the boundary; changes no sync math.
      */

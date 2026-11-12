@@ -277,10 +277,13 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		i !== void 0 && (a.password_hash = i), this.dispatch(e.GROUP_JOIN, a);
 	}
 	leaveGroup() {
-		return this.group !== null && (this.cancelSeekCoalescing(), this.dispatch(e.GROUP_LEAVE, {
-			group_id: this.group.group_id,
+		if (this.group === null) return !1;
+		this.cancelSeekCoalescing();
+		let t = this.group.group_id;
+		return this.group = null, this.dispatch(e.GROUP_LEAVE, {
+			group_id: t,
 			member_id: this.memberId
-		}), this.group = null, !0);
+		}), !0;
 	}
 	sendPlay(t) {
 		return this.group !== null && (this.dispatch(e.PLAYBACK_PLAY, {

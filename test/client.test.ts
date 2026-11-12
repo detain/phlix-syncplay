@@ -1399,6 +1399,25 @@ describe('SyncPlayClient — leaveGroup early return when not in a group', () =>
   });
 });
 
+describe('SyncPlayClient — leaveGroup unwind-before-send (SPY-5)', () => {
+  it('clears the cached group even when the send sink throws', () => {
+    const client = new SyncPlayClient({
+      send: () => {
+        throw new Error('socket closed');
+      },
+      now: () => 1000,
+      memberId: 'me',
+      memberName: 'Tester',
+    });
+    client.handleIncoming(groupStateMessage('host1', 'me'));
+    expect(client.getGroup()).not.toBeNull();
+    expect(() => client.leaveGroup()).toThrow('socket closed');
+    expect(client.getGroup()).toBeNull();
+    // no-group bool law unchanged
+    expect(client.leaveGroup()).toBe(false);
+  });
+});
+
 describe('SyncPlayClient — joinGroup with password hash', () => {
   it('joinGroup includes password_hash when provided (line 190)', () => {
     const h = makeHarness();

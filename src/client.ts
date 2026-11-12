@@ -225,8 +225,8 @@ export interface SyncPlayClientOptions {
    * resets it as well — the streak is per-connection measurement history
    * (LW-043): the fresh connection after a reconnect starts honest at zero.
    * {@link SyncPlayClient.destroy} does NOT reset it (every reader sits
-   * behind the terminal latch, so a reset there would be unreadable). The library deliberately picks no
-   * "degraded" threshold — after N rejections is consumer policy (spinner
+   * behind the terminal latch, so a reset there would be unreadable). The
+   * library deliberately picks no "degraded" threshold — after N rejections is consumer policy (spinner
    * copy, retry pacing, transport hint). Observes what was already true at
    * the boundary; changes no sync math.
    */
@@ -667,11 +667,14 @@ export class SyncPlayClient {
     }
     // A coalesced seek that never shipped belongs to the room we are leaving.
     this.cancelSeekCoalescing();
+    // SPY-5: unwind BEFORE the send — a throwing sink (closed socket) must not
+    // leave the stale group cached; the caller left either way.
+    const groupId = this.group.group_id;
+    this.group = null;
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE, {
-      group_id: this.group.group_id,
+      group_id: groupId,
       member_id: this.memberId,
     });
-    this.group = null;
     return true;
   }
 
