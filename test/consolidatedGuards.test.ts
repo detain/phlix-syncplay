@@ -12,7 +12,7 @@
  * @copyright 2026 Joe Huss <detain@interserver.net>
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { SyncPlayClient, type FrameDropReason } from '../src/client';
 import { decodeMessage, isValidMessageType, SYNCPLAY_MESSAGE_TYPES } from '../src';
 import type { RawMessage, SyncPlayMessageType, UnknownFrame } from '../src/messages';
@@ -500,6 +500,46 @@ describe('m18 — destroy() unwinds state without the disconnect callback', () =
     expect(h.client.getGroup()).toBeNull();
     expect(h.disconnects).toBe(0);
     expect(h.client.sendChat('after destroy')).toBe(false);
+  });
+
+  // SPY-1: the destroyed latch also guards the reconnect lane. A consumer's
+  // onDisconnect callback is where reconnect backoff lives (README "Reconnect
+  // recovery"): firing it on a destroyed instance armed a consumer timer on a
+  // client that promised ZERO timers and routed NO callbacks.
+  it('SPY-1: onDisconnect() after a sink-driven destroy() fires no callback and leaves zero timers', () => {
+    vi.useFakeTimers();
+    try {
+      let reconnects = 0;
+      let destroyOnSeek = false;
+      const client: SyncPlayClient = new SyncPlayClient({
+        send: (m) => {
+          // Sink callback: the transport tears the screen down mid-dispatch.
+          if (destroyOnSeek && m.type === SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK) client.destroy();
+        },
+        now: () => 1000,
+        memberId: 'me',
+        seekThrottleMs: 5,
+        onDisconnect: () => {
+          // A real consumer schedules its reconnect backoff here.
+          setTimeout(() => {
+            reconnects += 1;
+          }, 1000);
+        },
+      });
+      client.handleIncoming(JOINED_GROUP);
+      expect(client.sendSeek(0, 1000)).toBe(true); // leading edge; arms the window
+      expect(client.sendSeek(1000, 1300)).toBe(true); // coalesced trailing intent
+      destroyOnSeek = true;
+      vi.advanceTimersByTime(25); // flush -> sink -> destroy() mid-dispatch
+      expect(vi.getTimerCount()).toBe(0);
+      // The socket-close handler still fires after teardown.
+      client.onDisconnect();
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(10_000);
+      expect(reconnects).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

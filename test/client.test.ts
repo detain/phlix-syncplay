@@ -385,6 +385,24 @@ describe('SyncPlayClient — onDisconnect / reconnect reset (B4)', () => {
     expect(client.getTimeSync().getSampleCount()).toBe(0);
   });
 
+  it('SPY-1: onDisconnect() on a destroyed instance is a no-op — no callback, no state touch', () => {
+    // destroy() is TERMINAL (LW-046). A consumer whose socket-close handler
+    // still runs after screen teardown calls onDisconnect() on the dead
+    // instance; pre-fix that fired the consumer's disconnect callback (the
+    // "reconnecting…" lane) on a client that promised it routes nothing.
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.destroy();
+    expect(h.disconnects).toEqual([]);
+    h.client.onDisconnect();
+    expect(h.disconnects).toEqual([]);
+    expect(h.client.getGroup()).toBeNull();
+    // The reconnect lane stays closed: re-join still ships nothing.
+    h.sent.length = 0;
+    h.client.joinGroup('sp_abc');
+    expect(h.sent).toHaveLength(0);
+  });
+
   it('supports the documented re-join recovery sequence after a reset', () => {
     const h = makeHarness();
     h.client.handleIncoming(groupStateMessage('host1', 'me'));

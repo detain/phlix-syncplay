@@ -978,6 +978,11 @@ export class SyncPlayClient {
    *   "Command repeat policy").
    */
   onDisconnect(): void {
+    // SPY-1 / LW-046: destroy() is terminal — a socket-close handler that
+    // outlives screen teardown must not fire the consumer's reconnect lane.
+    if (this.destroyed) {
+      return;
+    }
     this.cancelSeekCoalescing();
     this.timeSync.reset();
     // LW-043: the rejection streak is per-connection measurement history —
