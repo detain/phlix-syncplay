@@ -301,9 +301,9 @@ per-intent, not per-key-event.** How that is met per sender:
 You hash the group password **client-side** and pass the digest to
 `createGroup` / `joinGroup` as `password_hash`. The recipe is fixed by
 [`SPEC.md` §8.2](./SPEC.md): **unsalted SHA-256** of the password's **UTF-8**
-bytes, encoded as **64 lowercase hex characters**. The server compares the
-digest verbatim and rejects anything that is not `^[0-9a-f]{64}$` (it does not
-re-hash or case-fold), so an uppercase or base64 digest will never match. It is
+bytes, encoded as **64 lowercase hex characters**. This library refuses
+anything that is not `^[0-9a-f]{64}$` before sending, so always emit lowercase
+hex; an uppercase or base64 digest is rejected. It is
 a replayable weak group gate, never an identity (SPEC §8.2).
 
 ```ts

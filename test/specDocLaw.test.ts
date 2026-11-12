@@ -22,6 +22,7 @@
  * zero-live-producer caveat on either surface).
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -588,8 +589,32 @@ describe('deferred-lane era-cite + TOC currency', () => {
     // pin from its measured red (the m36 pin above guards the date SHAPE, so
     // rotatability itself never fights a lane). 2026-11-04 → 2026-11-03: the
     // forward-dated stamp was a disclosed date fiction (review minor m6; all
-    // author/commit dates in the range are 2026-11-03).
-    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-03/);
+    // author/commit dates in the range are 2026-11-03). Re-blessed
+    // 2026-11-03 → 2026-11-12 (SPY-S3) from the measured red after the
+    // SPY-S1..S5 normative SPEC legs landed on 2026-11-12.
+    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-12/);
+  });
+
+  it('stamp is not older than the last commit that touched SPEC.md (staleness tripwire)', () => {
+    // A normative hunk landing with an older stamp reddens here: the stamp
+    // date must be >= the committer date of the latest SPEC.md commit
+    // (one-day slack for committer-timezone skew). Skipped when git history
+    // is unavailable (e.g. a source tarball).
+    let last = '';
+    try {
+      last = execFileSync('git', ['log', '-1', '--format=%cs', '--', 'SPEC.md'], {
+        cwd: fileURLToPath(new URL('..', import.meta.url)),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(last)) return;
+    const m = SPEC.match(/\*\*Document revision:\*\* (\d{4}-\d{2}-\d{2})/);
+    expect(m).not.toBeNull();
+    const day = 86_400_000;
+    expect(Date.parse(m![1]) + day).toBeGreaterThanOrEqual(Date.parse(last));
   });
 
   it('keeps the Contents TOC in step with the added subsections', () => {
