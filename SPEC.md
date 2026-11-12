@@ -525,9 +525,9 @@ server_time: number        (§4 named exception: UNIX seconds on :8097, ms on hu
 nudge?: {                  (S446 soft-desync correction — directed frames ONLY, see below)
   drift_ms: number,        (group position − reported position, ms; >0 = behind — :1566)
   direction: 'behind' | 'ahead',   (:1578)
-  suggested_rate: number,  (1 ± 0.1 — `GroupState::NUDGE_RATE_STEP` :167; :1579-1581)
-  tolerance_ms: number,    (group position tolerance — default 2000, `GroupState.php:124`; :1582)
-  cooldown_ms: number      (`GroupState::NUDGE_COOLDOWN_MS` = 1000 — `GroupState.php:145`; :1583)
+  suggested_rate: number,  (1 ± 0.1 — `GroupState::NUDGE_RATE_STEP` `GroupState.php:179` @c904aa4d; :1579-1581)
+  tolerance_ms: number,    (group position tolerance — default 2000, `GroupState.php:136` @c904aa4d; :1582)
+  cooldown_ms: number      (`GroupState::NUDGE_COOLDOWN_MS` = 1000 — `GroupState.php:157` @c904aa4d; :1583)
 }
 ```
 > Broadcast to every group member including the originator — the server does not
