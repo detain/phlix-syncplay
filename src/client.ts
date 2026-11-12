@@ -221,10 +221,11 @@ export interface SyncPlayClientOptions {
    * with no signal to explain it (W-min124 M-SYNCPLAY-14, review
    * `syncplay__gameux` m3). Fires per rejection with the CURRENT
    * consecutive-rejection streak; any accepted sample resets the streak to 0
-   * and fires nothing, and {@link SyncPlayClient.onDisconnect} /
-   * {@link SyncPlayClient.destroy} reset it as well — the streak is
-   * per-connection measurement history (LW-043): the fresh connection after
-   * a reconnect starts honest at zero. The library deliberately picks no
+   * and fires nothing, and {@link SyncPlayClient.onDisconnect}
+   * resets it as well — the streak is per-connection measurement history
+   * (LW-043): the fresh connection after a reconnect starts honest at zero.
+   * {@link SyncPlayClient.destroy} does NOT reset it (every reader sits
+   * behind the terminal latch, so a reset there would be unreadable). The library deliberately picks no
    * "degraded" threshold — after N rejections is consumer policy (spinner
    * copy, retry pacing, transport hint). Observes what was already true at
    * the boundary; changes no sync math.

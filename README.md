@@ -132,7 +132,7 @@ const client = new SyncPlayClient({
     /* render group (`group.members` normalized to an array; `group.queue` delivered per producer — SPEC §4); you are yourId */
   },
   onSync: ({ offset, latency, isStable }) => { /* time-sync status */ },
-  onSyncDegraded: (consecutiveRejections) => { /* fires per matched-but-rejected ping round (rtt outside SPEC §5's window); resets on any acceptance — consumer owns the threshold */ },
+  onSyncDegraded: (consecutiveRejections) => { /* fires per matched-but-rejected ping round (rtt outside SPEC §5's window, or a pong with no usable server_time); resets on any acceptance and on onDisconnect (not on destroy) — consumer owns the threshold */ },
   onPlaybackCommand: ({ type, position, serverTime }) => { /* apply locally */ },
   onMemberJoined: ({ id, name }) => {},
   onMemberLeft: ({ id, name }) => {}, // roster diff inside a same-group group_state (SPEC §6 leave law)

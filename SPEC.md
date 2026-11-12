@@ -552,7 +552,7 @@ nudge?: {                  (S446 soft-desync correction — directed frames ONLY
 > absence is load-bearing in a way a consumer must understand:
 >
 > - **There is no rate RESET frame.** The server emits `suggested_rate` only as
->   `1 ± NUDGE_RATE_STEP` (`sendOutOfSyncNudge()` :1607-1609, `GroupState.php:179`);
+>   `1 ± NUDGE_RATE_STEP` (`sendOutOfSyncNudge()` :1607-1609, `GroupState.php:179` @c904aa4d);
 >   a value of exactly `1.0` has no producer. When a drifting member comes back
 >   within tolerance, the server says NOTHING on the directed channel — the
 >   out-of-sync guard (`handlePlaybackSync()` :1552, `!isMemberInSync`) simply
