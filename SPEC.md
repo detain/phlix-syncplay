@@ -824,6 +824,13 @@ the drift `timeDelta` matches the server's per-second `microtime(true)` scale.
 That `/ 1000` is the units bridge and is correct only because `now()` is ms —
 do not inject a seconds clock.
 
+**Integer-ms quad.** `t1` (the ping's `client_time`) and `t4` are
+**integer** milliseconds: a client whose `now()` is fractional MUST truncate
+both (`Math.trunc`) before use. The server int-casts the `client_time` it
+echoes on the pong, so a fractional `t1` could never equal its own echo and
+every pong would be refused as a straggler. This aligns the client TO the
+existing server/hub law; no wire shape changes.
+
 - Reject the sample if `rtt < 0` or `rtt > MAX_ACCEPTABLE_RTT`. The `rtt < 0`
   arm is client-side hardening that the server's own rejection in
   `TimeSync.php` omits (it bounds `rtt` above only): a negative round trip

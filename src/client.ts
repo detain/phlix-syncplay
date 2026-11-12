@@ -939,7 +939,12 @@ export class SyncPlayClient {
     if (this.destroyed) {
       return;
     }
-    const t1 = this.now();
+    // SPY-2: the quad is INTEGER milliseconds. The server int-casts the
+    // `client_time` it echoes (phlix-server/hub TimeSync), so a fractional t1
+    // (a performance.now()-style clock) would never equal its own echo and
+    // every pong would be refused as a cross-round straggler. Truncate at the
+    // source so the sent, recorded, and echoed values are the same integer.
+    const t1 = Math.trunc(this.now());
     const outstanding = this.lastPingSendTime;
     // CONSOLIDATED m22 (review asphp MINOR-3): a BACKWARD wall-clock step made
     // the age NEGATIVE, and a negative age passes `<= MAX_ACCEPTABLE_RTT`
@@ -1186,7 +1191,8 @@ export class SyncPlayClient {
       return;
     }
 
-    const t4 = this.now();
+    // SPY-2: t4 on the same integer-ms scale as t1 (see {@link pingTime}).
+    const t4 = Math.trunc(this.now());
     // Prefer the matched echo; otherwise fall back to our recorded send time
     // (the pre-echo shape this library's own callers may emit).
     const t1 = echoed ?? outstanding;

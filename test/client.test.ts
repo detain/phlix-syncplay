@@ -2669,3 +2669,25 @@ describe('SyncPlayClient — identity refusal, state clamps, streak reset, group
     expect(g.joined).toEqual([{ id: 'newbie', name: 'New Bie' }]);
   });
 });
+
+describe('SyncPlayClient — integer-ms time-sync symmetry (SPY-2)', () => {
+  it('a fractional now() clock round-trips: t1 is truncated, the int echo matches, a sample lands', () => {
+    const h = makeHarness();
+    h.clock.set(1000.7);
+    h.client.pingTime();
+    const ping = h.sent.at(-1) as unknown as { client_time: number };
+    expect(ping.client_time).toBe(1000);
+    h.clock.set(1050.4);
+    // Server int-casts the echo (same integer we sent) and answers.
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: 1075,
+    });
+    expect(h.syncs).toHaveLength(1);
+    // t4 = 1050 (truncated): rtt 50, offset = 1075 - 1000 + 25 = 100.
+    expect(h.syncs[0]!.offset).toBe(100);
+    expect(h.syncs[0]!.latency).toBe(25);
+  });
+});

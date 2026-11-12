@@ -356,7 +356,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	pingTime() {
 		if (this.destroyed) return;
-		let t = this.now(), n = this.lastPingSendTime;
+		let t = Math.trunc(this.now()), n = this.lastPingSendTime;
 		if (n !== null) {
 			let e = t - n;
 			if (e >= 0 && e <= 1e3) return;
@@ -448,7 +448,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		if (t === null) return;
 		let n = e, r = typeof n.client_time == "number" && Number.isFinite(n.client_time) ? n.client_time : null;
 		if (r !== null && r !== t) return;
-		let i = this.now(), a = r == null ? t : r;
+		let i = Math.trunc(this.now()), a = r == null ? t : r;
 		this.lastPingSendTime = null;
 		let o = typeof n.server_time == "number" && Number.isFinite(n.server_time) ? n.server_time : null;
 		if (o === null) {

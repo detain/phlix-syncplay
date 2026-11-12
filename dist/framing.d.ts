@@ -32,6 +32,11 @@ import { type RawMessage, type SyncPlayMessageType, type UnknownFrame } from './
  * `Date.now()`). The framing `timestamp` field is emitted in milliseconds and
  * `TimeSync`'s drift math presumes a ms clock (it converts via `now() / 1000`
  * to reach the server's per-second scale). Do NOT inject a seconds clock.
+ *
+ * A fractional ms clock (e.g. `performance.timeOrigin + performance.now()`) is
+ * tolerated on the time-sync path: `SyncPlayClient` truncates the ping's
+ * `client_time` (t1) and the pong's receive time (t4) to integer ms, because
+ * the server int-casts the `client_time` it echoes (SPEC section 5).
  */
 export type NowFn = () => number;
 /**
