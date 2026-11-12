@@ -370,7 +370,7 @@ function connect() {
 ```ts
 import {
   SYNCPLAY_MESSAGE_TYPES, // the 19 canonical type strings
-  ALL_MESSAGE_TYPES,      // the same 19 as a frozen array (validation/iteration)
+  ALL_MESSAGE_TYPES,      // the same 19 as a runtime-frozen (Object.freeze) readonly array
   PROTOCOL_VERSION,       // 1
   encodeMessage,          // (type, payload, now) -> flat RAW JSON object
   serializeMessage,       // (RAW object) -> wire JSON string (server-shaped envelope)

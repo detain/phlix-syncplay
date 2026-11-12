@@ -25,6 +25,12 @@ describe('SYNCPLAY_MESSAGE_TYPES', () => {
     expect(ALL_MESSAGE_TYPES).toHaveLength(19);
   });
 
+  it('ALL_MESSAGE_TYPES is frozen at runtime, not just typed readonly', () => {
+    expect(Object.isFrozen(ALL_MESSAGE_TYPES)).toBe(true);
+    expect(() => (ALL_MESSAGE_TYPES as unknown as string[]).push('x')).toThrow(TypeError);
+    expect(ALL_MESSAGE_TYPES).toHaveLength(19);
+  });
+
   it('matches the server TYPE_* strings byte-for-byte', () => {
     expect(SYNCPLAY_MESSAGE_TYPES).toEqual({
       GROUP_CREATE: 'syncplay_group_create',

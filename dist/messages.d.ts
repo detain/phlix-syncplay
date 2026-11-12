@@ -55,7 +55,9 @@ export type SyncPlayMessageType = (typeof SYNCPLAY_MESSAGE_TYPES)[keyof typeof S
 export declare const PROTOCOL_VERSION = 1;
 /**
  * Ordered list of all valid message type strings (mirrors
- * `Messages::VALID_TYPES`). Useful for validation and exhaustiveness tests.
+ * `Messages::VALID_TYPES`). Useful for validation and exhaustiveness tests. Frozen at runtime
+ * (`Object.freeze`) as well as typed `readonly`, so a mutating consumer throws
+ * in strict mode instead of silently corrupting the catalogue.
  */
 export declare const ALL_MESSAGE_TYPES: readonly SyncPlayMessageType[];
 /** True if `type` is one of the 19 valid SyncPlay message types. */

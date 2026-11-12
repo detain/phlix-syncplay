@@ -19,7 +19,7 @@ var e = {
 	TIME_SYNC: "syncplay_time_sync",
 	ERROR: "syncplay_error",
 	INFO: "syncplay_info"
-}, t = 1, n = [
+}, t = 1, n = Object.freeze([
 	e.GROUP_CREATE,
 	e.GROUP_JOIN,
 	e.GROUP_LEAVE,
@@ -39,7 +39,7 @@ var e = {
 	e.TIME_SYNC,
 	e.ERROR,
 	e.INFO
-];
+]);
 function r(e) {
 	return n.includes(e);
 }

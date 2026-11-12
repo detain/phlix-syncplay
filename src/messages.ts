@@ -72,9 +72,11 @@ export const PROTOCOL_VERSION = 1;
 
 /**
  * Ordered list of all valid message type strings (mirrors
- * `Messages::VALID_TYPES`). Useful for validation and exhaustiveness tests.
+ * `Messages::VALID_TYPES`). Useful for validation and exhaustiveness tests. Frozen at runtime
+ * (`Object.freeze`) as well as typed `readonly`, so a mutating consumer throws
+ * in strict mode instead of silently corrupting the catalogue.
  */
-export const ALL_MESSAGE_TYPES: readonly SyncPlayMessageType[] = [
+export const ALL_MESSAGE_TYPES: readonly SyncPlayMessageType[] = Object.freeze([
   SYNCPLAY_MESSAGE_TYPES.GROUP_CREATE,
   SYNCPLAY_MESSAGE_TYPES.GROUP_JOIN,
   SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE,
@@ -94,7 +96,7 @@ export const ALL_MESSAGE_TYPES: readonly SyncPlayMessageType[] = [
   SYNCPLAY_MESSAGE_TYPES.TIME_SYNC,
   SYNCPLAY_MESSAGE_TYPES.ERROR,
   SYNCPLAY_MESSAGE_TYPES.INFO,
-];
+]);
 
 /** True if `type` is one of the 19 valid SyncPlay message types. */
 export function isValidMessageType(type: string): type is SyncPlayMessageType {
