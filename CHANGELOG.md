@@ -5,6 +5,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- SPY-S15: version-gate enforcement-window watch note added to `framing.ts` unwrap and
+  the `client.ts` protocol_version mirror (cross-referenced; docblock only, no behavior change).
+- SPY-S13: memberName default 'User' documented in docblock/README (alignment to 'Host' remains owner-gated).
 - SPY-S12: `SyncPlayClient` gains `listGroups()`, `sendQueue(queue)` and
   `transferHost(newHostId)` senders over the existing SPEC §4.1/§4.2/§4.4
   wire codes (no new types); `seekThrottleMs` range and `@throws TypeError`

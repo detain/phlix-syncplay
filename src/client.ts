@@ -1214,6 +1214,13 @@ export class SyncPlayClient {
     // integer above what this decoder implements, is refused through the
     // existing malformed-drop machinery — no new wire vocabulary, and absent/
     // stale integers keep falling through exactly like the server's arms.
+    //
+    // SPY-S15 (watch note): the enforcement window is deliberately loose —
+    // absent `protocol_version` and stale integers are TOLERATED because the
+    // legacy Tizen wrapper and older servers still emit them. Tightening this
+    // gate breaks that documented tolerance, so any change belongs to a future
+    // wire-law revision made together with framing.ts `decodeMessage` unwrap
+    // (the presence-keyed `protocol_version` check there; keep the two in sync).
     if ('protocol_version' in msg) {
       const version = (msg as { protocol_version?: unknown }).protocol_version;
       if (typeof version !== 'number' || !Number.isInteger(version) || version > PROTOCOL_VERSION) {

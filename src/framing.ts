@@ -123,6 +123,12 @@ export function decodeMessage(raw: unknown): RawMessage | UnknownFrame | null {
   // (`syncplay_info`, `Messages::info()`) and MUST pass through UNTOUCHED
   // (M-SYNCPLAY-02). The wrapper never carries `protocol_version`, so the
   // tolerance for legacy Tizen sends is preserved exactly.
+  //
+  // SPY-S15 (watch note): this unwrap is presence-keyed on `protocol_version`;
+  // the VALUE law (non-integer / higher-than-supported refused, absent and stale
+  // integers tolerated) lives in client.ts handleIncoming (LW-049). Tightening
+  // either side breaks the documented legacy tolerance — revise both together
+  // under a future wire-law revision; no behavior change here.
   const data = record.data;
   const frame: Record<string, unknown> =
     !('protocol_version' in record) &&
