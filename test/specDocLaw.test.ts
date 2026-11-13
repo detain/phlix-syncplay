@@ -600,7 +600,7 @@ describe('deferred-lane era-cite + TOC currency', () => {
     // date must be >= the committer date of the latest SPEC.md commit
     // (one-day slack for committer-timezone skew). Skipped when git history
     // is unavailable (e.g. a source tarball).
-    let last = '';
+    let last: string;
     try {
       last = execFileSync('git', ['log', '-1', '--format=%cs', '--', 'SPEC.md'], {
         cwd: fileURLToPath(new URL('..', import.meta.url)),

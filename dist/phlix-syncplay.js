@@ -1,4 +1,4 @@
-//#region src/messages.ts
+// src/messages.ts
 var e = {
 	GROUP_CREATE: "syncplay_group_create",
 	GROUP_JOIN: "syncplay_group_join",
@@ -43,8 +43,7 @@ var e = {
 function r(e) {
 	return n.includes(e);
 }
-//#endregion
-//#region \0@oxc-project+runtime@0.154.0/helpers/esm/typeof.js
+// \0@oxc-project+runtime@0.156.0/helpers/esm/typeof.js
 function i(e) {
 	"@babel/helpers - typeof";
 	return i = typeof Symbol == "function" && typeof Symbol.iterator == "symbol" ? function(e) {
@@ -53,8 +52,7 @@ function i(e) {
 		return e && typeof Symbol == "function" && e.constructor === Symbol && e !== Symbol.prototype ? "symbol" : typeof e;
 	}, i(e);
 }
-//#endregion
-//#region \0@oxc-project+runtime@0.154.0/helpers/esm/toPrimitive.js
+// \0@oxc-project+runtime@0.156.0/helpers/esm/toPrimitive.js
 function a(e, t) {
 	if (i(e) != "object" || !e) return e;
 	var n = e[Symbol.toPrimitive];
@@ -65,14 +63,12 @@ function a(e, t) {
 	}
 	return (t === "string" ? String : Number)(e);
 }
-//#endregion
-//#region \0@oxc-project+runtime@0.154.0/helpers/esm/toPropertyKey.js
+// \0@oxc-project+runtime@0.156.0/helpers/esm/toPropertyKey.js
 function o(e) {
 	var t = a(e, "string");
 	return i(t) == "symbol" ? t : t + "";
 }
-//#endregion
-//#region \0@oxc-project+runtime@0.154.0/helpers/esm/defineProperty.js
+// \0@oxc-project+runtime@0.156.0/helpers/esm/defineProperty.js
 function s(e, t, n) {
 	return (t = o(t)) in e ? Object.defineProperty(e, t, {
 		value: n,
@@ -81,8 +77,7 @@ function s(e, t, n) {
 		writable: !0
 	}) : e[t] = n, e;
 }
-//#endregion
-//#region \0@oxc-project+runtime@0.154.0/helpers/esm/objectSpread2.js
+// \0@oxc-project+runtime@0.156.0/helpers/esm/objectSpread2.js
 function c(e, t) {
 	var n = Object.keys(e);
 	if (Object.getOwnPropertySymbols) {
@@ -104,8 +99,7 @@ function l(e) {
 	}
 	return e;
 }
-//#endregion
-//#region src/framing.ts
+// src/framing.ts
 function u(e, t, n) {
 	return l(l({}, t), {}, {
 		type: e,
@@ -133,8 +127,7 @@ function d(e) {
 function f(e) {
 	return JSON.stringify(e);
 }
-//#endregion
-//#region src/time-sync.ts
+// src/time-sync.ts
 var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	constructor(e) {
 		s(this, "samples", []), s(this, "driftRate", 1), s(this, "now", void 0), s(this, "samplesVersion", 0), s(this, "cacheVersion", -1), s(this, "cachedOffset", 0), s(this, "cachedLatency", 0), s(this, "cachedIsStable", !1), this.now = e;
@@ -796,7 +789,6 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		this.send(u(e, t, this.now));
 	}
 };
-//#endregion
 export { n as ALL_MESSAGE_TYPES, g as DRIFT_CORRECTION_FACTOR, v as DRIFT_RATE_MAX, _ as DRIFT_RATE_MIN, m as MAX_ACCEPTABLE_RTT, p as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, h as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, S as SyncPlayClient, y as TIME_SYNC_PROTOCOL_VERSION, b as TimeSync, d as decodeMessage, u as encodeMessage, r as isValidMessageType, f as serializeMessage };
 
 //# sourceMappingURL=phlix-syncplay.js.map
