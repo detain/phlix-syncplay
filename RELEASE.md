@@ -13,8 +13,14 @@ artifact, so the ritual below is not optional.
 3. **Deterministic rebuild, twice**: `npm run build` →
    `find dist -type f | sort | xargs md5sum | md5sum` → build again → same
    aggregate. Both builds and the committed bytes must agree; if not, the
-   build became non-deterministic — fix that before releasing. Record the
-   aggregate md5 in the release commit message.
+   build became non-deterministic — fix that before releasing. The aggregate is
+   the md5 of the sorted per-file `md5sum` listing (run from the repo root so
+   paths read `dist/...`); `find dist -type f ! -name '*.map' | sort | xargs md5sum | md5sum`
+   is the non-map variant. Record the aggregate md5 (and which variant) in the
+   release commit message, plus the all-files and non-map aggregates and the
+   per-file `phlix-syncplay.js` / `.umd.cjs` md5s in the CHANGELOG release
+   section (as the 0.1.9 entry does) — Unreleased entries do not carry hashes,
+   since dist is rebuilt until the cut.
 4. **Gates** (all green, in this order): `npm run lint`,
    `npm run typecheck`, `npm run test:run` (vitest runs serially; jest-style
    file-parallelism has bitten estate bundles before).
