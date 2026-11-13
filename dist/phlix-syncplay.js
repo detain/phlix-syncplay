@@ -345,6 +345,30 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			server_time: this.getSynchronizedTime()
 		}), !0);
 	}
+	listGroups() {
+		return !this.destroyed && (this.dispatch(e.GROUP_LIST, {}), !0);
+	}
+	sendQueue(t) {
+		if (!Array.isArray(t)) throw TypeError("SyncPlayClient: queue must be an array");
+		let n = [];
+		for (let e of t) {
+			if (typeof e != "object" || !e || typeof e.media_id != "string") throw TypeError("SyncPlayClient: every queue item needs a string media_id");
+			let t = { media_id: e.media_id };
+			e.media_info !== void 0 && (t.media_info = e.media_info), n.push(t);
+		}
+		return this.group !== null && (this.dispatch(e.PLAYBACK_QUEUE, {
+			group_id: this.group.group_id,
+			queue: n
+		}), !0);
+	}
+	transferHost(t) {
+		if (typeof t != "string" || t === "") throw TypeError("SyncPlayClient: newHostId must be a non-empty string");
+		return this.group !== null && (this.dispatch(e.HOST_TRANSFER, {
+			group_id: this.group.group_id,
+			current_host_id: this.memberId,
+			new_host_id: t
+		}), !0);
+	}
 	sendChat(t) {
 		return this.group !== null && (this.dispatch(e.CHAT, {
 			group_id: this.group.group_id,

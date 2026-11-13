@@ -171,6 +171,9 @@ ws.onopen = () => {
 client.sendPlay(positionMs);
 client.sendPause(positionMs);
 client.sendSeek(fromMs, toMs);
+client.sendQueue([{ media_id: 'm1', media_info: { title: 'Pilot' } }]); // replaces the queue
+client.transferHost('member-b');       // hand the host role over (host only)
+client.listGroups();                   // any time; reply lands on onGroupList
 
 // Position report — ANY authenticated member may send it; NOT host-gated
 // (state report, §9.1: the server ingests every member's position for the

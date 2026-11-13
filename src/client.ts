@@ -11,7 +11,8 @@
  *  - the canonical message framing (encode/decode),
  *  - a {@link TimeSync} instance fed from time_pong responses,
  *  - the current group state derived from server group_state messages,
- *  - the host-only playback command senders.
+ *  - the host-only playback command senders (play/pause/seek/queue/host transfer)
+ *    plus the `listGroups` request.
  *
  * It has NO dependency on WebSocket, Date, or any framework, and it schedules
  * NO PERIODIC timers. The transport `send` and the clock `now` are injected;
@@ -190,7 +191,8 @@ export interface SyncPlayClientOptions {
    * `0` is the documented escape hatch: pure passthrough — every call
    * dispatches synchronously and this library schedules no timers at all.
    * Negative or non-finite values throw a `TypeError` at construction
-   * (parse-don't-validate at the options boundary).
+   * (parse-don't-validate at the options boundary). Must be a finite number
+   * in [0, 2147483647].
    */
   seekThrottleMs?: number;
 
@@ -722,6 +724,8 @@ export class SyncPlayClient {
    * (CONSOLIDATED m4): "accepted for sending" must be observable, silence is
    * not. `true` means the library handed the frame to the `send` sink, not
    * that the server accepted it — the receipt story is the echo/error lane.
+   *
+   * @throws TypeError on non-finite or negative position
    */
   sendPlay(position: number): boolean {
     SyncPlayClient.assertPosition('position', position);
@@ -737,7 +741,11 @@ export class SyncPlayClient {
     return true;
   }
 
-  /** Host command: pause at `position` (ms). Boolean law per {@link sendPlay}. */
+  /**
+   * Host command: pause at `position` (ms). Boolean law per {@link sendPlay}.
+   *
+   * @throws TypeError on non-finite or negative position
+   */
   sendPause(position: number): boolean {
     SyncPlayClient.assertPosition('position', position);
     if (this.group === null) {
@@ -769,6 +777,8 @@ export class SyncPlayClient {
    * one lossy path left is the timer flush whose group vanished (defensive
    * arm in `closeSeekWindow`) or whose `send` threw (guarded —
    * `'send-failed'` on {@link SyncPlayClientOptions.onFrameDropped}).
+   *
+   * @throws TypeError on non-finite or negative position
    */
   sendSeek(fromPosition: number, toPosition: number): boolean {
     SyncPlayClient.assertPosition('fromPosition', fromPosition);
@@ -879,6 +889,8 @@ export class SyncPlayClient {
    * (SPEC §9 item 2 / §9.1); on `:8097` each accepted report is additionally
    * ingested for the S446 per-member drift policy (§4 `nudge`). Host-driven
    * pacing is an integration convention, never an authorization precondition.
+   *
+   * @throws TypeError on non-finite or negative position
    */
   reportPosition(position: number, isPlaying: boolean): boolean {
     SyncPlayClient.assertPosition('position', position);
@@ -891,6 +903,86 @@ export class SyncPlayClient {
       position,
       is_playing: isPlaying,
       server_time: this.getSynchronizedTime(),
+    });
+    return true;
+  }
+
+  // --- Group enumeration / queue / host transfer (SPY-S12) -------------------
+  //
+  // Senders ride EXISTING wire codes only (SPEC §4.1/§4.2/§4.4): no new types.
+
+  /**
+   * Request the group list (`syncplay_group_list`, SPEC §4.1 — bare request,
+   * no fields). The reply arrives through
+   * {@link SyncPlayClientOptions.onGroupList}. Callable outside a group (that
+   * is its point); returns `false` only on a destroyed instance. `true` means
+   * the frame was handed to the `send` sink, not that the server answered.
+   */
+  listGroups(): boolean {
+    if (this.destroyed) {
+      return false;
+    }
+    this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_LIST, {});
+    return true;
+  }
+
+  /**
+   * Host command: REPLACE the group's playback queue wholesale
+   * (`syncplay_playback_queue`, SPEC §4.2, client shape `group_id` + `queue`
+   * of `{ media_id, media_info? }`). NOT_HOST-gated by both producers; the
+   * accepted queue comes back as the broadcast on
+   * {@link SyncPlayClientOptions.onQueueChanged}. Boolean law per
+   * {@link sendPlay} (`false` with no cached group).
+   *
+   * @throws TypeError when `queue` is not an array of items with a string `media_id`
+   */
+  sendQueue(queue: ReadonlyArray<Pick<PlaybackQueueItem, 'media_id' | 'media_info'>>): boolean {
+    if (!Array.isArray(queue)) {
+      throw new TypeError('SyncPlayClient: queue must be an array');
+    }
+    const items: Array<Pick<PlaybackQueueItem, 'media_id' | 'media_info'>> = [];
+    for (const item of queue) {
+      if (item === null || typeof item !== 'object' || typeof item.media_id !== 'string') {
+        throw new TypeError('SyncPlayClient: every queue item needs a string media_id');
+      }
+      const out: Pick<PlaybackQueueItem, 'media_id' | 'media_info'> = { media_id: item.media_id };
+      if (item.media_info !== undefined) {
+        out.media_info = item.media_info;
+      }
+      items.push(out);
+    }
+    if (this.group === null) {
+      return false;
+    }
+    this.dispatch(SYNCPLAY_MESSAGE_TYPES.PLAYBACK_QUEUE, {
+      group_id: this.group.group_id,
+      queue: items,
+    });
+    return true;
+  }
+
+  /**
+   * Host command: hand the host role to `newHostId`
+   * (`syncplay_host_transfer`, SPEC §4.4: `group_id`, `current_host_id`,
+   * `new_host_id`). `current_host_id` is this client's self-asserted
+   * `memberId` (the server authorizes by the authenticated connection).
+   * NOT_HOST-gated; the answer is a `group_state` broadcast plus
+   * {@link SyncPlayClientOptions.onHostTransfer}. Boolean law per
+   * {@link sendPlay}.
+   *
+   * @throws TypeError when `newHostId` is not a non-empty string
+   */
+  transferHost(newHostId: string): boolean {
+    if (typeof newHostId !== 'string' || newHostId === '') {
+      throw new TypeError('SyncPlayClient: newHostId must be a non-empty string');
+    }
+    if (this.group === null) {
+      return false;
+    }
+    this.dispatch(SYNCPLAY_MESSAGE_TYPES.HOST_TRANSFER, {
+      group_id: this.group.group_id,
+      current_host_id: this.memberId,
+      new_host_id: newHostId,
     });
     return true;
   }

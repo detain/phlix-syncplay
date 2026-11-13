@@ -5,6 +5,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- SPY-S12: `SyncPlayClient` gains `listGroups()`, `sendQueue(queue)` and
+  `transferHost(newHostId)` senders over the existing SPEC §4.1/§4.2/§4.4
+  wire codes (no new types); `seekThrottleMs` range and `@throws TypeError`
+  position docblocks added (SPY-S11 minor).
+
 - LW-081 (review `syncplay__crossfe` finding 12; lane w23-L1): `messages.ts`
   now re-exports the contracts wire union `SyncPlayErrorCode`
   (`@phlix/contracts#v0.5.7` `src/errors.ts`: legacy SCREAMING 12 ∪ dotted
