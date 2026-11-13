@@ -131,9 +131,9 @@ export interface SyncPlayClientOptions {
      */
     memberId: string;
     /**
-     * This client's display name (sent on create/join). Defaults to `'User'`
-     * when omitted (NOT `'Host'`, even for the group creator); aligning the
-     * default is an owner-gated wire-visible change.
+     * This client's display name (sent on create/join). Defaults to `'Host'`
+     * when omitted (changed from `'User'`, owner ruling 2026-11-13; it applies
+     * to joiners too, so pass a real name when joining).
      */
     memberName?: string;
     /**

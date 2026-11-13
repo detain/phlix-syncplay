@@ -132,7 +132,7 @@ const client = new SyncPlayClient({
   send: (message) => ws.send(JSON.stringify(message)),
   now: () => Date.now(),
   memberId,
-  memberName: 'Alice', // optional; defaults to 'User' if omitted (also for the creator)
+  memberName: 'Alice', // optional; defaults to 'Host' if omitted (also for joiners)
   onState: (group, yourId) => {
     // `yourId` is the identity the server stamped for THIS connection
     // (phlix-server `SyncPlayManager.php:1853`/`:1909` @ `a63dc0db`). Reconcile

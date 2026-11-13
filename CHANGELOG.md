@@ -5,6 +5,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- SPY-S13: `memberName` default changed from `'User'` to `'Host'` (behaviour change;
+  owner ruling 2026-11-13) in code, README and docblock; matches the server's
+  `createGroup` default, and the server join-frame fallback is aligned too.
+- Docs/docblock minors: seekThrottleMs range, `@throws TypeError` on position
+  senders, docblock rewraps, README password_hash wording.
+
 ## [0.1.9] - 2026-11-12
 
 Release cut (SPY-S16): folds the SPY-S2..S15 fix campaign (SPY-S12 senders, S11 boundary

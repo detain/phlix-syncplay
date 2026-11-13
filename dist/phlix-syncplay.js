@@ -225,7 +225,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 }, x = 250, S = class t {
 	constructor(e) {
 		var n;
-		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "User" : n, this.timeSync = new b(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
+		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "Host" : n, this.timeSync = new b(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
 	}
 	static parseSeekThrottleMs(e) {
 		if (e === void 0) return x;
