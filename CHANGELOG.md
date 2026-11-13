@@ -5,7 +5,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- Dependency upgrade: eslint + @eslint/js 10.x, @types/node 26, vite 8.3.8, vitest + coverage-v8 5.1, typescript-eslint 8.72.2; CI actions bumped (checkout v7.0.1, setup-node v7.1.0). TypeScript stays 6.0.3: typescript-eslint 8.72 peers `typescript <6.1.0`, so TS 7 is not yet usable. dist/ rebuilt with the new vite (no API change). Dev-toolchain only; nothing runtime changes.
+- Dependency upgrade: eslint 10.15 + @eslint/js 10.x, @types/node 26, vite 8.3.8, vitest + coverage-v8 5.1, typescript-eslint 8.72.2; CI actions bumped (checkout v7.0.1, setup-node v7.1.0). TypeScript stays 6.0.3: typescript-eslint 8.72 peers `typescript <6.1.0`, so TS 7 is not yet usable. dist/ rebuilt with the new vite (no API change). Dev-toolchain only; nothing runtime changes.
 - SPY-S13: `memberName` default changed from `'User'` to `'Host'` (behaviour change;
   owner ruling 2026-11-13) in code, README and docblock; matches the server's
   `createGroup` default, and the server join-frame fallback is aligned too.
