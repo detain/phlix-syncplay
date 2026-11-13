@@ -130,7 +130,11 @@ export interface SyncPlayClientOptions {
      *     likewise sees its own commands echo as foreign.
      */
     memberId: string;
-    /** This client's display name (sent on create/join). */
+    /**
+     * This client's display name (sent on create/join). Defaults to `'User'`
+     * when omitted (NOT `'Host'`, even for the group creator); aligning the
+     * default is an owner-gated wire-visible change.
+     */
     memberName?: string;
     /**
      * Command-repeat protection for {@link SyncPlayClient.sendSeek} — a

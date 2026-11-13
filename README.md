@@ -132,7 +132,7 @@ const client = new SyncPlayClient({
   send: (message) => ws.send(JSON.stringify(message)),
   now: () => Date.now(),
   memberId,
-  memberName: 'Alice',
+  memberName: 'Alice', // optional; defaults to 'User' if omitted (also for the creator)
   onState: (group, yourId) => {
     // `yourId` is the identity the server stamped for THIS connection
     // (phlix-server `SyncPlayManager.php:1853`/`:1909` @ `a63dc0db`). Reconcile
@@ -171,8 +171,8 @@ ws.onopen = () => {
 client.sendPlay(positionMs);
 client.sendPause(positionMs);
 client.sendSeek(fromMs, toMs);
-client.sendQueue([{ media_id: 'm1', media_info: { title: 'Pilot' } }]); // replaces the queue
-client.transferHost('member-b');       // hand the host role over (host only)
+client.sendQueue([{ media_id: 'm1', media_info: { title: 'Pilot' } }]); // replaces the queue; throws TypeError on malformed input
+client.transferHost('member-b');       // hand the host role over (host only); throws TypeError on malformed input
 client.listGroups();                   // any time; reply lands on onGroupList
 
 // Position report — ANY authenticated member may send it; NOT host-gated
