@@ -5,6 +5,16 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-11-12
+
+Release cut (SPY-S16): folds the SPY-S2..S15 fix campaign (SPY-S12 senders, S11 boundary
+coercion, S7 epoch guard, S10 frozen type list, S13/S15 docs). No wire-shape change, no new
+error codes. Dual-recipe dist aggregates at this cut (determinism x2): all-files
+`872b96bb5a1cf95166c9e7ac6942cdd1`, non-map `15f5c7f4d89b8ab0559b9194320acf6e`;
+`phlix-syncplay.js` `eead68d1cc994d60d714bcdf5a81ac7f`, `.umd.cjs` `cc7b5d4f2b667c5ea25e9e62e6df3ac1`.
+
+Changes:
+
 - SPY-S15: version-gate enforcement-window watch note added to `framing.ts` unwrap and
   the `client.ts` protocol_version mirror (cross-referenced; docblock only, no behavior change).
 - SPY-S13: memberName default 'User' documented in docblock/README (alignment to 'Host' remains owner-gated).
