@@ -151,7 +151,7 @@ const client = new SyncPlayClient({
   onMemberTyping: (memberId, isTyping) => {},
   onChat: (memberId, memberName, message, timestampMs) => { /* every accepted message, INCLUDING your own echo (fan-out includes the sender) — render chat from here only */ },
   onQueueChanged: (queue) => { /* wholesale queue replacement; also folded into getGroup().queue; [] = cleared */ },
-  onHostTransfer: (currentHostId, newHostId) => {}, /* defensive-only arm: zero live inbound producers — SPEC §3 types the frame client → server and the server/hub announce transfers via group_state/host_elect; build transfer UX on onState/onHostChanged */
+  onHostTransfer: (currentHostId, newHostId) => {}, /* defensive-only arm: zero live inbound producers — SPEC §3 types the frame client → server and BOTH carriers announce a voluntary transfer via a broadcast group_state (the new host rides group.host_id into onState); build transfer UX on onState — host_elect/onHostChanged fire only on host DEPARTURE */
   onPlaybackSync: (memberId, position, isPlaying, serverTime, nudge) => { /* `nudge` = server-directed S446 soft correction ({drift_ms, direction, suggested_rate, tolerance_ms, cooldown_ms}); undefined unless the `:8097` server unicasted it to THIS member — apply suggested_rate, never seek (SPEC §4) */ },
   onTimeSync: (state) => { /* { memberId, groupId, serverTimeSec, offsetMs, latencyMs, driftRate, isStable } */ },
   onGroupList: (groups) => { /* [{ id, name, member_count, has_password, current_media, is_playing }] — live producer row, SPEC §4 */ },

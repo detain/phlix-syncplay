@@ -317,10 +317,11 @@ export interface SyncPlayClientOptions {
    * The group host transferred to another member (TYPE_HOST_TRANSFER /
    * syncplay_host_transfer). DEFENSIVE-ONLY arm: §3 types the frame
    * client → server, and no live producer emits it inbound — the server's
-   * `handleHostTransfer` answers with a broadcast `syncplay_group_state` and
-   * the hub announces via `syncplay_host_elect` + state. The handler is kept
-   * in case a producer ever appears; build transfer UX on `onState` /
-   * `onHostChanged` instead (SPEC §3/§4).
+   * `handleHostTransfer` AND the hub's `handleCanonicalHostTransfer` both
+   * answer with a broadcast `syncplay_group_state` (the new host rides
+   * `group.host_id` into `onState`). The handler is kept in case a producer
+   * ever appears; build transfer UX on `onState` — `syncplay_host_elect` /
+   * `onHostChanged` fires only on host DEPARTURE (SPEC §3/§4.4/§6).
    */
   onHostTransfer?: (_currentHostId: string, _newHostId: string) => void;
   /**
@@ -971,14 +972,16 @@ export class SyncPlayClient {
    * `new_host_id`). `current_host_id` is this client's self-asserted
    * `memberId` (the server authorizes by the authenticated connection).
    * NOT_HOST-gated; the answer is a state re-fold, never an inbound
-   * `host_transfer` frame: the `:8097` server broadcasts a fresh
-   * `syncplay_group_state` (the new host rides `group.host_id` into the
-   * state delivered by {@link SyncPlayClientOptions.onState}) and the hub
-   * announces `syncplay_host_elect` + state via
-   * {@link SyncPlayClientOptions.onHostChanged}. Build transfer UX on
-   * those two — not on the defensive-only `onHostTransfer` arm, which has
-   * zero live producers (see its own doc). Boolean law per
-   * {@link sendPlay}.
+   * `host_transfer` frame: the `:8097` server (`SyncPlayManager`) and the
+   * hub relay (`handleCanonicalHostTransfer`) BOTH answer with a fresh
+   * broadcast `syncplay_group_state` — the new host rides `group.host_id`
+   * into the state delivered by {@link SyncPlayClientOptions.onState}.
+   * Build transfer UX on `onState`: `syncplay_host_elect` →
+   * {@link SyncPlayClientOptions.onHostChanged} stays scoped to host
+   * DEPARTURE on both carriers (SPEC §4.4/§6; see M-SYNCPLAY-03), never
+   * the voluntary-transfer answer. Do not build on the defensive-only
+   * `onHostTransfer` arm — zero live producers (see its own doc). Boolean
+   * law per {@link sendPlay}.
    *
    * @throws TypeError when `newHostId` is not a non-empty string
    */
