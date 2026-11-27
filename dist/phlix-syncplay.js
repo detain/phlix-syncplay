@@ -119,7 +119,12 @@ function d(e) {
 	if (typeof n.type != "string") return null;
 	let i = n.data, a = !("protocol_version" in n) && typeof i == "object" && i && !Array.isArray(i) ? (() => {
 		let e = {};
-		for (let t of Object.keys(n)) t !== "data" && (e[t] = n[t]);
+		for (let t of Object.keys(n)) t !== "data" && Object.defineProperty(e, t, {
+			value: n[t],
+			enumerable: !0,
+			writable: !0,
+			configurable: !0
+		});
 		return l(l({}, i), e);
 	})() : n;
 	return r(n.type), a;

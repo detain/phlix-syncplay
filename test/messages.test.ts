@@ -190,6 +190,59 @@ describe('framing — decodeMessage', () => {
     expect(decodeMessage({ protocol_version: 1 })).toBeNull();
     expect(decodeMessage(null)).toBeNull();
   });
+
+  it('S-syncplay-39 (phlix-syncplay-050): a planted `__proto__` key rides the legacy unwrap as an OWN inert data property — never through the [[Set]] prototype setter', () => {
+    // Legacy Tizen { type, data, timestamp } wrapper with a forged OWN
+    // `__proto__` key. JSON.parse DOES create `__proto__` as an own data
+    // property, so the old `rest[key] = record[key]` copy invoked the
+    // Object.prototype.__proto__ SETTER: rest's prototype was swapped to the
+    // attacker object and the key silently vanished from the copy — harmless
+    // today only because the trailing spread re-collects own keys (fragile
+    // by construction). Post-cure the copy is Object.defineProperty-based:
+    // no setter is ever invoked, and the planted key survives exactly as it
+    // does on the canonical pass-through path.
+    const polluted =
+      '{"type":"syncplay_playback_play","data":{"group_id":"g1"},"timestamp":1700000000000,"__proto__":{"polluted":"yes"}}';
+    const decoded = decodeMessage(polluted);
+    expect(decoded).not.toBeNull();
+    const rec = decoded as unknown as Record<string, unknown>;
+    // (a) nothing on the global prototype chain moved
+    expect(Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted')).toBe(false);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // (b) the decoded frame itself carries a pristine prototype
+    expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+    // (c) the planted key was COPIED, not consumed by the setter: own inert
+    //     data property. RED pre-cure — the [[Set]] copy dropped it.
+    expect(Object.prototype.hasOwnProperty.call(rec, '__proto__')).toBe(true);
+    expect(rec['__proto__']).toEqual({ polluted: 'yes' });
+    // (d) the legitimate unwrap still happened alongside it
+    expect(rec.type).toBe('syncplay_playback_play');
+    expect(rec.group_id).toBe('g1');
+    expect(rec.timestamp).toBe(1700000000000);
+    expect(rec).not.toHaveProperty('data');
+  });
+
+  it('S-syncplay-39: `constructor`/`prototype` keys ride the unwrap unchanged (own-shadowed before and after — the cure must not regress them)', () => {
+    const frame =
+      '{"type":"syncplay_playback_play","data":{"group_id":"g1"},"timestamp":1700000000000,"constructor":"c","prototype":"p"}';
+    const rec = decodeMessage(frame) as unknown as Record<string, unknown>;
+    expect(Object.getPrototypeOf(rec)).toBe(Object.prototype);
+    expect(Object.prototype.hasOwnProperty.call(rec, 'constructor')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(rec, 'prototype')).toBe(true);
+    expect(rec.constructor).toBe('c');
+    expect(rec.prototype).toBe('p');
+    expect(rec.group_id).toBe('g1');
+  });
+
+  it('S-syncplay-39: canonical frames (protocol_version present) pass a planted `__proto__` through untouched — the byte-compat law both paths share', () => {
+    const canonical =
+      '{"type":"syncplay_info","protocol_version":1,"timestamp":1700000000000,"message":"m","__proto__":{"x":1}}';
+    const rec = decodeMessage(canonical) as unknown as Record<string, unknown>;
+    expect(Object.getPrototypeOf(rec)).toBe(Object.prototype);
+    expect(Object.prototype.hasOwnProperty.call(rec, '__proto__')).toBe(true);
+    expect(rec['__proto__']).toEqual({ x: 1 });
+    expect(rec.message).toBe('m');
+  });
 });
 
 describe('TimeSyncPayload — server wire-shape pin (M-SYNCPLAY-03)', () => {
