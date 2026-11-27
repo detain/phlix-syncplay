@@ -1584,11 +1584,16 @@ export class SyncPlayClient {
       return;
     }
 
-    // SPY-S7: a NON-echo pong carries no t1 of its own, so it is attributable
-    // only to a ping stamped in the CURRENT connection generation. A send time
-    // from an older generation is refused (slot untouched); the pre-echo legacy
-    // shape stays accepted within-epoch.
-    if (echoed === null && this.pingEpoch !== this.connectionEpoch) {
+    // SPY-S7 + phlix-syncplay-047: the generation law covers BOTH pong arms.
+    // A send time stamped in an OLDER connection generation is refused whole
+    // (slot untouched, nothing sampled) — the pre-echo arm because a non-echo
+    // pong is attributable only to the current generation, and the echo arm
+    // because on an integer-ms clock a straggler from the dead generation can
+    // echo a t1 the current slot also carries. The pre-cure shape exempted
+    // the echo arm (`echoed === null && …`), so a wrong-epoch match reached
+    // addSample; with t3 == t2 the estimator's rtt never contains t2, and the
+    // cross-generation quad poisoned the clock.
+    if (this.pingEpoch !== this.connectionEpoch) {
       return;
     }
 
@@ -1605,9 +1610,12 @@ export class SyncPlayClient {
     this.lastPingSendTime = null;
     // M-SYNCPLAY-19: non-finite t2 would poison the offset average forever —
     // same drop-to-null treatment as a missing one (round stays consumed).
+    // phlix-syncplay-028: finite t2 must ALSO pass the LW-050 plausibility
+    // window on real-clock rounds — with t3 == t2 the estimator's rtt never
+    // contains t2, so a finite-but-absurd stamp used to sail through.
     const t2 =
       typeof pong.server_time === 'number' && Number.isFinite(pong.server_time)
-        ? pong.server_time
+        ? SyncPlayClient.pongServerTimeOrReject(t1, pong.server_time)
         : null;
 
     if (t2 === null) {
@@ -1820,6 +1828,29 @@ export class SyncPlayClient {
     }
     const plausible = raw >= 1e12 || (raw >= 1e9 && raw < 4e9);
     return plausible ? SyncPlayClient.serverTimeToMs(raw) : fallback();
+  }
+
+  /**
+   * phlix-syncplay-028 cure: the `time_pong` t2 gate was FINITE-only, so a
+   * plausible-looking-but-absurd wall stamp (the report's epoch-SECONDS
+   * 1.77e9 into an epoch-ms round, or a 9e11 uptime) was believed raw. With
+   * t3 == t2 the estimator's rtt never contains t2, so such a sample passes
+   * every RTT bound and poisons the offset average by ~1e12 — silently, for
+   * the life of the connection. On a REAL-clock round (t1 itself inside the
+   * LW-050 window) t2 now rides the same consumer-bound decision every other
+   * `server_time` arm uses — {@link serverTimeOrNow} with the seconds-vs-ms
+   * scale promotion — and an out-of-window magnitude yields null: the counted
+   * rejection path (LW-043), refusing the sample WITHOUT writing state or
+   * firing a callback it shouldn't. Synthetic-era rounds (t1 < 1e9 — the
+   * ratified LW-049 fall-through territory, and every integer-ms test clock
+   * in the estate) keep the legacy finite-only behavior bit-identically.
+   */
+  private static pongServerTimeOrReject(t1: number, raw: number): number | null {
+    if (t1 >= 1e12 || (t1 >= 1e9 && t1 < 4e9)) {
+      const decoded = SyncPlayClient.serverTimeOrNow(raw, () => Number.NaN);
+      return Number.isNaN(decoded) ? null : decoded;
+    }
+    return raw;
   }
 
   /**

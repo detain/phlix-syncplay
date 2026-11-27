@@ -480,26 +480,26 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		}
 	}
 	handleTimePong(e) {
-		let t = this.lastPingSendTime;
-		if (t === null) return;
-		let n = e, r = typeof n.client_time == "number" && Number.isFinite(n.client_time) ? n.client_time : null;
-		if (r !== null && r !== t || r === null && this.pingEpoch !== this.connectionEpoch) return;
-		let i = Math.trunc(this.now()), a = r == null ? t : r;
+		let n = this.lastPingSendTime;
+		if (n === null) return;
+		let r = e, i = typeof r.client_time == "number" && Number.isFinite(r.client_time) ? r.client_time : null;
+		if (i !== null && i !== n || this.pingEpoch !== this.connectionEpoch) return;
+		let a = Math.trunc(this.now()), o = i == null ? n : i;
 		this.lastPingSendTime = null;
-		let o = typeof n.server_time == "number" && Number.isFinite(n.server_time) ? n.server_time : null;
-		if (o === null) {
-			var s, c;
-			this.consecutiveSyncRejections += 1, (s = (c = this.options).onSyncDegraded) == null || s.call(c, this.consecutiveSyncRejections);
-		} else if (this.timeSync.addSample(a, o, o, i)) {
-			var l, u;
-			this.consecutiveSyncRejections = 0, (l = (u = this.options).onSync) == null || l.call(u, {
+		let s = typeof r.server_time == "number" && Number.isFinite(r.server_time) ? t.pongServerTimeOrReject(o, r.server_time) : null;
+		if (s === null) {
+			var c, l;
+			this.consecutiveSyncRejections += 1, (c = (l = this.options).onSyncDegraded) == null || c.call(l, this.consecutiveSyncRejections);
+		} else if (this.timeSync.addSample(o, s, s, a)) {
+			var u, d;
+			this.consecutiveSyncRejections = 0, (u = (d = this.options).onSync) == null || u.call(d, {
 				offset: this.timeSync.getOffset(),
 				latency: this.timeSync.getLatency(),
 				isStable: this.timeSync.isStable()
 			});
 		} else {
-			var d, f;
-			this.consecutiveSyncRejections += 1, (d = (f = this.options).onSyncDegraded) == null || d.call(f, this.consecutiveSyncRejections);
+			var f, p;
+			this.consecutiveSyncRejections += 1, (f = (p = this.options).onSyncDegraded) == null || f.call(p, this.consecutiveSyncRejections);
 		}
 	}
 	static normalizeMembers(e, t) {
@@ -530,6 +530,13 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	static serverTimeOrNow(e, n) {
 		return typeof e != "number" || !Number.isFinite(e) || e < 1e3 ? n() : e >= 0xe8d4a51000 || e >= 1e9 && e < 4e9 ? t.serverTimeToMs(e) : n();
+	}
+	static pongServerTimeOrReject(e, n) {
+		if (e >= 0xe8d4a51000 || e >= 1e9 && e < 4e9) {
+			let e = t.serverTimeOrNow(n, () => NaN);
+			return Number.isNaN(e) ? null : e;
+		}
+		return n;
 	}
 	static normalizeQueue(e) {
 		if (Array.isArray(e)) return e.filter((e) => typeof e == "object" && !!e).map((e) => ({

@@ -1035,6 +1035,22 @@ export declare class SyncPlayClient {
      */
     private static serverTimeOrNow;
     /**
+     * phlix-syncplay-028 cure: the `time_pong` t2 gate was FINITE-only, so a
+     * plausible-looking-but-absurd wall stamp (the report's epoch-SECONDS
+     * 1.77e9 into an epoch-ms round, or a 9e11 uptime) was believed raw. With
+     * t3 == t2 the estimator's rtt never contains t2, so such a sample passes
+     * every RTT bound and poisons the offset average by ~1e12 — silently, for
+     * the life of the connection. On a REAL-clock round (t1 itself inside the
+     * LW-050 window) t2 now rides the same consumer-bound decision every other
+     * `server_time` arm uses — {@link serverTimeOrNow} with the seconds-vs-ms
+     * scale promotion — and an out-of-window magnitude yields null: the counted
+     * rejection path (LW-043), refusing the sample WITHOUT writing state or
+     * firing a callback it shouldn't. Synthetic-era rounds (t1 < 1e9 — the
+     * ratified LW-049 fall-through territory, and every integer-ms test clock
+     * in the estate) keep the legacy finite-only behavior bit-identically.
+     */
+    private static pongServerTimeOrReject;
+    /**
      * Normalize the `group.queue` array a `group_state` frame carries
      * (M-SYNCPLAY-06: this handler used to drop the field entirely). Producer
      * coordinates and per-carrier item fields are documented on

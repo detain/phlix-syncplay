@@ -505,3 +505,259 @@ describe('LW-050 — implausible server_time magnitudes take the clock-estimate 
     expect(SPEC).toMatch(/consumer-bound trust window \(LW-050\)[\s\S]{0,80}?are not believed/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S-syncplay-23 — pong hardening (findings phlix-syncplay-028 + -047):
+// (a) an LW-050-style plausibility window on the `time_pong` t2, routed
+//     through the SAME serverTimeOrNow decision the other time arms use;
+// (b) the epoch check hoisted to cover the ECHO arm, so a pong matched to a
+//     stale-generation slot can never poison the clock.
+// Written RED-FIRST against the un-hardened client: every test marked
+// (red-first) fails until its cure lands; (holding) pins freeze behavior
+// identical before and after, and the synthetic-era (holding) pairs freeze
+// the anti-over-cure side — pre-epoch test clocks keep the legacy
+// finite-only path bit-identically (the ratified LW-049 fall-through shape
+// extended to synthetic clocks).
+// ---------------------------------------------------------------------------
+
+const CLIENT_SRC = readFileSync(fileURLToPath(new URL('../src/client.ts', import.meta.url)), 'utf8');
+
+/** A real-world integer-ms wall clock value (epoch ms, 2026-era). */
+const EPOCH_MS = 1_761_900_000_000;
+
+interface PongHarness {
+  client: SyncPlayClient;
+  sent: RawMessage[];
+  syncs: Array<{ offset: number; latency: number; isStable: boolean }>;
+  degraded: number[];
+  clock: { now: () => number; set: (v: number) => void };
+  /** The single-flight slot, read/write like the house private-poke idiom. */
+  slot: () => number | null;
+}
+
+/** Manual-clock transport harness recording the time-sync observer callbacks. */
+function makePongHarness(): PongHarness {
+  const h = {} as PongHarness;
+  h.sent = [];
+  h.syncs = [];
+  h.degraded = [];
+  let t = 1000;
+  h.clock = { now: () => t, set: (v: number) => { t = v; } };
+  const options = {
+    send: (m: RawMessage) => h.sent.push(m),
+    now: h.clock.now,
+    memberId: 'me',
+    memberName: 'Tester',
+    onSync: (s: { offset: number; latency: number; isStable: boolean }) => h.syncs.push(s),
+    onSyncDegraded: (streak: number) => h.degraded.push(streak),
+  } as ConstructorParameters<typeof SyncPlayClient>[0];
+  h.client = new SyncPlayClient(options);
+  h.slot = () => (h.client as unknown as { lastPingSendTime: number | null }).lastPingSendTime;
+  return h;
+}
+
+/** Deliver a `time_pong` with the given echo/server_time onto the client. */
+function deliverPong(h: PongHarness, clientTime: number | undefined, serverTime: unknown): void {
+  const frame: Record<string, unknown> = {
+    type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+    protocol_version: 1,
+    server_time: serverTime,
+  };
+  if (clientTime !== undefined) {
+    frame.client_time = clientTime;
+  }
+  h.client.handleIncoming(frame as RawMessage);
+}
+
+/** Ship a ping at the clock's current value (the round's t1). */
+function startRound(h: PongHarness): number {
+  h.client.pingTime();
+  return Math.trunc(h.clock.now());
+}
+
+describe('S-syncplay-23 (a): pong t2 rides the LW-050 plausibility window (finding -028)', () => {
+  it('a window-plausible ms pong on a real-clock round samples normally (holding)', () => {
+    const h = makePongHarness();
+    h.clock.set(EPOCH_MS);
+    const t1 = startRound(h);
+    expect(t1).toBe(EPOCH_MS);
+    h.clock.set(EPOCH_MS + 40);
+    deliverPong(h, EPOCH_MS, 1_761_900_001_050);
+    // rtt = 40, oneWay = 20 → offset = (t1+1050) - t1 - 20 = 1030: the
+    // server genuinely leads by ~1.05s — the window BELIEVES (after scale
+    // decision) exactly what LW-050 ratified, raw pass-through at >=1e12.
+    expect(h.syncs.map((s) => s.offset)).toEqual([1030]);
+    expect(h.degraded).toEqual([]);
+  });
+
+  it('a SECONDS-shaped pong t2 is scale-promoted on a real-clock round, not believed raw (red-first)', () => {
+    const h = makePongHarness();
+    h.clock.set(EPOCH_MS);
+    startRound(h);
+    h.clock.set(EPOCH_MS + 40);
+    deliverPong(h, EPOCH_MS, 1_761_900_001);
+    // Promoted to 1_761_900_001_000: offset = 1000 - 20 = 980. Un-hardened
+    // this same frame seeds offset ≈ -1_760_138_098_019 (rtt cancels t2) —
+    // the -028 poison: a ±1.76e12 skew that survives in the average forever.
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+    expect(h.syncs).toHaveLength(1);
+    expect(h.client.getTimeSync().getOffset()).toBe(980);
+    expect(h.degraded).toEqual([]);
+  });
+
+  it('the upper window edge 3_999_999_999 is seconds-promoted INSIDE the window (red-first: scale decision pinned)', () => {
+    const h = makePongHarness();
+    h.clock.set(EPOCH_MS);
+    startRound(h);
+    h.clock.set(EPOCH_MS + 40);
+    deliverPong(h, EPOCH_MS, 3_999_999_999);
+    // In-window means "believe after scale decision", not "believe raw":
+    // promoted → 3_999_999_999_000, offset = that - EPOCH_MS - 20. The
+    // un-hardened value would differ → this pins the windowed promotion.
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+    expect(h.client.getTimeSync().getOffset()).toBe(2_238_099_998_980);
+    expect(h.degraded).toEqual([]);
+  });
+
+  it('a 1e12-boundary pong t2 passes through the window unchanged (holding)', () => {
+    const h = makePongHarness();
+    h.clock.set(EPOCH_MS);
+    startRound(h);
+    h.clock.set(EPOCH_MS + 40);
+    deliverPong(h, EPOCH_MS, 1e12);
+    // Year-2001-era ms stamp: in-window (>=1e12), promoted only ≥ 1e12 →
+    // raw pass-through. Honestly skewed if believed, but the WINDOW is the
+    // ratified law (LW-050) — magnitude alone does not refuse it.
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+    expect(h.client.getTimeSync().getOffset()).toBe(-761_900_000_020);
+    expect(h.degraded).toEqual([]);
+  });
+
+  // Out-of-window magnitudes on a REAL-clock round: 9e11 (uptime-style,
+  // the -028 example), 5e9/4e9 (between epoch-seconds and epoch-ms — the
+  // poisoned-scale class), 999/5 (sub-window junk into the ms world).
+  const refused = [
+    { t2: 9e11, label: '9e11 uptime-shape (the -028 report example)' },
+    { t2: 5e9, label: '5e9 scale-ambiguous stamp' },
+    { t2: 4e9, label: '4e9 just past the seconds-window edge' },
+    { t2: 999, label: '999 sub-window value into an ms world' },
+    { t2: 5, label: '5 magnitude-junk stamp' },
+  ];
+  for (const { t2, label } of refused) {
+    it(`refuses the implausible pong t2 ${label} on a real-clock round (red-first: un-hardened ACCEPTS — rtt cancels t2)`, () => {
+      const h = makePongHarness();
+      h.clock.set(EPOCH_MS);
+      startRound(h);
+      h.clock.set(EPOCH_MS + 40);
+      deliverPong(h, EPOCH_MS, t2);
+      // -028 mechanism: with t3 == t2 the estimator's rtt never contains t2,
+      // so a finite-but-absurd stamp sails through addSample with rtt 40 and
+      // poisons the offset by ~1e12. The cure routes t2 through the window:
+      // refused → counted rejection (LW-043 path), exactly like a missing t2.
+      expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+      expect(h.syncs).toEqual([]);
+      expect(h.degraded).toEqual([1]);
+      // Refusal purity: M-SYNCPLAY-13 slot-release law unchanged (round
+      // consumed at match, pacing never stalls) and nothing fires onSync.
+      expect(h.slot()).toBeNull();
+      h.sent.length = 0;
+      h.client.pingTime();
+      expect(h.sent).toHaveLength(1);
+    });
+  }
+
+  it('Infinity, non-number and absent pong server_time still ride the counted rejection (holding)', () => {
+    const h = makePongHarness();
+    h.clock.set(EPOCH_MS);
+    startRound(h);
+    h.clock.set(EPOCH_MS + 40);
+    deliverPong(h, EPOCH_MS, Number.POSITIVE_INFINITY);
+    h.client.pingTime(); // slot was released at the match (M-SYNCPLAY-13 law)
+    deliverPong(h, undefined, '1761900001050');
+    h.client.pingTime();
+    deliverPong(h, undefined, undefined);
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(h.degraded).toEqual([1, 2, 3]);
+    expect(h.syncs).toEqual([]);
+  });
+
+  it('SYNTHETIC-era rounds (t1 < 1e9) keep the legacy finite-only pong path bit-identically (holding — anti-over-cure)', () => {
+    // The ratified LW-049 fall-through shape extended to test clocks: whole
+    // suites drive integer-ms synthetic time; a hard absolute window would
+    // reject t2=1100 and regress them. The window is gated on the ROUND's
+    // clock family, so a synthetic round measures as it always has.
+    const h = makePongHarness();
+    h.clock.set(1000);
+    startRound(h);
+    h.clock.set(1001);
+    deliverPong(h, 1000, 1100);
+    expect(h.client.getTimeSync().getOffset()).toBe(100);
+    h.clock.set(2000);
+    startRound(h);
+    h.clock.set(2001);
+    deliverPong(h, 2000, 2100);
+    expect(h.syncs).toHaveLength(2);
+    expect(h.degraded).toEqual([]);
+  });
+
+  it('the t2 window routes through serverTimeOrNow and rejects to the counted path (source pin)', () => {
+    expect(CLIENT_SRC).toMatch(
+      /SyncPlayClient\.pongServerTimeOrReject\(t1, pong\.server_time\)/
+    );
+    expect(CLIENT_SRC).toMatch(
+      /const decoded = SyncPlayClient\.serverTimeOrNow\(raw, \(\) => Number\.NaN\);/
+    );
+  });
+});
+
+describe('S-syncplay-23 (b): the epoch check covers the ECHO arm too (finding -047)', () => {
+  it('an echo pong matched to a stale-generation slot is refused, slot untouched (red-first)', () => {
+    // -047 scenario: fast reconnect on an integer-ms clock — a straggler
+    // pong from the dead generation echoes a t1 that the CURRENT slot also
+    // carries (poked or collided). The echo-match guard passes (echo equals
+    // the slot), then only the epoch law can refuse it. Un-hardened, the
+    // echoed value skipped the SPY-S7 epoch check entirely and seeded a
+    // cross-generation sample.
+    const h = makePongHarness();
+    h.clock.set(1000);
+    startRound(h);
+    h.client.onDisconnect();
+    // Force a cross-generation outstanding slot (gen-0 stamp, gen-1 client)
+    // — the house private-poke idiom (see the SPY-S7 test in client.test).
+    (h.client as unknown as { lastPingSendTime: number | null }).lastPingSendTime = 1000;
+    h.clock.set(1050);
+    deliverPong(h, 1000, 1100);
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(h.slot()).toBe(1000); // refusal purity: slot left intact
+    expect(h.syncs).toEqual([]); // no clock write
+    expect(h.degraded).toEqual([]); // not even announced: this is the SPY-S7 shape
+  });
+
+  it('after a stale-echo refusal the clock stays clean — a within-generation pong still lands (red-first)', () => {
+    const h = makePongHarness();
+    h.clock.set(1000);
+    startRound(h);
+    h.client.onDisconnect();
+    (h.client as unknown as { lastPingSendTime: number | null }).lastPingSendTime = 1000;
+    h.clock.set(1050);
+    deliverPong(h, 1000, 1100);
+    // Gen-1 round: age 1001 > MAX_ACCEPTABLE_RTT so the poked slot refreshes.
+    h.clock.set(2001);
+    startRound(h);
+    h.clock.set(2051);
+    deliverPong(h, 2001, 2100);
+    // Un-hardened, the refused frame had already poisoned this clock with a
+    // second sample; the cured client holds exactly the clean one.
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+    expect(h.client.getTimeSync().getOffset()).toBe(74); // 2100 - 2001 - trunc(50/2)
+    expect(h.syncs).toHaveLength(1);
+  });
+
+  it('the epoch law is unconditional in source — both pong arms share it (source pin)', () => {
+    // The pre-cure shape (`echoed === null && …`) exempted the echo arm;
+    // the cure hoists the check above the t4/t1/slot block so a wrong-epoch
+    // match cannot reach addSample on EITHER arm.
+    expect(CLIENT_SRC).toMatch(/if \(this\.pingEpoch !== this\.connectionEpoch\) \{\n\s*return;\n\s*\}/);
+    expect(CLIENT_SRC).not.toMatch(/echoed === null && this\.pingEpoch !== this\.connectionEpoch/);
+  });
+});
