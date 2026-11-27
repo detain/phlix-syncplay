@@ -1232,7 +1232,9 @@ wire (era `phlix-server` @ `98d7f691`), so a consumer sizing its client or a
 reviewer auditing "is this capped?" reads current fact rather than intent. These
 are descriptive observations of shipped behavior; they add no new client
 requirement. A value marked *error* carries the named `error_code` back to the
-client; the socket otherwise survives.
+client; the socket otherwise survives. Rows added after the original
+`98d7f691` pass carry their own era stamps in the Site column, so every row
+reads against the commit it was actually observed in.
 
 | Bound | Value | Site | On breach |
 |-------|-------|------|-----------|
@@ -1241,19 +1243,16 @@ client; the socket otherwise survives.
 | Members per group | 50 | `GroupState.php:118` (`MAX_MEMBERS`), enforced `addMember` :422 / joinGroup `SyncPlayManager.php:840` | `syncplay.group_full` |
 | Queue length | 1000 | `GroupState.php:128` (`MAX_QUEUE_SIZE`), enforced append :907 / wholesale-set `SyncPlayManager.php:1266-1272` | `syncplay.queue_limit_exceeded` |
 | Per-member nudge rate | 1 / 1000 ms | `GroupState.php:157` (`NUDGE_COOLDOWN_MS`), `claimNudgeSlot` :875 | nudge suppressed (silent, §4.2) |
+| Inbound package size — **hub relay `:8804`** | **CAPPED** — `InboundPackageCap::MAX_INBOUND_PACKAGE_BYTES` = 10485760 (10 MiB), a repo-declared value | `phlix-hub/src/Relay/InboundPackageCap.php` (const); wired at TCP-accept through `InboundHandshakeGuard::compose()` in `src/SyncPlay/SyncPlayRelayWorker.php:631-635` (era `phlix-hub` @ `b7ad2a3e`) | vendor `Input` refuses to buffer past the cap and CLOSES the connection — no `error_code` frame; the socket dies at the boundary. The same declared cap is pinned on all four hub WS surfaces (`:8802` `RelayWorker.php:323`, `:8803` `ClientRelayWorker.php:330`, `:8804` `SyncPlayRelayWorker.php:632`, `:8805` `FederationWorker.php:338`) |
+| Inbound package size — **server direct `:8097`** | **UNCAPPED** by any estate declaration — no `maxPackageSize` write exists anywhere in `phlix-server/src/` at this era; reassembly rides whatever the Workerman vendor default in the server's own vendor tree happens to be | absence of a cap site in `phlix-server/src/Server/WebSocket/` is the observation (era `phlix-server` @ `262f01d3`) | whatever vendor behavior the inherited default carries today; a vendor bump silently moves the wire bound with no estate decision — the asymmetry the hub leg closed and the server rail has NOT (server-side declaration is `R-SP-W2-03` duty) |
+| Chat message length | `MAX_CHAT_MESSAGE_BYTES` = 2048 | `GroupState.php:157` (era `phlix-server` @ `262f01d3`), enforced at the WS boundary `SyncPlayManager.php:1417-1420` (`truncateUtf8`) and again in `GroupState::addChatMessage` `:1035-1037` (`mb_strcut` belt — stored bytes are exactly the broadcast bytes) | **truncated** on a UTF-8 codepoint boundary; a body that is whitespace after truncation is dropped silently |
+| Group / member display name | `MAX_NAME_BYTES` = 128 | `GroupState.php:156`, enforced `SyncPlayManager::createGroup()` `:720-728` and `joinGroup()` `:827-833` (before the lookup, so the S289 idempotent-rejoin name refresh is covered too) | **refused** — the over-cap slot is named inside the existing `syncplay.create_failed` / `syncplay.join_failed` envelope; both REST and WS rails inherit the guard; no new wire codes |
+| Queue item `media_id` | `MAX_MEDIA_ID_BYTES` = 64 | `GroupState.php:158`, enforced in the wholesale-set parser `SyncPlayManager.php:1322-1325` | **refused all-or-nothing** (the LOW-2 law) via the existing `syncplay.queue_limit_exceeded` envelope; the current queue is left untouched |
+| Queue item `media_info` | `MAX_MEDIA_INFO_BYTES` = 4096, budgeted on the **ENCODED** size | `GroupState.php:159`, enforced `SyncPlayManager.php:1336-1342` | refused via the same envelope; the `json_encode` probe doubles as the representability gate (an opaque payload `json_encode` cannot represent, e.g. a decoded INF, refuses on the same arm) |
 
-What is **not** bounded on the wire today — the gap the review named — is a
-per-connection COMMAND frame rate, a maximum message/frame byte size, per-string
-field LENGTH caps, and a defined malformed-input close-code matrix. The server
-absorbs every inbound command frame at whatever rate a client sends (the
-library's `seekThrottleMs` coalescing in §9.1 is CLIENT-side pacing and relieves
-nothing server-side); oversized/over-long payloads and structural garbage are
-handled only by the `type`-dispatch + JSON-parse guards in §2, not by a size or
-length budget. That full normative rate/size matrix — including any delegation to
-the contracts registry for shared limits — requires new enforcement across every
-producer (including the server's own rebroadcasts) and is deferred to the
-contracts wave (`R-SP-W2-03`); it is not something this lane can normalize
-because there is no shipped behavior to describe.
+The four caps above (SH-016, shipped `96a2ee90` era, re-verified at `262f01d3`) plus the hub/server package-size asymmetry replace what this subsection previously disclaimed: the field LENGTH legs and the hub's frame-size leg are shipped behavior and are now tabled; the server's own package-size declaration is not.
+
+What is **not** bounded on the wire today is a per-connection COMMAND frame rate and a defined malformed-input close-code matrix. The server absorbs every inbound command frame at whatever rate a client sends (the library's `seekThrottleMs` coalescing in §9.1 is CLIENT-side pacing and relieves nothing server-side); oversized/over-long payloads and structural garbage ride the caps tabled above where one exists and are otherwise handled only by the `type`-dispatch + JSON-parse guards in §2, not by a rate budget. That remaining normative rate matrix — including any delegation to the contracts registry for shared limits — requires new enforcement across every producer (including the server's own rebroadcasts) and is deferred to the contracts wave (`R-SP-W2-03`); it is not something this lane can normalize because there is no shipped behavior to describe.
 
 ---
 
