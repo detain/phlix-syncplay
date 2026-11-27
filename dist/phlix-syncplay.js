@@ -542,9 +542,6 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	static finiteOr(e, t) {
 		return typeof e == "number" && Number.isFinite(e) ? e : t;
 	}
-	static finiteOrNull(e) {
-		return typeof e == "number" && Number.isFinite(e) ? e : null;
-	}
 	static finiteOrUndefined(e) {
 		return typeof e == "number" && Number.isFinite(e) ? e : void 0;
 	}
@@ -553,6 +550,9 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	static nonnegOrUndefined(e) {
 		if (!(typeof e != "number" || !Number.isFinite(e) || e < 0)) return e;
+	}
+	static nonnegOrNull(e) {
+		return typeof e != "number" || !Number.isFinite(e) || e < 0 ? null : e;
 	}
 	positionOrDrop(e) {
 		var t;
@@ -582,7 +582,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		}
 		let u = a.group_id, d = t.strOrNull(a.host_id);
 		this.group !== null && this.group.group_id !== u && this.cancelSeekCoalescing();
-		let f = this.group, p = t.normalizeMembers(a.members, d), m = t.finiteOrNull(a.current_media_duration);
+		let f = this.group, p = t.normalizeMembers(a.members, d), m = t.nonnegOrNull(a.current_media_duration);
 		if (this.group = {
 			group_id: u,
 			group_name: t.strOr(a.group_name, ""),

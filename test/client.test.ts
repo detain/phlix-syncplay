@@ -2613,6 +2613,31 @@ describe('SyncPlayClient — identity refusal, state clamps, streak reset, group
     expect(h.states[1]?.playback_position).toBe(0);
   });
 
+  it('phlix-syncplay-048: a forged negative current_media_duration folds to null — the clamp-disarming sentinel is never stored', () => {
+    const h = guardHarness(false);
+    // `-1` used to pass the finite-only guard and land in the model: every
+    // ceiling law is keyed `duration > 0`, so the fold silently ran
+    // clamp-disarmed AND advertised a negative duration to onState.
+    h.client.handleIncoming(guardGroupState({ current_media_duration: -1, playback_position: 47_000_000 }));
+    expect(h.states[0]?.current_media_duration).toBeNull();
+    expect(h.client.getGroup()?.current_media_duration).toBeNull();
+    // null is the documented "unknown duration" (LW-042): no ceiling invented,
+    // so the position passes — the REFUSAL changes the field, not the fold.
+    expect(h.states[0]?.playback_position).toBe(47_000_000);
+    // Fractional negatives take the same arm; the floor clamp is duration-
+    // independent and stays armed.
+    h.client.handleIncoming(guardGroupState({ current_media_duration: -0.5, playback_position: -5000 }));
+    expect(h.states[1]?.current_media_duration).toBeNull();
+    expect(h.states[1]?.playback_position).toBe(0);
+    // Honest arms whole: positive duration still clamps at the ceiling, and
+    // zero remains the real value a fresh room reports.
+    h.client.handleIncoming(guardGroupState({ current_media_duration: 100000, playback_position: 47_000_000 }));
+    expect(h.states[2]?.current_media_duration).toBe(100000);
+    expect(h.states[2]?.playback_position).toBe(100000);
+    h.client.handleIncoming(guardGroupState({ current_media_duration: 0 }));
+    expect(h.states[3]?.current_media_duration).toBe(0);
+  });
+
   it('LW-043a: a matched pong with a missing or non-finite server_time counts as a rejection (streak; slot still released)', () => {
     const h = makeHarness();
     h.client.pingTime();

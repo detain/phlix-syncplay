@@ -1653,10 +1653,6 @@ export class SyncPlayClient {
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
   }
 
-  private static finiteOrNull(value: unknown): number | null {
-    return typeof value === 'number' && Number.isFinite(value) ? value : null;
-  }
-
   private static finiteOrUndefined(value: unknown): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
   }
@@ -1678,6 +1674,24 @@ export class SyncPlayClient {
   private static nonnegOrUndefined(value: unknown): number | undefined {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
       return undefined;
+    }
+    return value;
+  }
+
+  /**
+   * The `null` twin of {@link nonnegOrUndefined} — and the duration-domain
+   * parse for the `group_state` fold. phlix-syncplay-048 (FUZZ R-004): a
+   * finite NEGATIVE `current_media_duration` has no honest producer, and
+   * because every ceiling law in this client is keyed `duration > 0`
+   * ({@link clampedPosition}, {@link positionOrDrop}), storing one would
+   * silently disarm the position clamp while advertising a bogus duration to
+   * every `onState` consumer. The boundary treats it exactly like an absent
+   * field (`null` = duration unknown, the documented LW-042 shape). Zero
+   * stays honest: a freshly-created room genuinely reports 0 (fold-pinned).
+   */
+  private static nonnegOrNull(value: unknown): number | null {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return null;
     }
     return value;
   }
@@ -1788,9 +1802,11 @@ export class SyncPlayClient {
     // host_id is authoritative).
     const members = SyncPlayClient.normalizeMembers(group.members, hostId);
 
-    // LW-042: one duration read feeds both model fields — the position clamp
-    // belongs to THIS fold's duration, not the stale cache.
-    const duration = SyncPlayClient.finiteOrNull(group.current_media_duration);
+    // LW-042 + phlix-syncplay-048: one duration read feeds both model fields —
+    // the position clamp belongs to THIS fold's duration, not the stale cache,
+    // and the read is a DURATION-domain parse: a forged negative folds to null
+    // (clamp disarm closed), so only `> 0` ever invents a ceiling here.
+    const duration = SyncPlayClient.nonnegOrNull(group.current_media_duration);
 
     this.group = {
       group_id: groupId,

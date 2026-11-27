@@ -853,7 +853,6 @@ export declare class SyncPlayClient {
      * are accepted; anything else takes the documented fallback.
      */
     private static finiteOr;
-    private static finiteOrNull;
     private static finiteOrUndefined;
     /**
      * Nudge rate domain (CONSOLIDATED m2): the server's only emitted values are
@@ -864,6 +863,18 @@ export declare class SyncPlayClient {
     private static nudgeRateOrUndefined;
     /** Finite AND non-negative ms (CONSOLIDATED m2): tolerance/cooldown domain. */
     private static nonnegOrUndefined;
+    /**
+     * The `null` twin of {@link nonnegOrUndefined} — and the duration-domain
+     * parse for the `group_state` fold. phlix-syncplay-048 (FUZZ R-004): a
+     * finite NEGATIVE `current_media_duration` has no honest producer, and
+     * because every ceiling law in this client is keyed `duration > 0`
+     * ({@link clampedPosition}, {@link positionOrDrop}), storing one would
+     * silently disarm the position clamp while advertising a bogus duration to
+     * every `onState` consumer. The boundary treats it exactly like an absent
+     * field (`null` = duration unknown, the documented LW-042 shape). Zero
+     * stays honest: a freshly-created room genuinely reports 0 (fold-pinned).
+     */
+    private static nonnegOrNull;
     /**
      * Inbound-position acceptance law (CONSOLIDATED m2 + the M6 clamp arm made
      * executable): finite, never negative (no honest producer for a <0
