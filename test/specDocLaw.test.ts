@@ -260,11 +260,14 @@ describe('time-sync Algorithm header names the pong echo arm (W-min123 M-SYNCPLA
 });
 
 describe('SPEC §5 owns the rtt<0 honesty note (W-min123 M-SYNCPLAY-10, review docmaint minor-8)', () => {
-  it('states the negative-rtt arm is client hardening the server reject omits', () => {
-    // The library rejects on BOTH bounds; TimeSync.php bounds rtt above only.
-    // §5 previously implied shared law without saying so (the drift-clamp
-    // honesty-note idiom this vein established was missing here).
-    expect(SPEC).toMatch(/The `rtt < 0`\s+arm is client-side hardening that the server's own rejection in/);
+  it('states both rtt bounds agree with the shipped server guard', () => {
+    // Re-blessed 2026-11-27 (S-syncplay-09, finding phlix-syncplay-009) from
+    // measured red: the pinned "client-side hardening the server omits"
+    // sentence rotated false-to-era — server 6437e318 added the negative arm
+    // ("review minor asphp-1") and TimeSync.php::addOffsetSample() @ 262f01d3
+    // (`:187`) now rejects on BOTH axes. The drop-not-average law ("never from
+    // an honest measurement") is unchanged and still pinned below.
+    expect(SPEC).toMatch(/Both bounds\s+now agree with the shipped server/);
     expect(SPEC).toMatch(/never from an honest measurement/);
   });
 });

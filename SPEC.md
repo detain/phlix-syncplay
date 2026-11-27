@@ -766,6 +766,29 @@ is_stable: boolean         (server TimeSync::isSyncStable())
 > belongs to `time_ping`/`time_pong` only). On `:8804` the hub has no producer
 > and refuses inbound use (see §8.4).
 
+> **Advisory honesty (2026-11-27, `S-syncplay-09`, finding phlix-syncplay-009).**
+> The four estimator-named fields above carry NO server estimate on any live
+> connection: `phlix-server` @ `262f01d3` builds the `time_sync` reply from
+> `TimeSync::getStatus()` (`src/Session/SyncPlay/SyncPlayManager.php:1790-1800`),
+> but that class's only sample feeder `processPong()` (`TimeSync.php:140`) has
+> zero callers across the server's `src/`, and the pong payload it would read
+> (`server_receive_time`, `TimeSync.php:144`) is never emitted by
+> `Messages::timePong()` (`src/Session/SyncPlay/Messages.php:702`) — the feed is
+> dead twice over. The store every reply reads is constructor-fresh and empty,
+> so a live `:8097` answer delivers `offset_ms` 0, `latency_ms` 0
+> (`getTimeOffset()`/`getEstimatedLatency()` return 0 on an empty buffer,
+> `TimeSync.php:249`/`:275`), `drift_rate` 1.0 and `is_stable` false
+> (`isSyncStable()` requires `OFFSET_SAMPLE_COUNT` samples, `TimeSync.php:303`).
+> Consumers MUST NOT read those four bytes as server sync knowledge — they are
+> never-fed-estimator constants, and each client's own §5 ping/pong estimator is
+> the measurement path: this library's `handleTimeSync()` forwards the frame
+> verbatim to `onTimeSync` and never feeds it into its own `TimeSync`. The same
+> constants also surface in the server-internal `getStats()` snapshot as
+> `time_sync_status` (`SyncPlayManager.php:2237-2244` @ `262f01d3`) — stats
+> scaffolding, not a §4 wire frame. Whether the server should feed its own
+> estimator is ROUTED to the `phlix-server` wave; this section documents shipped
+> reality, not intent.
+
 ### 4.6 Informational
 
 `syncplay_error` (server → client)
@@ -865,8 +888,12 @@ row lands. The port that already agreed with this ruling is the console:
 `$serverTime - $t4 + $latency` with `$rtt = $t4 - $clientTime` and
 `$latency = $rtt / 2`, which is `t2 - t1 - rtt / 2` — classical θ written
 from the receive side. Divergence during the release window is SAFE for the
-same reason the aggregation fix above is: the offset never crosses the wire
-(ping/pong carry raw `t1`/`t2` only) and each side runs its local estimator.
+same reason the aggregation fix above is: the MEASURED offset
+never crosses the wire — ping/pong carry raw `t1`/`t2` only. The `time_sync`
+advisory does NAME an `offset_ms` field, but §4.5 records that on the shipped
+server those bytes are never-fed-estimator constants carrying no estimate
+information, so no published offset can diverge: each side runs only its local
+estimator.
 
 **Clock contract.** The injected `now()` MUST return **epoch milliseconds**
 (same scale as `Date.now()`). All quad timestamps (`t1`..`t4`), positions,
@@ -883,11 +910,15 @@ echoes on the pong, so a fractional `t1` could never equal its own echo and
 every pong would be refused as a straggler. This aligns the client TO the
 existing server/hub law; no wire shape changes.
 
-- Reject the sample if `rtt < 0` or `rtt > MAX_ACCEPTABLE_RTT`. The `rtt < 0`
-  arm is client-side hardening that the server's own rejection in
-  `TimeSync.php` omits (it bounds `rtt` above only): a negative round trip
-  arises solely from a corrupt or forged echo, or a rewound local clock —
-  never from an honest measurement — and a local estimator's law is to drop
+- Reject the sample if `rtt < 0` or `rtt > MAX_ACCEPTABLE_RTT`. Both bounds
+  now agree with the shipped server: `TimeSync.php::addOffsetSample()` @
+  `262f01d3` (`:187`) rejects `rtt < 0 || rtt > MAX_ACCEPTABLE_RTT` on BOTH
+  axes (the server's negative arm landed with `6437e318`, credited to
+  "review minor asphp-1"). At `bc3b9b33` the server's guard bounded `rtt`
+  above only — the previous sentence here recorded that era and is
+  superseded. A negative round trip arises solely from a corrupt or forged
+  echo, or a rewound local clock — never from an honest measurement —
+  and a local estimator's law is to drop
   impossible samples, not average them in.
 - Keep a rolling buffer of up to `2 * OFFSET_SAMPLE_COUNT` samples.
 - **Offset** = weighted mean over the last `OFFSET_SAMPLE_COUNT` samples,
@@ -898,7 +929,9 @@ existing server/hub law; no wire shape changes.
   weighted sum at realistic RTTs and crushes offsets toward zero — ruled a
   defect by the estate and cured here and in the mobile copy; the server's
   local estimator awaits its lockstep fix, which is safe because this
-  aggregation never crosses the wire. Result rounded to whole ms.
+  aggregation never crosses the wire — the `offset_ms` bytes the `time_sync`
+  advisory carries are never-fed-estimator constants per §4.5, not a server
+  aggregation. Result rounded to whole ms.
 - **Latency** = mean of `rtt / 2` over recent samples.
 - **Stable** when `samples ≥ OFFSET_SAMPLE_COUNT` AND the **population**
   variance of the recent offsets (integer-ms samples; `sum((o - mean)²) / n`)
