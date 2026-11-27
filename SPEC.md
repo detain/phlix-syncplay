@@ -240,7 +240,7 @@ All field names are **snake_case**.
 > `handleCanonicalPlaybackSync()` `:2467-2477` @ `b7ad2a3e`). The `:8097`
 > server does NOT: the anchor-advance cure made the echo's position share one
 > ms reference tick (`phlix-server/src/Session/SyncPlay/SyncPlayManager.php`
-> `:1619`/`:1628` @ `86427c6d`), but the stamp beside it is still the older
+> `:1619`/`:1628` @ `262f01d3`), but the stamp beside it is still the older
 > seconds read (`:1615` `$serverTime = time()`; nudge leg `:1690`/`:1700` @
 > `262f01d3`), so every `:8097` group echo and S446 nudge today carries a
 > position that leads its stamp by up to one second. A producer MUST satisfy

@@ -591,8 +591,11 @@ describe('deferred-lane era-cite + TOC currency', () => {
     // forward-dated stamp was a disclosed date fiction (review minor m6; all
     // author/commit dates in the range are 2026-11-03). Re-blessed
     // 2026-11-03 → 2026-11-12 (SPY-S3) from the measured red after the
-    // SPY-S1..S5 normative SPEC legs landed on 2026-11-12.
-    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-12/);
+    // SPY-S1..S5 normative SPEC legs landed on 2026-11-12. Re-blessed again
+    // 2026-11-12 → 2026-11-27 (S-syncplay-05 fix round) from the measured red:
+    // the §4/§5 same-instant leg rotated the stamp without this paired
+    // re-bless, reddening the origin lineage (review round-1 Critical).
+    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-27/);
   });
 
   it('stamp is not older than the last commit that touched SPEC.md (staleness tripwire)', () => {
