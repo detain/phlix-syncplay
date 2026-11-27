@@ -1,5 +1,5 @@
 /**
- * messages.
+ * index.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  */
