@@ -28,6 +28,7 @@
     "test:run": "vitest run",
     "lint": "eslint ."
   },
+  "//engines": "No 'engines' declared, deliberately (SPY-S9; test/packageManifest.test.ts pins the absence and carries the full posture note, phlix-syncplay-038). The package ships a committed ES2017 dist bundle for browser/RN Hermes/legacy-WebKit runtimes, so a Node floor would misstate the constraint; the real floor is dev-only (vite engines ^20.19.0 || >=22.12.0, vitest engines ^22.12.0 || ^24.0.0 || >=26.0.0; CI builds on Node 22/24). Sibling @phlix/ui declares engines >=18.0.0; the asymmetry is intentional. Do not add engines without rotating the manifest-test absence pin in the same commit.",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@phlix/contracts": "github:detain/phlix-contracts#v0.5.8",
