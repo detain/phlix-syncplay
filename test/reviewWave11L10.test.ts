@@ -309,19 +309,24 @@ describe('LW-047 — ungrouped host_elect fires ONLY onHostChanged (ratified exc
 });
 
 // ---------------------------------------------------------------------------
-// LW-049 (review syncplay__secnet #4): protocol_version VALUE gate on
-// canonical inbound frames. Server truth mirrored (:8097 MessageHandler
-// refuses > PROTOCOL_VERSION and, since it is `is_int`-keyed, lets absent and
-// stale integer stamps fall through; hub :8804 gates nothing). Pre-wave the
-// LIBRARY also checked presence only — a protocol_version-2 frame drove the
-// v1 decoder's full state machine. Absent / 0 / negative fall through exactly
-// like the server's arms; foreign vocabulary is untouched (unknown-frame law).
+// LW-049 (review syncplay__secnet #4) + phlix-syncplay-034: protocol_version
+// VALUE gate on canonical inbound frames. Server truth mirrored (:8097
+// MessageHandler refuses > PROTOCOL_VERSION; hub :8804 gates nothing). Pre-wave
+// the LIBRARY also checked presence only — a protocol_version-2 frame drove the
+// v1 decoder's full state machine. Now refused: non-integer, above
+// PROTOCOL_VERSION, and (034) integers BELOW 1 — the sub-1 floor is stricter
+// than the server's is_int arm on purpose: `0`/negative have no honest producer
+// and are NOT the documented absent shape. Absent still falls through accepted
+// (the legacy Tizen/older-server lane, ratified); foreign vocabulary is
+// untouched (unknown-frame law).
 // ---------------------------------------------------------------------------
 describe('LW-049 — handleIncoming mirrors the server protocol_version value law on canonical frames', () => {
   const badVersions: Array<[string, unknown]> = [
     ['a higher integer', 2],
     ['a string version', '1'],
     ['a fractional version', 1.5],
+    ['zero (phlix-syncplay-034 floor)', 0],
+    ['a negative integer (phlix-syncplay-034 floor)', -1],
   ];
   for (const [label, version] of badVersions) {
     it(`refuses a canonical frame carrying ${label} — drop-reported, not applied (group_state)`, () => {
@@ -365,18 +370,29 @@ describe('LW-049 — handleIncoming mirrors the server protocol_version value la
     expect(h.drops).toHaveLength(0);
   });
 
-  it('stale integer stamps (0, -3) fall through accepted, mirroring the server is_int arm (holding)', () => {
-    for (const version of [0, -3]) {
-      const h = makeHarness();
-      h.client.handleIncoming({
-        type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
-        protocol_version: version,
-        your_id: 'me',
-        group: { group_id: 'sp_1', group_name: 'Movie Night', member_count: 1, host_id: 'host1', playback_position: 0, playback_state: 'playing' },
-      } as RawMessage);
-      expect(h.client.getGroup()?.group_id).toBe('sp_1');
-      expect(h.drops).toHaveLength(0);
-    }
+  it('the 034 floor reaches below zero: -3 is refused like 0 and -1', () => {
+    const h = makeHarness();
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: -3,
+      your_id: 'me',
+      group: { group_id: 'sp_1', group_name: 'Movie Night', member_count: 1, host_id: 'host1', playback_position: 0, playback_state: 'playing' },
+    } as RawMessage);
+    expect(h.client.getGroup()).toBeNull();
+    expect(h.drops).toHaveLength(1);
+    expect(h.drops[0].reason).toBe('malformed');
+  });
+
+  it('the floor binds at 1: the exact current stamp is applied (holding boundary)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: { group_id: 'sp_1', group_name: 'Movie Night', member_count: 1, host_id: 'host1', playback_position: 0, playback_state: 'playing' },
+    } as RawMessage);
+    expect(h.client.getGroup()?.group_id).toBe('sp_1');
+    expect(h.drops).toHaveLength(0);
   });
 
   it('the version law binds canonical frames only — foreign vocabulary still reaches onUnknownFrame (holding)', () => {

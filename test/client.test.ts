@@ -609,6 +609,32 @@ describe('SyncPlayClient — handleIncoming inbound handlers', () => {
     ]);
   });
 
+  // phlix-syncplay-034 (S-syncplay-29): REAL wire-path refusal of a frame the
+  // transport genuinely carries with a sub-1 `protocol_version`. We encode
+  // through the library's own framing (which stamps `1`), then rewrite the
+  // envelope value on the serialized JSON — the bytes a mis-stamping producer
+  // would actually put on the wire — and feed THAT through handleIncoming. The
+  // frame passes framing's presence-keyed unwrap untouched and dies at the
+  // receiver-side value law, surfacing as a `malformed` drop.
+  it('real wire bytes with protocol_version 0 are refused at the value law (malformed drop)', () => {
+    const drops: Array<{ reason: string; frame: unknown }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onFrameDropped: (reason, frame) => drops.push({ reason, frame }),
+    });
+
+    const wire = JSON.stringify(
+      { ...JSON.parse(serializeMessage(groupStateMessage('host1', 'me'))), protocol_version: 0 },
+    );
+    client.handleIncoming(wire);
+
+    expect(drops).toHaveLength(1);
+    expect(drops[0].reason).toBe('malformed');
+    expect(client.getGroup()).toBeNull();
+  });
+
   // S294 control — the pair that distinguishes a fix from deleting the guard
   // wholesale: playback_sync from self is CONSUMED (above) but command frames
   // from self are STILL DROPPED (below). If any of these ever fires, the

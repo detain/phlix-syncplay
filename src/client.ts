@@ -1213,26 +1213,39 @@ export class SyncPlayClient {
     }
     const msg = decoded as RawMessage;
 
-    // LW-049 (review syncplay__secnet #4): the receiver-side mirror of the
-    // server's `protocol_version` VALUE law, on canonical frames only. Truth
-    // mirrored: `:8097` MessageHandler refuses integer stamps HIGHER than its
-    // PROTOCOL_VERSION and (the check being `is_int`-keyed) lets ABSENT and
-    // stale integers fall through accepted; the hub :8804 gates nothing. The
-    // codec was presence-keyed only (framing unwraps on the key's existence),
-    // so a version-2 frame drove the v1 state machine. A non-integer, or an
-    // integer above what this decoder implements, is refused through the
-    // existing malformed-drop machinery — no new wire vocabulary, and absent/
-    // stale integers keep falling through exactly like the server's arms.
+    // LW-049 (review syncplay__secnet #4) + phlix-syncplay-034: the
+    // receiver-side mirror of the server's `protocol_version` VALUE law, on
+    // canonical frames only. Truth mirrored: `:8097` MessageHandler refuses
+    // integer stamps HIGHER than its PROTOCOL_VERSION; the hub :8804 gates
+    // nothing. The codec was presence-keyed only (framing unwraps on the
+    // key's existence), so a version-2 frame drove the v1 state machine. A
+    // non-integer, an integer above what this decoder implements, or an
+    // integer BELOW 1 is refused through the existing malformed-drop
+    // machinery — no new wire vocabulary. The `>= 1` floor is deliberately
+    // stricter than the server's `is_int` arm (which lets `0` and negatives
+    // fall through): both live producers mint `1`, so sub-1 stamps have no
+    // honest sender, and an explicit garbage version is NOT the documented
+    // absent shape (absent = legacy no-version; see SPY-S15 below).
     //
-    // SPY-S15 (watch note): the enforcement window is deliberately loose —
-    // absent `protocol_version` and stale integers are TOLERATED because the
-    // legacy Tizen wrapper and older servers still emit them. Tightening this
-    // gate breaks that documented tolerance, so any change belongs to a future
-    // wire-law revision made together with framing.ts `decodeMessage` unwrap
-    // (the presence-keyed `protocol_version` check there; keep the two in sync).
+    // SPY-S15 (watch note — value arm TIGHTENED by phlix-syncplay-034): the
+    // enforcement window is now loose on exactly one arm: an ABSENT
+    // `protocol_version` stays TOLERATED because the legacy Tizen wrapper and
+    // older servers omit the key. The former stale-integer tolerance is
+    // closed — an explicit integer must now lie in [1, PROTOCOL_VERSION].
+    // framing.ts `decodeMessage` remains presence-keyed on this key (it only
+    // decides the wrapper unwrap; the VALUE law lives HERE, at the one
+    // receiver boundary), so the halves stay in sync by division of labor,
+    // not mirrored tolerance. SPEC §2's tolerance paragraph and the framing
+    // SPY-S15 note still narrate the pre-034 stale-integer arm; their
+    // currency rides the S-syncplay-12 stamp of the decode-tolerance note.
     if ('protocol_version' in msg) {
       const version = (msg as { protocol_version?: unknown }).protocol_version;
-      if (typeof version !== 'number' || !Number.isInteger(version) || version > PROTOCOL_VERSION) {
+      if (
+        typeof version !== 'number' ||
+        !Number.isInteger(version) ||
+        version < 1 ||
+        version > PROTOCOL_VERSION
+      ) {
         this.options.onFrameDropped?.('malformed', msg);
         return;
       }

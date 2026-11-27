@@ -413,7 +413,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		let c = n;
 		if ("protocol_version" in c) {
 			let e = c.protocol_version;
-			if (typeof e != "number" || !Number.isInteger(e) || e > 1) {
+			if (typeof e != "number" || !Number.isInteger(e) || e < 1 || e > 1) {
 				var l, u;
 				(l = (u = this.options).onFrameDropped) == null || l.call(u, "malformed", c);
 				return;
