@@ -772,7 +772,10 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			return;
 		}
 		let f = typeof e.is_playing == "boolean" && e.is_playing, p = t.serverTimeOrNow(e.server_time, () => this.getSynchronizedTime()), m = t.normalizeNudge(e.nudge);
-		(n = (r = this.options).onPlaybackSync) == null || n.call(r, c, l, f, p, m);
+		if ((n = (r = this.options).onPlaybackSync) == null || n.call(r, c, l, f, p, m), m !== void 0) {
+			var h, g;
+			(h = (g = this.options).onNudge) == null || h.call(g, c, m);
+		}
 	}
 	handleTimeSync(e) {
 		var t, n;

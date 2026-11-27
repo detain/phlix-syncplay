@@ -355,6 +355,13 @@ export interface SyncPlayClientOptions {
    * `_memberId` is THIS client's id and the four state args carry the same
    * authoritative group state as the echo; apply `nudge.suggested_rate`
    * instead of seeking (the server's "nudge, never seek" policy).
+   *
+   * Implementing the policy on this callback is possible but was
+   * demonstrably MISSABLE (phlix-syncplay-017: both adopted consumers bound
+   * fewer than five parameters and collapsed the nudge away). Bind
+   * {@link SyncPlayClientOptions.onNudge} instead for the rate correction —
+   * it is the dedicated, un-missable surface; this 5th argument stays for
+   * the M-SYNCPLAY-08 frame-family delivery law.
    */
   onPlaybackSync?: (
     _memberId: string,
@@ -363,6 +370,32 @@ export interface SyncPlayClientOptions {
     _serverTime: number,
     nudge?: PlaybackSyncNudge,
   ) => void;
+  /**
+   * S446 rate-policy delivery, dedicated hook (phlix-syncplay-017): fires
+   * ONLY when a `syncplay_playback_sync` frame carried a `nudge` object —
+   * the directed out-of-sync correction the `:8097` server unicasts to the
+   * drifting member (`SyncPlayManager.php:1569-1585`). The group echo and
+   * every hub-relay frame carry no nudge and fire NOTHING here (absent ≠
+   * zeroed, SPEC §4/§8.4).
+   *
+   * WHY A SECOND SURFACE: one five-positional-arg callback serving both
+   * "state report (usually ignored)" and "act-now policy" lost the policy
+   * half in adoption — positional arity collapse. A NAMED option makes
+   * ignoring the correction a visible, deliberate omission. Apply
+   * `nudge.suggested_rate` as the server's "nudge, never seek" policy
+   * (`GroupState.php:39`) commands — do NOT seek in response.
+   *
+   * `_memberId` is the frame's `member_id`: per wire law the DRIFTING
+   * MEMBER's own id on a directed frame (recipient is the one nudged,
+   * `SyncPlayManager.php:1570`). `_nudge` is the SAME normalized object
+   * delivered as the 5th {@link onPlaybackSync} argument (per-field
+   * narrowing, every field optional). Ordering: fires after
+   * `onPlaybackSync` for the same frame; like every callback here it is
+   * invoked straight (THROW LAW, class header) — an `onPlaybackSync` that
+   * throws short-circuits it, and a refused frame
+   * ({@link onFrameDropped} `'malformed'`) never reaches either hook.
+   */
+  onNudge?: (_memberId: string, _nudge: PlaybackSyncNudge) => void;
   /**
    * Advisory server sync-state snapshot (TYPE_TIME_SYNC / syncplay_time_sync):
    * the server's UNICAST reply to a `syncplay_time_sync` request. Units are
@@ -2319,6 +2352,14 @@ export class SyncPlayClient {
     // carried none — the group echo and every hub-relay frame.
     const nudge = SyncPlayClient.normalizeNudge(msg.nudge);
     this.options.onPlaybackSync?.(senderId, position, isPlaying, serverTime, nudge);
+    // phlix-syncplay-017: the dedicated un-missable policy hook. Fires ONLY
+    // when the frame carried a nudge (narrowed to an object); echo/hub
+    // frames stay single-callback, refused frames never reach this line
+    // (every guard above returned via onFrameDropped first). Same normalized
+    // object as the 5th arg above — normalized once, delivered by reference.
+    if (nudge !== undefined) {
+      this.options.onNudge?.(senderId, nudge);
+    }
   }
 
   private handleTimeSync(msg: RawMessage): void {

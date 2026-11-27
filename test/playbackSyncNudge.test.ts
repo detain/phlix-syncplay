@@ -254,3 +254,135 @@ describe('M-SYNCPLAY-08 — the S446 nudge payload survives the library boundary
     expect(seen).toEqual([['drifter-1', 90000, true, 1788300111000]]);
   });
 });
+
+/**
+ * S-syncplay-14 (finding phlix-syncplay-017, CONSUMER R-003) — the DEDICATED
+ * `onNudge` option surface. The nudge rode ONLY `onPlaybackSync`'s 5th
+ * positional argument, and both adopting consumers (phlix-ui
+ * `src/api/syncplay.ts:931-938`, phlix-tizen `src/stores/useSyncPlayStore.ts:767-768`
+ * — their repos' wiring rows, cited from the review at that era) bound fewer
+ * parameters and collapsed the server's directed rate-policy away. A named
+ * callback makes the policy un-missable; consumer wiring stays their rows.
+ */
+describe('S-syncplay-14 — dedicated onNudge hook: the S446 policy is un-missable at the option surface', () => {
+  type HookEvent =
+    | { hook: 'sync'; memberId: string; nudge: PlaybackSyncNudge | undefined }
+    | { hook: 'nudge'; memberId: string; nudge: PlaybackSyncNudge }
+    | { hook: 'dropped'; reason: unknown };
+
+  function makeHookedClient(
+    memberId = 'drifter-1',
+    opts: { joinRoom?: boolean; collapseSync?: boolean } = {},
+  ) {
+    const events: HookEvent[] = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId,
+      memberName: 'Tester',
+      onFrameDropped: (reason) => events.push({ hook: 'dropped', reason }),
+      // The 4-param arm reproduces the historical consumer collapse shape
+      // (phlix-ui bound four args and `void`-ed the extras; tizen bound
+      // three) — the class of adoption that lost the policy half.
+      onPlaybackSync: opts.collapseSync
+        ? (mid, position, isPlaying, serverTime) => {
+            void position;
+            void isPlaying;
+            void serverTime;
+            events.push({ hook: 'sync', memberId: mid, nudge: undefined });
+          }
+        : (mid, _position, _isPlaying, _serverTime, nudge) =>
+            events.push({ hook: 'sync', memberId: mid, nudge }),
+      onNudge: (mid, nudge) => events.push({ hook: 'nudge', memberId: mid, nudge }),
+    });
+    if (opts.joinRoom !== false) {
+      // LW-044 grouped-delivery premise (see makeClient); explicit `members`
+      // per the S-syncplay-24 refusal law.
+      client.handleIncoming({
+        type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+        protocol_version: 1,
+        your_id: memberId,
+        group: { group_id: 'sp_nudge_room', host_id: 'host-1', members: [] },
+      });
+    }
+    return { client, events };
+  }
+
+  it('a directed frame fires onNudge ONCE, after onPlaybackSync, with the SAME normalized object', () => {
+    const { client, events } = makeHookedClient('drifter-1');
+    feed(client, DIRECTED_NUDGE_BEHIND);
+
+    expect(events.map((e) => e.hook)).toEqual(['sync', 'nudge']);
+    const syncEvent = events[0] as Extract<HookEvent, { hook: 'sync' }>;
+    const nudgeEvent = events[1] as Extract<HookEvent, { hook: 'nudge' }>;
+    // One normalization, shared reference — both surfaces carry the same policy.
+    expect(nudgeEvent.nudge).toBe(syncEvent.nudge);
+    expect(nudgeEvent.memberId).toBe('drifter-1');
+    expect(nudgeEvent.nudge).toEqual({
+      drift_ms: 3500,
+      direction: 'behind',
+      suggested_rate: 1.1,
+      tolerance_ms: 2000,
+      cooldown_ms: 1000,
+    });
+  });
+
+  it('the group echo and the hub-relay frame fire NO onNudge (state-only frames keep single-callback delivery)', () => {
+    const host = makeHookedClient('host-1');
+    feed(host.client, GROUP_ECHO_FRAME);
+    expect(host.events.map((e) => e.hook)).toEqual(['sync']);
+
+    const hub = makeHookedClient('hub-client-1');
+    feed(hub.client, HUB_ECHO_FRAME);
+    expect(hub.events.map((e) => e.hook)).toEqual(['sync']);
+  });
+
+  it('a 4-parameter onPlaybackSync binder — the exact collapse shape that lost the policy — still receives it here', () => {
+    const { client, events } = makeHookedClient('drifter-1', { collapseSync: true });
+    feed(client, DIRECTED_NUDGE_BEHIND);
+
+    expect(events.map((e) => e.hook)).toEqual(['sync', 'nudge']);
+    const nudgeEvent = events[1] as Extract<HookEvent, { hook: 'nudge' }>;
+    expect(nudgeEvent.memberId).toBe('drifter-1');
+    expect(nudgeEvent.nudge).toEqual({
+      drift_ms: 3500,
+      direction: 'behind',
+      suggested_rate: 1.1,
+      tolerance_ms: 2000,
+      cooldown_ms: 1000,
+    });
+  });
+
+  it('presence is the policy: a present-but-partial nudge still fires (narrowed per-field); a non-object nudge never fires one', () => {
+    const { client, events } = makeHookedClient('drifter-1');
+    feed(
+      client,
+      envelope({
+        member_id: 'drifter-1',
+        position: 1000,
+        is_playing: false,
+        server_time: 1788300111,
+        nudge: { drift_ms: 2500, direction: 'sideways', suggested_rate: 'fast' },
+      }),
+    );
+    const partial = events[1] as Extract<HookEvent, { hook: 'nudge' }>;
+    expect(partial.hook).toBe('nudge');
+    expect(partial.nudge).toEqual({
+      drift_ms: 2500,
+      direction: undefined,
+      suggested_rate: undefined,
+      tolerance_ms: undefined,
+      cooldown_ms: undefined,
+    });
+
+    feed(client, { ...GROUP_ECHO_FRAME, member_id: 'drifter-1', nudge: 'nope' });
+    expect(events.filter((e) => e.hook === 'nudge')).toHaveLength(1);
+  });
+
+  it('purity: a refused frame (LW-044 no-group) reaches neither hook — only onFrameDropped', () => {
+    const { client, events } = makeHookedClient('drifter-1', { joinRoom: false });
+    feed(client, DIRECTED_NUDGE_BEHIND);
+
+    expect(events).toEqual([{ hook: 'dropped', reason: 'malformed' }]);
+  });
+});
