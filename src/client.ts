@@ -970,8 +970,14 @@ export class SyncPlayClient {
    * (`syncplay_host_transfer`, SPEC §4.4: `group_id`, `current_host_id`,
    * `new_host_id`). `current_host_id` is this client's self-asserted
    * `memberId` (the server authorizes by the authenticated connection).
-   * NOT_HOST-gated; the answer is a `group_state` broadcast plus
-   * {@link SyncPlayClientOptions.onHostTransfer}. Boolean law per
+   * NOT_HOST-gated; the answer is a state re-fold, never an inbound
+   * `host_transfer` frame: the `:8097` server broadcasts a fresh
+   * `syncplay_group_state` (the new host rides `group.host_id` into the
+   * state delivered by {@link SyncPlayClientOptions.onState}) and the hub
+   * announces `syncplay_host_elect` + state via
+   * {@link SyncPlayClientOptions.onHostChanged}. Build transfer UX on
+   * those two — not on the defensive-only `onHostTransfer` arm, which has
+   * zero live producers (see its own doc). Boolean law per
    * {@link sendPlay}.
    *
    * @throws TypeError when `newHostId` is not a non-empty string
