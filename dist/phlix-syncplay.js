@@ -223,7 +223,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 }, x = 250, S = class t {
 	constructor(e) {
 		var n;
-		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "Host" : n, this.timeSync = new b(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
+		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "intendsMembership", !0), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "Host" : n, this.timeSync = new b(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
 	}
 	static parseSeekThrottleMs(e) {
 		if (e === void 0) return x;
@@ -266,7 +266,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			member_id: this.memberId,
 			member_name: this.memberName
 		};
-		i !== void 0 && (a.password_hash = i), this.dispatch(e.GROUP_CREATE, a);
+		i !== void 0 && (a.password_hash = i), this.intendsMembership = !0, this.dispatch(e.GROUP_CREATE, a);
 	}
 	joinGroup(n, r) {
 		let i = t.parsePasswordHash(r);
@@ -276,13 +276,13 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			member_id: this.memberId,
 			member_name: this.memberName
 		};
-		i !== void 0 && (a.password_hash = i), this.dispatch(e.GROUP_JOIN, a);
+		i !== void 0 && (a.password_hash = i), this.intendsMembership = !0, this.dispatch(e.GROUP_JOIN, a);
 	}
 	leaveGroup() {
 		if (this.group === null) return !1;
 		this.cancelSeekCoalescing();
 		let t = this.group.group_id;
-		return this.group = null, this.dispatch(e.GROUP_LEAVE, {
+		return this.group = null, this.intendsMembership = !1, this.dispatch(e.GROUP_LEAVE, {
 			group_id: t,
 			member_id: this.memberId
 		}), !0;
@@ -597,53 +597,58 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	}
 	handleGroupState(e) {
 		var n, r;
-		let i = e, a = i.group;
-		if (typeof a != "object" || !a) {
-			var o, s;
-			(o = (s = this.options).onFrameDropped) == null || o.call(s, "malformed", e);
+		if (!this.intendsMembership) {
+			var i, a;
+			(i = (a = this.options).onFrameDropped) == null || i.call(a, "malformed", e);
 			return;
 		}
-		if (typeof a.group_id != "string") {
+		let o = e, s = o.group;
+		if (typeof s != "object" || !s) {
 			var c, l;
 			(c = (l = this.options).onFrameDropped) == null || c.call(l, "malformed", e);
 			return;
 		}
-		if (a.members === void 0) {
+		if (typeof s.group_id != "string") {
 			var u, d;
 			(u = (d = this.options).onFrameDropped) == null || u.call(d, "malformed", e);
 			return;
 		}
-		let f = a.group_id, p = t.strOrNull(a.host_id);
-		this.group !== null && this.group.group_id !== f && this.cancelSeekCoalescing();
-		let m = this.group, h = t.normalizeMembers(a.members, p), g = t.nonnegOrNull(a.current_media_duration);
+		if (s.members === void 0) {
+			var f, p;
+			(f = (p = this.options).onFrameDropped) == null || f.call(p, "malformed", e);
+			return;
+		}
+		let m = s.group_id, h = t.strOrNull(s.host_id);
+		this.group !== null && this.group.group_id !== m && this.cancelSeekCoalescing();
+		let g = this.group, _ = t.normalizeMembers(s.members, h), v = t.nonnegOrNull(s.current_media_duration);
 		if (this.group = t.freezeGroup({
-			group_id: f,
-			group_name: t.strOr(a.group_name, ""),
-			members: h,
-			member_count: t.finiteOrUndefined(a.member_count),
-			host_id: p,
-			current_media_id: t.strOrNull(a.current_media_id),
-			current_media_duration: g,
-			playback_position: t.clampedPosition(a.playback_position, g),
-			playback_state: t.playbackState(a.playback_state),
-			queue: t.normalizeQueue(a.queue),
-			created_at: t.finiteOrUndefined(a.created_at),
-			last_activity_at: t.finiteOrUndefined(a.last_activity_at)
-		}), m !== null && m.group_id === f) {
-			let e = new Set(h.map((e) => e.id));
-			for (let t of m.members) if (!e.has(t.id)) {
-				var _, v;
-				(_ = (v = this.options).onMemberLeft) == null || _.call(v, {
+			group_id: m,
+			group_name: t.strOr(s.group_name, ""),
+			members: _,
+			member_count: t.finiteOrUndefined(s.member_count),
+			host_id: h,
+			current_media_id: t.strOrNull(s.current_media_id),
+			current_media_duration: v,
+			playback_position: t.clampedPosition(s.playback_position, v),
+			playback_state: t.playbackState(s.playback_state),
+			queue: t.normalizeQueue(s.queue),
+			created_at: t.finiteOrUndefined(s.created_at),
+			last_activity_at: t.finiteOrUndefined(s.last_activity_at)
+		}), g !== null && g.group_id === m) {
+			let e = new Set(_.map((e) => e.id));
+			for (let t of g.members) if (!e.has(t.id)) {
+				var y, b;
+				(y = (b = this.options).onMemberLeft) == null || y.call(b, {
 					id: t.id,
 					name: t.name
 				});
 			}
 		}
-		(n = (r = this.options).onState) == null || n.call(r, this.group, typeof i.your_id == "string" ? i.your_id : void 0);
-		let y = i.your_id;
-		if (typeof y == "string" && y !== this.memberId) {
-			var b, x;
-			(b = (x = this.options).onIdentityMismatch) == null || b.call(x, y, this.memberId);
+		(n = (r = this.options).onState) == null || n.call(r, this.group, typeof o.your_id == "string" ? o.your_id : void 0);
+		let x = o.your_id;
+		if (typeof x == "string" && x !== this.memberId) {
+			var S, C;
+			(S = (C = this.options).onIdentityMismatch) == null || S.call(C, x, this.memberId);
 		}
 	}
 	handlePlayback(e, n) {

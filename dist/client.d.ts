@@ -524,6 +524,21 @@ export declare class SyncPlayClient {
     private seekFlushTimer;
     private group;
     /**
+     * S-syncplay-17 (finding phlix-syncplay-020): the intended-membership latch.
+     * `handleGroupState` adopts a room ONLY while this is armed, so an in-flight
+     * `group_state` echo that arrives AFTER a voluntary `leaveGroup()` can no
+     * longer re-materialize the room we just left. Armed at construction (a
+     * server-pushed first state is a legitimate adoption — SPEC §10.1 item 2's
+     * fresh-state paths must not need a join call to function); disarmed by
+     * `leaveGroup()` before its `group_leave` ships (SPY-5 unwind-before-send:
+     * a throwing sink still leaves AND still disarms); re-armed by every
+     * explicit `joinGroup()`/`createGroup()` before their dispatch.
+     * `onDisconnect()` deliberately does NOT disarm (involuntary — resuming the
+     * room by adopting the next state is lawful recovery), and `destroy()`
+     * needs no latch write: the LW-046 routing halt already admits zero frames.
+     */
+    private intendsMembership;
+    /**
      * LW-046: latch set by {@link SyncPlayClient.destroy}. The m18 docblock
      * already promised INERTY — this is the field that makes it true: inbound
      * routing, the void senders and the coalescer re-arm all consult it, and
@@ -695,6 +710,11 @@ export declare class SyncPlayClient {
      * Leave the current group. Returns whether the LEAVE frame actually
      * dispatched — `false` with no cached group (CONSOLIDATED m4: the silent
      * void no-op gave wrappers no way to show "still joining").
+     *
+     * S-syncplay-17: the leave is VOLUNTARY, so it also disarms the
+     * intended-membership latch — a late `group_state` echo for the room just
+     * left is refused whole (`SPEC §10.1`, finding phlix-syncplay-020). Only an
+     * explicit `joinGroup()`/`createGroup()` re-arms.
      */
     leaveGroup(): boolean;
     /**

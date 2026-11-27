@@ -1589,6 +1589,23 @@ seed a sample (any such sample would itself be rejected on `rtt`), so it is
 treated as lost and the next call may re-ping; a matched pong frees the slot
 even when it omits `server_time`.
 
+**Post-leave echo — the intended-membership latch.** Item 2 discards state on an
+*involuntary* drop; a *voluntary* `leaveGroup()` is a stronger claim: the client
+MUST NOT re-adopt the room it just left, and a `syncplay_group_state` echo still
+in flight on the server side MUST be refused. The client therefore carries a
+per-instance intent flag: armed at construction (a server-pushed first state is
+a legitimate adoption), re-armed by every explicit `joinGroup()`/`createGroup()`
+before their dispatch — a throwing send sink still counts (the caller asked to
+join either way) — and disarmed by `leaveGroup()` before its `group_leave`
+ships. While disarmed, an inbound `group_state` is refused whole through the
+`'malformed'` frame-drop lane (the same vocabulary post-leave `playback`/`seek`/
+`playback_sync` echoes already use): zero writes to the cached group, and no
+`onState`, roster-diff `onMemberLeft`, or identity-mismatch probe fires for a
+refused frame. `onDisconnect()` does NOT disarm — item 2's fresh-state adoption
+stays lawful, and §10.2's recovery re-arms by re-joining. `destroy()` needs no
+latch write; its routing halt already admits zero frames. The ONLY way back to
+adoption is an explicit join: want the room, `joinGroup()` again.
+
 ### 10.2 Required recovery sequence
 
 ```

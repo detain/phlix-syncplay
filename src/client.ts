@@ -577,6 +577,21 @@ export class SyncPlayClient {
 
   private group: SyncPlayGroup | null = null;
   /**
+   * S-syncplay-17 (finding phlix-syncplay-020): the intended-membership latch.
+   * `handleGroupState` adopts a room ONLY while this is armed, so an in-flight
+   * `group_state` echo that arrives AFTER a voluntary `leaveGroup()` can no
+   * longer re-materialize the room we just left. Armed at construction (a
+   * server-pushed first state is a legitimate adoption — SPEC §10.1 item 2's
+   * fresh-state paths must not need a join call to function); disarmed by
+   * `leaveGroup()` before its `group_leave` ships (SPY-5 unwind-before-send:
+   * a throwing sink still leaves AND still disarms); re-armed by every
+   * explicit `joinGroup()`/`createGroup()` before their dispatch.
+   * `onDisconnect()` deliberately does NOT disarm (involuntary — resuming the
+   * room by adopting the next state is lawful recovery), and `destroy()`
+   * needs no latch write: the LW-046 routing halt already admits zero frames.
+   */
+  private intendsMembership = true;
+  /**
    * LW-046: latch set by {@link SyncPlayClient.destroy}. The m18 docblock
    * already promised INERTY — this is the field that makes it true: inbound
    * routing, the void senders and the coalescer re-arm all consult it, and
@@ -840,6 +855,9 @@ export class SyncPlayClient {
     if (parsed !== undefined) {
       payload.password_hash = parsed;
     }
+    // S-syncplay-17: an explicit create IS the intent to be in a room — re-arm
+    // before dispatch (SPY-5 symmetry: the caller joined either way).
+    this.intendsMembership = true;
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_CREATE, payload);
   }
 
@@ -872,6 +890,8 @@ export class SyncPlayClient {
     if (parsed !== undefined) {
       payload.password_hash = parsed;
     }
+    // S-syncplay-17: re-arm the intended-membership latch (see {@link createGroup}).
+    this.intendsMembership = true;
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_JOIN, payload);
   }
 
@@ -879,6 +899,11 @@ export class SyncPlayClient {
    * Leave the current group. Returns whether the LEAVE frame actually
    * dispatched — `false` with no cached group (CONSOLIDATED m4: the silent
    * void no-op gave wrappers no way to show "still joining").
+   *
+   * S-syncplay-17: the leave is VOLUNTARY, so it also disarms the
+   * intended-membership latch — a late `group_state` echo for the room just
+   * left is refused whole (`SPEC §10.1`, finding phlix-syncplay-020). Only an
+   * explicit `joinGroup()`/`createGroup()` re-arms.
    */
   leaveGroup(): boolean {
     if (this.group === null) {
@@ -887,9 +912,11 @@ export class SyncPlayClient {
     // A coalesced seek that never shipped belongs to the room we are leaving.
     this.cancelSeekCoalescing();
     // SPY-5: unwind BEFORE the send — a throwing sink (closed socket) must not
-    // leave the stale group cached; the caller left either way.
+    // leave the stale group cached; the caller left either way. The latch
+    // unwinds with the cache for the same reason (S-syncplay-17).
     const groupId = this.group.group_id;
     this.group = null;
+    this.intendsMembership = false;
     this.dispatch(SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE, {
       group_id: groupId,
       member_id: this.memberId,
@@ -2078,6 +2105,17 @@ export class SyncPlayClient {
   }
 
   private handleGroupState(msg: RawMessage): void {
+    // S-syncplay-17 (finding phlix-syncplay-020, SPEC §10.1): the intended-
+    // membership gate runs BEFORE any shape work or side effect. After a
+    // VOLUNTARY leave, an in-flight `group_state` echo for the room just left
+    // must not re-adopt it — refusal follows the LW-044 whole-frame lane
+    // ('malformed' is the estate vocabulary for a frame this client will not
+    // attribute), reaching neither the store, onState, the roster diff, nor
+    // the c03 mismatch probe. Only joinGroup()/createGroup() re-arm.
+    if (!this.intendsMembership) {
+      this.options.onFrameDropped?.('malformed', msg);
+      return;
+    }
     const payload = msg as Partial<GroupStatePayload>;
     const group = payload.group;
     if (typeof group !== 'object' || group === null) {

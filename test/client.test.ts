@@ -3354,3 +3354,98 @@ describe('S-syncplay-03 — adoptServerIdentity / onIdentityMismatch seam', () =
     expect(h.client.getGroup()?.host_id).toBe('hub-uuid-10'); // new store object
   });
 });
+
+describe('SyncPlayClient — intended-membership latch: post-leave group_state echoes refused (phlix-syncplay-020, S-syncplay-17, 2026-11-27)', () => {
+  /** Recorder harness local to the latch law: captures every observable side effect adoption would produce. */
+  function makeLatchHarness() {
+    const sent: RawMessage[] = [];
+    const drops: Array<{ reason: string; frame: unknown }> = [];
+    const states: Array<{ group: SyncPlayGroup; yourId: string | undefined }> = [];
+    const left: Array<{ id: string; name: string }> = [];
+    const mismatches: Array<{ serverYourId: string; clientMemberId: string }> = [];
+    const client = new SyncPlayClient({
+      send: (m) => sent.push(m),
+      now: () => 1000,
+      memberId: 'me',
+      memberName: 'Tester',
+      onFrameDropped: (reason, frame) => drops.push({ reason, frame }),
+      onState: (group, yourId) => states.push({ group, yourId }),
+      onMemberLeft: (member) => left.push(member),
+      onIdentityMismatch: (serverYourId, clientMemberId) => mismatches.push({ serverYourId, clientMemberId }),
+    });
+    return { client, sent, drops, states, left, mismatches };
+  }
+
+  it('voluntary leave disarms: an in-flight group_state echo is refused whole with zero state writes', () => {
+    const h = makeLatchHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me')); // adopt (server push, latch armed by construction)
+    h.drops.length = 0;
+    h.states.length = 0;
+    h.sent.length = 0;
+    expect(h.client.leaveGroup()).toBe(true);
+    expect(h.sent.at(-1)).toMatchObject({ type: 'syncplay_group_leave', group_id: 'sp_abc' });
+    expect(h.client.getGroup()).toBeNull();
+    // Late echo from the server: contradicting your_id + moved position. Pre-latch this RE-ADOPTED the room
+    // (finding phlix-syncplay-020); post-latch it must die at the gate before ANY side effect.
+    const echo = groupStateMessageAt('host1', 'ghost-of-me', 42424);
+    h.client.handleIncoming(echo);
+    expect(h.drops).toEqual([{ reason: 'malformed', frame: echo }]); // LW-044 whole-frame refusal vocabulary
+    expect(h.states).toHaveLength(0); // no onState
+    expect(h.left).toHaveLength(0); // no roster-diff onMemberLeft
+    expect(h.mismatches).toHaveLength(0); // no c03 mismatch probe on a refused frame
+    expect(h.client.getGroup()).toBeNull(); // zero store writes
+  });
+
+  it('SPY-5 symmetry: a leave whose send sink throws still disarms the latch', () => {
+    const drops: Array<{ reason: string }> = [];
+    const client = new SyncPlayClient({
+      send: () => {
+        throw new Error('socket closed');
+      },
+      now: () => 1000,
+      memberId: 'me',
+      memberName: 'Tester',
+      onFrameDropped: (reason) => drops.push({ reason }),
+    });
+    client.handleIncoming(groupStateMessage('host1', 'me'));
+    expect(client.getGroup()).not.toBeNull();
+    expect(() => client.leaveGroup()).toThrow('socket closed'); // unwind-before-send: cache AND latch already cleared
+    expect(client.getGroup()).toBeNull();
+    client.handleIncoming(groupStateMessage('host1', 'me'));
+    expect(drops).toEqual([{ reason: 'malformed' }]); // echo refused even though the frame itself is well-formed
+    expect(client.getGroup()).toBeNull();
+  });
+
+  it('joinGroup re-arms: after a voluntary leave, an explicit join re-admits group_state', () => {
+    const h = makeLatchHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.leaveGroup();
+    h.states.length = 0;
+    h.client.joinGroup('sp_abc');
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    expect(h.states).toHaveLength(1);
+    expect(h.client.getGroup()?.group_id).toBe('sp_abc');
+  });
+
+  it('createGroup re-arms: after a voluntary leave, an explicit create re-admits group_state', () => {
+    const h = makeLatchHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.leaveGroup();
+    h.states.length = 0;
+    h.client.createGroup('Movie Night');
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    expect(h.states).toHaveLength(1);
+    expect(h.client.getGroup()?.group_id).toBe('sp_abc');
+  });
+
+  it('involuntary disconnect does NOT disarm: §10.1 item 2 fresh-state adoption stays lawful', () => {
+    const h = makeLatchHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.onDisconnect(); // transport drop, not a choice
+    h.states.length = 0;
+    h.client.handleIncoming(groupStateMessageAt('host1', 'me', 5));
+    expect(h.drops).toHaveLength(0);
+    expect(h.states).toHaveLength(1); // resumed room adopted (recovery per §10.2 re-joins explicitly)
+    expect(h.client.getGroup()?.group_id).toBe('sp_abc');
+  });
+});
