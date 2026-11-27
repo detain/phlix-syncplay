@@ -12,7 +12,7 @@ The authoritative implementation is the PHP server:
 
 `@phlix/syncplay` is the canonical JS port of that protocol.
 
-> **Document revision:** 2026-11-12 — wire era `@phlix/syncplay` v0.1.6. This
+> **Document revision:** 2026-11-27 — wire era `@phlix/syncplay` v0.1.6. This
 > stamp is rotated with every normative edit to this document (per §1 item 6's
 > era-pin discipline), so a consumer can answer "which spec revision does my
 > build conform to?" without git archaeology.
@@ -230,6 +230,33 @@ All field names are **snake_case**.
 > stamp through untouched), and `time_pong`'s `server_time` is ms on BOTH
 > carriers (server `TimeSync::processPing()` `(int)(microtime(true) * 1000)`).
 > The exception covers the `:8097` server-stamped arms above and nothing else.
+>
+> **Same-instant law (echoed position + `server_time`).** A frame that echoes
+> a playhead MUST stamp `server_time` at the same instant the `position`
+> travelling with it was read: ONE reference tick, both fields. The `:8804`
+> hub satisfies the law by construction — its canonical `playback_sync` echo
+> reads `nowMs()` once and drives BOTH the advanced position and the stamp
+> from that single value (`phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php`
+> `handleCanonicalPlaybackSync()` `:2467-2477` @ `b7ad2a3e`). The `:8097`
+> server does NOT: the anchor-advance cure made the echo's position share one
+> ms reference tick (`phlix-server/src/Session/SyncPlay/SyncPlayManager.php`
+> `:1619`/`:1628` @ `86427c6d`), but the stamp beside it is still the older
+> seconds read (`:1615` `$serverTime = time()`; nudge leg `:1690`/`:1700` @
+> `262f01d3`), so every `:8097` group echo and S446 nudge today carries a
+> position that leads its stamp by up to one second. A producer MUST satisfy
+> the law one of two ways: stamp the same ms tick the position was advanced
+> to (the hub's one-tick form — the only lawful form for an ms carrier), or
+> keep a seconds stamp and FLOOR the position consistently with it (quantize
+> the advanced position into the second the stamp names). A carrier that must
+> expose both scales MUST name the ms one with the `_ms` suffix (§4.5's
+> `time_sync` snapshot convention) — never an unmarked dual. The named
+> `:8097` deviation is OPEN: the emission fix is a phlix-server producer
+> change, outside this document's surface; until it ships, `:8097` echoes
+> breach this law by ≤1s and §5's advance law inherits the error, with the
+> consumer duty stated there. The `?? time()` echo-fallback arms in the
+> exception above ride this same law whenever the server stamps them; a
+> sender-supplied ms stamp echoed verbatim is the SENDER's pair to keep
+> same-instant.
 >
 > **Delivery policy — what `@phlix/syncplay` consumers see.** Playhead-bearing
 > frames are normalized to ms AT PARSE: `SyncPlayClient.serverTimeToMs`
@@ -864,6 +891,22 @@ existing server/hub law; no wire shape changes.
   is client-side hardening and changes nothing on the wire.
 - **Adjusted position**:
   `position + (synchronizedNow - serverTime) * driftRate`.
+- **The advance law's input contract (same-instant).** The formula is honest
+  only when `position` and `serverTime` describe the SAME instant — §4's
+  same-instant law. `:8804` echoes satisfy it (one hub tick drives both
+  fields); `:8097` echoes do NOT while that producer deviation stays open:
+  the delivered stamp is `time()` normalized by `serverTimeToMs`
+  (`src/client.ts`), which names the START of the second the position was
+  read, so `synchronizedNow - serverTime` is an UPPER bound inflated by up
+  to 999 ms per echo. Advancing on the raw delta over-advances by that
+  sub-second band — the rubber-band the anchor-advance cure exists to
+  remove. Consumers MUST treat a `:8097`-echoed advance as floor-uncertain
+  to ±1s and bound any correction to the discontinuity the pair actually
+  explains: a correction larger than the jump is not justified by the stamp.
+  The library applies no advance on the delivery path — `onPlaybackSync`
+  hands the normalized pair through, and `TimeSync.getAdjustedPosition`
+  (`src/time-sync.ts`) documents the same-instant input it assumes. The
+  durable cure is §4's producer-side fix, not a client-side fudge.
 - **Freshness and degradation (client observability).** The window above has
   no expiry: after a sleep or a frozen timer tab the aggregates serve a hours-
   old window with full confidence. The library therefore exposes the inputs
