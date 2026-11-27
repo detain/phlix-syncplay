@@ -546,15 +546,21 @@ export interface GroupListResponsePayload {
  * The wire's typed error-name union, re-exported from `@phlix/contracts`
  * (LW-081, review `syncplay__crossfe` finding 12). The contracts source is
  * the single definition — `src/errors.ts` `SyncPlayErrorCode` = legacy
- * SCREAMING 12 ∪ dotted twins 8 = 20 names measured at `#v0.5.7` — and this
- * line is a pure TYPE re-export: it is erased at build (both JS bundles stay
- * byte-identical; `test/errorCodeUnion.test.ts` L1/L2/L3 pin that lineage,
- * the catalogue equality and the shipped `dist/messages.d.ts`). It exists so
- * consumers type-switch on `error_code` while importing only this package.
- * `error_code` itself deliberately keeps the free-`string` wire typing below
- * and in `SyncPlayClientOptions.onError` (parse-don't-validate on an external
- * wire; the client's `'UNKNOWN'` fallback sentinel is intentionally NOT a
- * union member).
+ * SCREAMING 12 ∪ dotted twins 8 = 20 names measured at `#v0.5.8` (restamped
+ * from `#v0.5.7` by S-syncplay-30; the set is identical at both pins) — and
+ * this line is a pure TYPE re-export: it is erased at build (both JS bundles
+ * stay byte-identical; `test/errorCodeUnion.test.ts` L1/L2/L3 pin that
+ * lineage, the catalogue equality and the shipped `dist/messages.d.ts`).
+ * Because this line exists, the shipped d.ts graph references
+ * `@phlix/contracts` and the manifest declares it a REQUIRED peer
+ * (phlix-syncplay-035; see package.json `//peerDependencies`). The re-export
+ * is downstream type ergonomics — it lets a consumer type-switch on
+ * `error_code` while importing only this package — not a claim of adoption:
+ * the observed estate consumers import the union from contracts directly
+ * (phlix-syncplay-060). `error_code` itself deliberately keeps the free-
+ * `string` wire typing below and in `SyncPlayClientOptions.onError`
+ * (parse-don't-validate on an external wire; the client's `'UNKNOWN'`
+ * fallback sentinel is intentionally NOT a union member).
  */
 export type { SyncPlayErrorCode } from '@phlix/contracts';
 /** ERROR message (Messages::error). */

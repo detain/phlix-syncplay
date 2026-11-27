@@ -40,14 +40,9 @@
     "vite": "^8.3.8",
     "vitest": "^5.1.0"
   },
-  "//peerDependencies": "dist/index.d.ts re-exports types from @phlix/contracts, so type-checking consumers need it installed. The range is \"*\" because contracts is distributed via the github: protocol (github:detain/phlix-contracts#vX.Y.Z), which semver ranges cannot match; each consumer pins the exact contracts tag directly. Optional: the runtime bundle never imports it.",
+  "//peerDependencies": "@phlix/contracts is a REQUIRED (non-optional) peer: dist/messages.d.ts re-exports the SyncPlayErrorCode type from it, so type-checking consumers must install it — without it the shipped d.ts graph fails to resolve (TS2307) for any consumer that does not set skipLibCheck (phlix-syncplay-035, branch-(a) ruling: keep the re-export rooted at the package and make the peer honest, rather than gating it behind a ./types subpath that would sever the '@phlix/syncplay'-rooted seam and trim a published type surface with no observed takers — phlix-syncplay-060: estate consumers import the union from contracts directly and pin contracts themselves). The runtime bundle never imports contracts: the re-export is a pure 'export type' line, erased at build (test/errorCodeUnion.test.ts L1/L2/L3 pin that). peerDependenciesMeta is deliberately absent — declaring the peer optional would misstate the requirement; test/packageManifest.test.ts pins its absence. The range is \"*\" because contracts is distributed via the github: protocol (github:detain/phlix-contracts#vX.Y.Z), which semver ranges cannot match; each consumer pins the exact contracts tag directly.",
   "peerDependencies": {
     "@phlix/contracts": "*"
-  },
-  "peerDependenciesMeta": {
-    "@phlix/contracts": {
-      "optional": true
-    }
   },
   "repository": {
     "type": "git",
