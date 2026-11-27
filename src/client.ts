@@ -359,9 +359,13 @@ export interface SyncPlayClientOptions {
    *
    * `_timestampMs` is the envelope `timestamp` — the server's send time,
    * authoritative MILLISECONDS on both carriers (S417;
-   * `Messages.php:924-927`, `SyncPlayRelayWorker.php:1230`). `undefined`
-   * only on hand-built frames that omitted it; the library never fabricates
-   * a send time.
+   * `Messages.php:924-927`, `SyncPlayRelayWorker.php:1230`). `undefined` on
+   * hand-built frames that omitted it AND on stamps that fail the shared
+   * sane-stamp law ({@link SyncPlayClient.serverTimeOrNow}'s finite AND ≥1000
+   * AND LW-050-window core, phlix-syncplay-049 — a forged epoch-zero or
+   * uptime-magnitude value reads as no trustworthy stamp; a seconds-form
+   * forged stamp is promoted ×1000 at the decode boundary); the library never
+   * fabricates a send time.
    */
   onChat?: (
     _memberId: string,
@@ -1799,35 +1803,47 @@ export class SyncPlayClient {
   }
 
   /**
-   * The one `server_time` acceptance law shared by the three consumers
-   * (playback / seek / playback_sync, M-SYNCPLAY-12 set): a FINITE number is
-   * unit-normalized via {@link serverTimeToMs}; anything else (absent,
-   * non-numeric, `1e999` → `Infinity`) yields the caller's honest
-   * clock-estimate fallback (M-SYNCPLAY-19).
+   * THE shared sane-stamp decision (phlix-syncplay-049 unification): a wire
+   * stamp is trusted only when it is a FINITE number, ≥ 1000, and inside one
+   * of the two plausible wall-clock windows; a trusted stamp is then
+   * unit-normalized via {@link serverTimeToMs}. Consumed by
+   * {@link serverTimeOrNow} (the `server_time` arms with a clock-estimate
+   * fallback) and by the chat envelope stamp (where the honest alternative is
+   * `undefined` — the library never fabricates a send time).
    *
-   * LW-050 (review syncplay__secnet #5): the finite gate BELIEVED any
-   * magnitude — a monotonic-uptime clock reading 9e11 "ms" normalized to 9e14
-   * (year ~30540) and teleported every interpolating consumer. Trust is now
-   * bounded to the two plausible wall-clock windows: `≥ 1e12` (epoch ms, real
-   * since 2001-09) and `[1e9, 4e9)` (epoch seconds, 2001-09 → 2096-11). A
-   * stamp outside both — above the m3 floor of 1000 but no honest carrier
-   * would emit it — takes the SAME clock-estimate fallback an absent stamp
-   * already gets. Deliberately ABSOLUTE (not estimate-relative): a fake
-   * `now`-clock in tests must never change what a real-epoch stamp is worth.
+   * CONSOLIDATED m3 (review gameux m1): epoch-zero / negative stamps are the
+   * exact "+56 years teleports the playhead" failure {@link serverTimeToMs}'s
+   * docblock cites — `server_time: 0` used to fold into 0 ms and poison every
+   * interpolation. No honest wall clock on EITHER carrier scale reads below
+   * 1000 (that is 1970-01-01T00:16:40Z), so it reads as no trustworthy stamp
+   * at all. LW-050 (review syncplay__secnet #5): the finite gate alone
+   * BELIEVED any magnitude — a monotonic-uptime clock reading 9e11 "ms"
+   * normalized to 9e14 (year ~30540) and teleported every interpolating
+   * consumer. Trust is therefore bounded to `≥ 1e12` (epoch ms, real since
+   * 2001-09) and `[1e9, 4e9)` (epoch seconds, 2001-09 → 2096-11). Deliberately
+   * ABSOLUTE (not estimate-relative): a fake `now`-clock in tests must never
+   * change what a real-epoch stamp is worth. The ≥ 1000 floor is subsumed by
+   * the windows at current bounds — it is the retained m3 defense-in-depth,
+   * not an independent acceptance leg.
    */
-  private static serverTimeOrNow(raw: unknown, fallback: () => number): number {
-    // CONSOLIDATED m3 (review gameux m1): epoch-zero / negative stamps are the
-    // exact "+56 years teleports the playhead" failure this class's own
-    // docblock cites — `server_time: 0` used to fold into 0 ms and poison
-    // every interpolation. No honest wall clock on EITHER carrier scale reads
-    // below 1000 (that is 1970-01-01T00:16:40Z), so it takes the documented
-    // clock-estimate fallback like an absent or non-finite one already did.
-    // LW-050 extends the same honesty to implausible MIDDLE magnitudes.
+  private static saneServerStamp(raw: unknown): number | undefined {
     if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 1000) {
-      return fallback();
+      return undefined;
     }
     const plausible = raw >= 1e12 || (raw >= 1e9 && raw < 4e9);
-    return plausible ? SyncPlayClient.serverTimeToMs(raw) : fallback();
+    return plausible ? SyncPlayClient.serverTimeToMs(raw) : undefined;
+  }
+
+  /**
+   * The one `server_time` acceptance law shared by the three consumers
+   * (playback / seek / playback_sync, M-SYNCPLAY-12 set): a trusted stamp per
+   * {@link saneServerStamp} (FINITE, ≥ 1000, LW-050 window — unit-normalized)
+   * is returned; anything else (absent, non-numeric, `1e999` → `Infinity`,
+   * implausible magnitude — M-SYNCPLAY-19 / LW-050) yields the caller's honest
+   * clock-estimate fallback.
+   */
+  private static serverTimeOrNow(raw: unknown, fallback: () => number): number {
+    return SyncPlayClient.saneServerStamp(raw) ?? fallback();
   }
 
   /**
@@ -2410,12 +2426,12 @@ export class SyncPlayClient {
     }
     const memberName = typeof payload.member_name === 'string' ? payload.member_name : '';
     // Envelope field — read off msg (BaseMessage.timestamp), not the payload
-    // cast; the runtime check keeps hand-built/JSON-decoded junk honest
-    // (M-SYNCPLAY-19: finite-only — `1e999` is not a timestamp).
-    const timestampMs =
-      typeof msg.timestamp === 'number' && Number.isFinite(msg.timestamp)
-        ? msg.timestamp
-        : undefined;
+    // cast. phlix-syncplay-049: routes through the SAME sane-stamp decision
+    // the time arms use (finite AND ≥1000 AND LW-050 window, unit-normalized)
+    // — an untrustworthy stamp delivers `undefined`, the honest shape an
+    // absent one already had (M-SYNCPLAY-19; the library never fabricates a
+    // send time and never renders epoch-zero/uptime garbage as a timestamp).
+    const timestampMs = SyncPlayClient.saneServerStamp(msg.timestamp);
     this.options.onChat?.(payload.member_id, memberName, payload.message, timestampMs);
   }
 

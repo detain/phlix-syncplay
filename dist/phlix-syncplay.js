@@ -528,8 +528,12 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	static serverTimeToMs(e) {
 		return e < 0xe8d4a51000 ? e * 1e3 : e;
 	}
+	static saneServerStamp(e) {
+		if (!(typeof e != "number" || !Number.isFinite(e) || e < 1e3)) return e >= 0xe8d4a51000 || e >= 1e9 && e < 4e9 ? t.serverTimeToMs(e) : void 0;
+	}
 	static serverTimeOrNow(e, n) {
-		return typeof e != "number" || !Number.isFinite(e) || e < 1e3 ? n() : e >= 0xe8d4a51000 || e >= 1e9 && e < 4e9 ? t.serverTimeToMs(e) : n();
+		var r;
+		return (r = t.saneServerStamp(e)) == null ? n() : r;
 	}
 	static pongServerTimeOrReject(e, n) {
 		if (e >= 0xe8d4a51000 || e >= 1e9 && e < 4e9) {
@@ -737,15 +741,15 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		(t = (n = this.options).onMemberTyping) == null || t.call(n, r.member_id, o);
 	}
 	handleChat(e) {
-		var t, n;
-		let r = e;
-		if (typeof r.member_id != "string" || typeof r.message != "string") {
-			var i, a;
-			(i = (a = this.options).onFrameDropped) == null || i.call(a, "malformed", e);
+		var n, r;
+		let i = e;
+		if (typeof i.member_id != "string" || typeof i.message != "string") {
+			var a, o;
+			(a = (o = this.options).onFrameDropped) == null || a.call(o, "malformed", e);
 			return;
 		}
-		let o = typeof r.member_name == "string" ? r.member_name : "", s = typeof e.timestamp == "number" && Number.isFinite(e.timestamp) ? e.timestamp : void 0;
-		(t = (n = this.options).onChat) == null || t.call(n, r.member_id, o, r.message, s);
+		let s = typeof i.member_name == "string" ? i.member_name : "", c = t.saneServerStamp(e.timestamp);
+		(n = (r = this.options).onChat) == null || n.call(r, i.member_id, s, i.message, c);
 	}
 	handlePlaybackQueueBroadcast(e) {
 		var n, r;

@@ -216,6 +216,58 @@ describe('M-SYNCPLAY-11 — inbound syncplay_chat fires onChat', () => {
     expect(h.chats).toHaveLength(0);
     expect(h.unknown).toHaveLength(0);
   });
+
+  // phlix-syncplay-049 (S-syncplay-38): the stamp gate used to be FINITE-only,
+  // so a forged `timestamp: 5` reached a consumer as 1970-01-01T00:00:00.005Z
+  // and a monotonic-uptime `9e11` was believed as a wall stamp. The cure routes
+  // the chat arm through the SAME sane-stamp decision the time arms use
+  // ({@link SyncPlayClient.serverTimeOrNow}'s finite AND ≥1000 AND LW-050-window
+  // core): an untrustworthy envelope stamp delivers `undefined` — the same
+  // honest shape an absent one already had. Real producer epoch-ms
+  // (S417: `Messages.php:924-927`, `SyncPlayRelayWorker.php:1230`) pass through
+  // UNTOUCHED; a seconds-form forged stamp rides the shared decode-boundary
+  // ×1000 promotion rather than being delivered at a bogus scale.
+  const stampedChat = (timestamp: unknown): Harness => {
+    const h = makeHarness();
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.CHAT,
+      protocol_version: 1,
+      member_id: 'beta',
+      member_name: 'Beta',
+      message: 'stamped frame',
+      timestamp,
+    });
+    return h;
+  };
+
+  it.each([
+    ['epoch-zero garbage 5 (the finding example)', 5],
+    ['finite-but-absurd uptime 9e11 (between the windows)', 9e11],
+    ['4e9 — just past the seconds-window upper edge', 4e9],
+    ['negative stamp -5000', -5000],
+    ['1e999 overflow decodes to Infinity', Number.POSITIVE_INFINITY],
+    ['NaN', Number.NaN],
+  ])('refuses the untrustworthy envelope stamp %s — delivers undefined (finding -049)', (_label, stamp) => {
+    const h = stampedChat(stamp);
+    expect(h.chats).toHaveLength(1);
+    expect(h.chats[0]).toEqual(['beta', 'Beta', 'stamped frame', undefined]);
+  });
+
+  it('promotes a seconds-form stamp through the shared decode boundary (finding -049)', () => {
+    // Unification leg: the window accepts epoch seconds (forged shape here —
+    // honest chat producers only stamp ms) and the shared helper normalizes
+    // ×1000, same as the server_time arms. Pre-cure delivered the raw 1788300222.
+    const h = stampedChat(1788300222);
+    expect(h.chats[0]).toEqual(['beta', 'Beta', 'stamped frame', 1788300222000]);
+  });
+
+  it('window edges and real epoch-ms producer stamps pass through UNTOUCHED (holding)', () => {
+    // Holding pins: the cure must not narrow what honest producers get.
+    expect(stampedChat(1788300222137).chats[0]![3]).toBe(1788300222137);
+    expect(stampedChat(1e12).chats[0]![3]).toBe(1e12); // ms-window lower edge
+    expect(stampedChat(1e9).chats[0]![3]).toBe(1e12); // seconds edge → promoted
+    expect(stampedChat(3999999999).chats[0]![3]).toBe(3999999999000); // upper edge → promoted
+  });
 });
 
 describe('M-SYNCPLAY-11 — inbound syncplay_playback_queue fires onQueueChanged', () => {
