@@ -366,7 +366,7 @@ describe('LW-049 — handleIncoming mirrors the server protocol_version value la
     h.client.handleIncoming({
       type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
       your_id: 'me',
-      group: { group_id: 'sp_1', group_name: 'Movie Night', member_count: 1, host_id: 'host1', playback_position: 0, playback_state: 'playing' },
+      group: { group_id: 'sp_1', group_name: 'Movie Night', member_count: 1, host_id: 'host1', playback_position: 0, playback_state: 'playing', members: [{ id: 'host1', name: 'Host', is_host: true, joined_at: 1 }] },
     } as unknown as RawMessage);
     expect(h.client.getGroup()?.group_id).toBe('sp_1');
     expect(h.drops).toHaveLength(0);
@@ -391,7 +391,7 @@ describe('LW-049 — handleIncoming mirrors the server protocol_version value la
       type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
       protocol_version: 1,
       your_id: 'me',
-      group: { group_id: 'sp_1', group_name: 'Movie Night', member_count: 1, host_id: 'host1', playback_position: 0, playback_state: 'playing' },
+      group: { group_id: 'sp_1', group_name: 'Movie Night', member_count: 1, host_id: 'host1', playback_position: 0, playback_state: 'playing', members: [{ id: 'host1', name: 'Host', is_host: true, joined_at: 1 }] },
     } as RawMessage);
     expect(h.client.getGroup()?.group_id).toBe('sp_1');
     expect(h.drops).toHaveLength(0);

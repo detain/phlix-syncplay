@@ -2538,6 +2538,113 @@ describe('SyncPlayClient — onMemberLeft roster diff (W-min124 M-SYNCPLAY-16, r
   });
 });
 
+// ------------------------------------------------ phlix-syncplay-029 (S-syncplay-24, 2026-11-27)
+
+describe('SyncPlayClient — group_state WITHOUT the members key is refused whole (phlix-syncplay-029, LW-041a precedent)', () => {
+  /** Three-member seeded room (the M-SYNCPLAY-16 roster-diff shape): the
+   *  defect was a SAME-room members-omitting frame emptying exactly this
+   *  model via the fold-to-[] arm plus the diff below it. */
+  function membersKeyAbsentHarness() {
+    const drops: Array<{ reason: string; frame: unknown }> = [];
+    const states: SyncPlayGroup[] = [];
+    const left: Array<{ id: string; name: string }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      memberName: 'Tester',
+      onFrameDropped: (reason, frame) => drops.push({ reason, frame }),
+      onState: (group) => states.push(group),
+      onMemberLeft: (m) => left.push(m),
+    });
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: {
+        group_id: 'sp_abc',
+        host_id: 'host1',
+        members: [
+          { id: 'host1', name: 'Host', is_host: true, joined_at: 0 },
+          { id: 'a', name: 'Ann', is_host: false, joined_at: 1 },
+          { id: 'me', name: 'Tester', is_host: false, joined_at: 2 },
+        ],
+      },
+    });
+    drops.length = 0;
+    states.length = 0;
+    left.length = 0;
+    return { client, drops, states, left };
+  }
+
+  /** Same-room group_state literal WITHOUT the members key (+ overrides). */
+  function frameWithoutMembers(overrides: Record<string, unknown>): RawMessage {
+    return {
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: { group_id: 'sp_abc', host_id: 'host1', playback_position: 77777, ...overrides },
+    };
+  }
+
+  it('a SAME-room frame omitting the members key is drop-reported with ZERO onMemberLeft — the diff baseline never runs', () => {
+    const h = membersKeyAbsentHarness();
+    const frame = frameWithoutMembers({});
+    h.client.handleIncoming(frame);
+    expect(h.drops.map((d) => d.reason)).toEqual(['malformed']);
+    expect(h.drops[0]?.frame).toBe(frame); // the refusal hands back the ORIGINAL frame
+    // Defect: previously host1/a/me all fired onMemberLeft (empty fold vs
+    // seeded roster). The acceptance law of this step: zero left events.
+    expect(h.left).toHaveLength(0);
+    expect(h.states).toHaveLength(0);
+  });
+
+  it('the refusal is pure — cached group keeps its full roster and untouched fields', () => {
+    const h = membersKeyAbsentHarness();
+    h.client.handleIncoming(frameWithoutMembers({ playback_position: 77777 }));
+    const group = h.client.getGroup();
+    expect(group?.group_id).toBe('sp_abc');
+    expect(group?.members.map((m) => m.id)).toEqual(['host1', 'a', 'me']);
+    // The seed's fold (position 0), NOT the refused frame's 77777 — the store
+    // never ran (and the frozen group forbids in-place mutation anyway).
+    expect(group?.playback_position).toBe(0);
+  });
+
+  it('a members-omitting frame for ANOTHER room is refused with no room change — the seek-cancel/store path is never reached', () => {
+    const h = membersKeyAbsentHarness();
+    h.client.handleIncoming(frameWithoutMembers({ group_id: 'sp_other' }));
+    expect(h.drops.map((d) => d.reason)).toEqual(['malformed']);
+    expect(h.client.getGroup()?.group_id).toBe('sp_abc'); // no adoption of sp_other
+    expect(h.states).toHaveLength(0);
+    expect(h.left).toHaveLength(0);
+  });
+
+  it('present-but-wrong-type members keep the ratified fold-to-empty law (null folds [], no refusal)', () => {
+    const h = membersKeyAbsentHarness();
+    h.client.handleIncoming(frameWithoutMembers({ members: null }));
+    // The KEY is present — not this step's refusal class. normalizeMembers
+    // folds null to [] (ratified at 'normalizes non-array members to empty
+    // array'), so the fold legitimately lands an empty roster…
+    expect(h.drops).toHaveLength(0);
+    expect(h.states).toHaveLength(1);
+    expect(h.states[0]?.members).toEqual([]);
+    // …and the M-SYNCPLAY-16 same-room diff then announces each seeded
+    // member as left — honest per-code behavior for an EMPTY new roster
+    // claim, pinned so the refusal boundary (missing KEY) stays distinguish-
+    // able from the fold boundary (wrong-type value).
+    expect(h.left.map((m) => m.id)).toEqual(['host1', 'a', 'me']);
+  });
+
+  it('the honest zero-member spellings [] and {} are present keys — accepted, no refusal', () => {
+    const h = membersKeyAbsentHarness();
+    h.client.handleIncoming(frameWithoutMembers({ members: [] }));
+    h.client.handleIncoming(frameWithoutMembers({ members: {} }));
+    expect(h.drops).toHaveLength(0);
+    expect(h.states).toHaveLength(2);
+    expect(h.states[1]?.members).toEqual([]);
+  });
+});
+
 describe('SyncPlayClient — typed boundary guards (W-min124 M-SYNCPLAY-19, review syncplay__secnet MINOR-3)', () => {
   it('group_state fields that are not their declared type fall back like absent ones', () => {
     const h = makeHarness();

@@ -1903,6 +1903,28 @@ export class SyncPlayClient {
       return;
     }
 
+    // phlix-syncplay-029 (LW-041a precedent): the `members` KEY is the roster's
+    // presence. Folding a frame that omits it fell to normalizeMembers' empty-
+    // list arm, and the M-SYNCPLAY-16 same-room diff below then fired
+    // onMemberLeft for EVERY previous member — one key-omitting frame silently
+    // emptied the room model. Both live producers always emit the key
+    // (server GroupState.php::getState() seeds $membersDict and emits
+    // 'members' on every fold — 262f01d3 :1102/:1116; hub
+    // SyncPlayRelayWorker.php::canonicalGroupPayload seeds $members and emits
+    // 'members' — b7ad2a3e :2131/:2147), and SPEC §4 spells members as a
+    // REQUIRED dict on syncplay_group_state — so an omitted key has NO honest
+    // producer: refuse the frame whole. Present-but-wrong-type values keep the
+    // ratified fold-to-empty law (client.test 'normalizes non-array members to
+    // empty array'), and the honest zero-member spellings [] / {} are present
+    // keys that fold untouched (presence check, not a truthiness check — the
+    // M-SYNCPLAY-12 doctrine). Like LW-041a: cached group and onState stay
+    // untouched, and no side effect runs — not the room-change seek cancel,
+    // not the roster diff, not the store.
+    if (group.members === undefined) {
+      this.options.onFrameDropped?.('malformed', msg);
+      return;
+    }
+
     // M-SYNCPLAY-19 + LW-041a: read once, reuse below and in the room-change
     // check so the comparison and the stored model can never disagree.
     const groupId = group.group_id;

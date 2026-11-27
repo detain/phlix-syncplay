@@ -84,6 +84,7 @@ function makeHarness(seekThrottleMs?: number) {
       host_id: 'me',
       playback_position: 0,
       playback_state: 'playing',
+      members: [{ id: 'me', name: 'Tester', is_host: true, joined_at: 1 }],
     },
   });
   sent.length = 0;
@@ -271,6 +272,7 @@ describe('SyncPlayClient — group replacement cancels the open seek window (R-S
         host_id: 'me',
         playback_position: 0,
         playback_state: 'playing',
+        members: [{ id: 'me', name: 'Tester', is_host: true, joined_at: 1 }],
       },
     });
   }
@@ -305,6 +307,7 @@ describe('SyncPlayClient — group replacement cancels the open seek window (R-S
         host_id: 'me',
         playback_position: 0,
         playback_state: 'playing',
+        members: [{ id: 'me', name: 'Tester', is_host: true, joined_at: 1 }],
       },
     });
     vi.advanceTimersByTime(250);

@@ -593,27 +593,32 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			(c = (l = this.options).onFrameDropped) == null || c.call(l, "malformed", e);
 			return;
 		}
-		let u = a.group_id, d = t.strOrNull(a.host_id);
-		this.group !== null && this.group.group_id !== u && this.cancelSeekCoalescing();
-		let f = this.group, p = t.normalizeMembers(a.members, d), m = t.nonnegOrNull(a.current_media_duration);
+		if (a.members === void 0) {
+			var u, d;
+			(u = (d = this.options).onFrameDropped) == null || u.call(d, "malformed", e);
+			return;
+		}
+		let f = a.group_id, p = t.strOrNull(a.host_id);
+		this.group !== null && this.group.group_id !== f && this.cancelSeekCoalescing();
+		let m = this.group, h = t.normalizeMembers(a.members, p), g = t.nonnegOrNull(a.current_media_duration);
 		if (this.group = t.freezeGroup({
-			group_id: u,
+			group_id: f,
 			group_name: t.strOr(a.group_name, ""),
-			members: p,
+			members: h,
 			member_count: t.finiteOrUndefined(a.member_count),
-			host_id: d,
+			host_id: p,
 			current_media_id: t.strOrNull(a.current_media_id),
-			current_media_duration: m,
-			playback_position: t.clampedPosition(a.playback_position, m),
+			current_media_duration: g,
+			playback_position: t.clampedPosition(a.playback_position, g),
 			playback_state: t.playbackState(a.playback_state),
 			queue: t.normalizeQueue(a.queue),
 			created_at: t.finiteOrUndefined(a.created_at),
 			last_activity_at: t.finiteOrUndefined(a.last_activity_at)
-		}), f !== null && f.group_id === u) {
-			let e = new Set(p.map((e) => e.id));
-			for (let t of f.members) if (!e.has(t.id)) {
-				var h, g;
-				(h = (g = this.options).onMemberLeft) == null || h.call(g, {
+		}), m !== null && m.group_id === f) {
+			let e = new Set(h.map((e) => e.id));
+			for (let t of m.members) if (!e.has(t.id)) {
+				var _, v;
+				(_ = (v = this.options).onMemberLeft) == null || _.call(v, {
 					id: t.id,
 					name: t.name
 				});
