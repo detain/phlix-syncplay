@@ -25,16 +25,30 @@
  * (as in client.test.ts); only the coalescer's flush timer is driven, via
  * vitest fake timers.
  *
+ * phlix-syncplay-025 extension: the pre-existing suite delivered GROUP_STATE
+ * inbound only — no test ever landed a rebroadcast `syncplay_playback_seek`
+ * WHILE a local coalescing window was open. The final block pins that
+ * collision: remote authoritative target vs pending local flush ordering,
+ * ship count, and the no-stale-flush / no-wire-pollution laws.
+ *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SyncPlayClient } from '../src/client';
+import { SyncPlayClient, type FrameDropReason, type PlaybackCommand } from '../src/client';
 import { SYNCPLAY_MESSAGE_TYPES, type RawMessage } from '../src/messages';
+
+/** Ordered log of everything the client surfaced: outbound frames and callbacks. */
+type HarnessEvent =
+  | { kind: 'send'; message: RawMessage }
+  | { kind: 'command'; command: PlaybackCommand }
+  | { kind: 'drop'; reason: FrameDropReason; frame: unknown };
 
 /** Fake transport + manual clock, in a group with this member as host. */
 function makeHarness(seekThrottleMs?: number) {
   const sent: RawMessage[] = [];
+  const commands: PlaybackCommand[] = [];
+  const events: HarnessEvent[] = [];
   let t = 1000;
   const clock = {
     now: () => t,
@@ -43,10 +57,20 @@ function makeHarness(seekThrottleMs?: number) {
     },
   };
   const client = new SyncPlayClient({
-    send: (m) => sent.push(m),
+    send: (m) => {
+      sent.push(m);
+      events.push({ kind: 'send', message: m });
+    },
     now: clock.now,
     memberId: 'me',
     memberName: 'Tester',
+    onPlaybackCommand: (command) => {
+      commands.push(command);
+      events.push({ kind: 'command', command });
+    },
+    onFrameDropped: (reason, frame) => {
+      events.push({ kind: 'drop', reason, frame });
+    },
     ...(seekThrottleMs === undefined ? {} : { seekThrottleMs }),
   });
   client.handleIncoming({
@@ -63,7 +87,8 @@ function makeHarness(seekThrottleMs?: number) {
     },
   });
   sent.length = 0;
-  return { client, sent, clock };
+  events.length = 0;
+  return { client, sent, clock, commands, events };
 }
 
 /** The seek frames currently on the wire, in order. */
@@ -301,5 +326,106 @@ describe('SyncPlayClient — group replacement cancels the open seek window (R-S
     vi.advanceTimersByTime(10_000);
     expect(sentSeeks(h.sent)).toHaveLength(2);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('SyncPlayClient — remote seek landing mid coalescing window (phlix-syncplay-025)', () => {
+  /**
+   * The server's rebroadcast of ANOTHER member's seek, shaped like the live
+   * wire frame the client actually receives (member_id is the authenticated
+   * sender per SPEC §9.1; the epoch-ms stamp is the plausible-accepted arm).
+   */
+  function remoteSeek(overrides: Record<string, unknown> = {}) {
+    return {
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+      protocol_version: 1,
+      group_id: 'sp_abc',
+      member_id: 'other',
+      from_position: 5000,
+      to_position: 9000,
+      server_time: 1700000000000,
+      ...overrides,
+    };
+  }
+
+  it('remote seek mid-window: consumer sees it exactly once, window untouched — local pending still flushes and the remote target never reaches OUR outbound wire', () => {
+    const h = makeHarness(250);
+    h.client.sendSeek(0, 5000); // leading — on the wire
+    h.client.sendSeek(0, 7000); // merged-latest pending in the open window
+
+    h.client.handleIncoming(remoteSeek());
+
+    // Inbound authority is surfaced through the callback, normalized ms stamp
+    // accepted as-is...
+    expect(h.commands).toEqual([{ type: 'seek', position: 9000, serverTime: 1700000000000 }]);
+    // ...while adding NOTHING to the outbound wire and leaving the window's
+    // machinery standing: still one owned flush timer, pending intact.
+    expect(sentSeeks(h.sent)).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(1);
+
+    vi.advanceTimersByTime(250); // boundary arrives on its ORIGINAL schedule
+    const seeks = sentSeeks(h.sent);
+    expect(seeks).toHaveLength(2);
+    expect(seeks[1]).toMatchObject({
+      group_id: 'sp_abc',
+      member_id: 'me',
+      from_position: 0,
+      to_position: 7000, // the LOCAL latest-wins target — inbound never overwrites it
+    });
+    // No wire pollution: the remote target never echoes back out under our id.
+    expect(seeks.map((m) => m.to_position)).not.toContain(9000);
+
+    // No stale flush: after the local trailing frame the window ships nothing
+    // further (its empty re-arm closes silently).
+    vi.advanceTimersByTime(10_000);
+    expect(sentSeeks(h.sent)).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Lawful order: the consumer sees the remote target BEFORE the local
+    // trailing frame ships; the settle emits no ghost events.
+    expect(h.events.map((e) => e.kind)).toEqual(['send', 'command', 'send']);
+  });
+
+  it('the echo of OUR OWN seek arriving mid-window stays silent (echo-suppression law) and cancels nothing', () => {
+    const h = makeHarness(250);
+    h.client.sendSeek(0, 5000); // leading
+    h.client.sendSeek(0, 7000); // pending
+    h.client.handleIncoming(remoteSeek({ member_id: 'me', to_position: 5000 }));
+    // Self-echo: no callback (a second application of our own intent), no
+    // drop (suppression is law, not garbage — the option docblock's own list).
+    expect(h.commands).toHaveLength(0);
+    expect(h.events.filter((e) => e.kind === 'drop')).toHaveLength(0);
+    expect(sentSeeks(h.sent)).toHaveLength(1);
+    vi.advanceTimersByTime(250);
+    const seeks = sentSeeks(h.sent);
+    expect(seeks).toHaveLength(2); // the echo cancelled nothing
+    expect(seeks[1].to_position).toBe(7000); // latest-wins local pending survived
+    expect(h.events.map((e) => e.kind)).toEqual(['send', 'send']);
+  });
+
+  it('a malformed remote seek (garbage to_position) mid-window drops through the existing malformed law and leaves the window intact', () => {
+    const h = makeHarness(250);
+    h.client.sendSeek(0, 5000);
+    h.client.sendSeek(0, 7000);
+    h.client.handleIncoming(remoteSeek({ to_position: 'nine-thousand' }));
+    // Handler-refused garbage: one drop, zero commands...
+    expect(h.commands).toHaveLength(0);
+    expect(h.events.filter((e) => e.kind === 'drop')).toHaveLength(1);
+    expect(h.events.map((e) => e.kind)).toEqual(['send', 'drop']);
+    // ...and the window neither lost its timer nor lost the pending target.
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(250);
+    const seeks = sentSeeks(h.sent);
+    expect(seeks).toHaveLength(2);
+    expect(seeks[1].to_position).toBe(7000);
+    expect(h.events.filter((e) => e.kind === 'drop')).toHaveLength(1); // no window-side drop either
+  });
+
+  it('the same remote seek with NO window open behaves identically at the callback — collision posture is inbound-only, not window-dependent', () => {
+    const h = makeHarness(250);
+    h.client.handleIncoming(remoteSeek());
+    expect(h.commands).toEqual([{ type: 'seek', position: 9000, serverTime: 1700000000000 }]);
+    expect(sentSeeks(h.sent)).toHaveLength(0); // inbound traffic never ships outbound...
+    expect(vi.getTimerCount()).toBe(0); // ...and never opens a window
   });
 });
