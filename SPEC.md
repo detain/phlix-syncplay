@@ -12,7 +12,7 @@ The authoritative implementation is the PHP server:
 
 `@phlix/syncplay` is the canonical JS port of that protocol.
 
-> **Document revision:** 2026-11-27 — wire era `@phlix/syncplay` v0.1.6. This
+> **Document revision:** 2026-11-28 — wire era `@phlix/syncplay` v0.1.6. This
 > stamp is rotated with every normative edit to this document (per §1 item 6's
 > era-pin discipline), so a consumer can answer "which spec revision does my
 > build conform to?" without git archaeology.
@@ -1045,6 +1045,18 @@ each join attempt to a per-connection server nonce, or keying the throttle per
 IP rather than per connection (which would collapse the ceiling to
 ~10/min/IP) — but neither is shipped, and choosing among them is server
 policy, not protocol law: noted here, not ruled.
+
+**Read that ceiling as the `:8097` direct worst case only.** The `:8804`
+hub-relay path is materially throttled against that target, by §8.4's already-stated
+laws rather than by any new claim: the group-password regime is server-side only — the
+hub's canonical join lane ACCEPTS `password_hash` and IGNORES it (the token's own
+`(server_id, owner)` scope is the gate; `SyncPlayRelayWorker.php:2167` @ `b7ad2a3e`),
+so no digest is ever checked there, the server-side `JoinPasswordThrottle` never sees
+the frame, and there is no failed-attempt oracle to probe; relay membership is an
+opaque hub per-connection uuid (§9) and a relay socket cannot address another user's
+shadow room at all. The relay's own connect churn is bounded independently by the hub's
+pre-auth `rate_limiter.syncplay_mount` budget — 30 handshakes per 60 s per IP
+(`RateLimitProfiles.php:336`, `syncplay_mount:<ip>`, phlix-hub @ `b7ad2a3e`).
 
 ### 8.3 Consumer-side display-string responsibility
 

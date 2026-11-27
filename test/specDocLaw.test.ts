@@ -595,7 +595,10 @@ describe('deferred-lane era-cite + TOC currency', () => {
     // 2026-11-12 → 2026-11-27 (S-syncplay-05 fix round) from the measured red:
     // the §4/§5 same-instant leg rotated the stamp without this paired
     // re-bless, reddening the origin lineage (review round-1 Critical).
-    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-27/);
+    // Re-blessed 2026-11-27 → 2026-11-28 (S-syncplay-10 fix round): the §8.2
+    // relay-scope carve-out rotated the stamp; pin moves in the same commit
+    // per the stamp-rotate⇒pin-rotate law.
+    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-28/);
   });
 
   it('stamp is not older than the last commit that touched SPEC.md (staleness tripwire)', () => {
