@@ -474,18 +474,35 @@ describe('m16 — host-eviction fires onMemberLeft (was silently swallowed)', ()
 // ---------------------------------------------------------------- m17
 
 describe('m17 — the seek-flush timer cannot surface an uncaught exception', () => {
-  it('sink throw at the flush is caught and reported send-failed', async () => {
-    const h = makeHarness({ seekThrottleMs: 5, sendThrowsAfter: 1 });
-    h.client.handleIncoming(JOINED_GROUP);
-    expect(h.client.sendSeek(0, 1000)).toBe(true); // leading edge ships (sink #1)
-    expect(h.client.sendSeek(1000, 1300)).toBe(true); // merged — becomes the flush frame
-    await new Promise((resolve) => setTimeout(resolve, 25)); // flush: sink #2 THROWS
-    expect(h.drops).toEqual([{ reason: 'send-failed', frame: null }]);
-    // Window unwound (no armed timer survives) and the DIRECT path still
-    // propagates sink throws by law — proving the guard is scoped to the
-    // timer flush only.
-    h.client.handleIncoming(JOINED_GROUP);
-    expect(() => h.client.sendSeek(1300, 2000)).toThrow('sink exploded');
+  it('sink throw at the flush is caught and reported send-failed', () => {
+    // S35 (phlix-syncplay-044): fake-timer advance replaces the real 25 ms
+    // yield — the flush is now driven by law, not by wall-clock luck, and an
+    // escaped throw would re-throw synchronously from the advance. Every
+    // prior assertion is kept; the "window unwound" claim gains its direct
+    // timer-count teeth.
+    vi.useFakeTimers();
+    try {
+      const h = makeHarness({ seekThrottleMs: 5, sendThrowsAfter: 1 });
+      h.client.handleIncoming(JOINED_GROUP);
+      expect(h.client.sendSeek(0, 1000)).toBe(true); // leading edge ships (sink #1)
+      expect(h.client.sendSeek(1000, 1300)).toBe(true); // merged — becomes the flush frame
+      expect(vi.getTimerCount()).toBe(1); // coalesced window owns EXACTLY ONE flush timer
+      // Advance to EXACTLY the window boundary: a (buggy) re-arm by the failed
+      // flush would then still be armed here — sweeping past it would let a
+      // ghost self-clean undetected. Sink #2 THROWS inside the callback.
+      vi.advanceTimersByTime(5);
+      expect(h.drops).toEqual([{ reason: 'send-failed', frame: null }]);
+      expect(vi.getTimerCount()).toBe(0); // failed flush unwound and did NOT re-arm
+      vi.advanceTimersByTime(1_000);
+      expect(h.drops).toHaveLength(1); // no ghost timer re-reported a second loss
+      // Window unwound (no armed timer survives) and the DIRECT path still
+      // propagates sink throws by law — proving the guard is scoped to the
+      // timer flush only.
+      h.client.handleIncoming(JOINED_GROUP);
+      expect(() => h.client.sendSeek(1300, 2000)).toThrow('sink exploded');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -621,25 +638,42 @@ describe('SPY-S11 — boundary coercion sweep', () => {
     expect(() => new SyncPlayClient({ ...base(), seekThrottleMs: 2147483647 })).not.toThrow();
   });
 
-  it('SPY-20: onFrameDropped throwing inside the flush timer is swallowed', async () => {
-    let sends = 0;
-    const c = new SyncPlayClient({
-      send: () => {
-        sends += 1;
-        if (sends > 1) throw new Error('x');
-      },
-      memberId: 'me',
-      now: () => 1000,
-      seekThrottleMs: 5,
-      onFrameDropped: () => {
-        throw new Error('report exploded');
-      },
-    });
-    c.handleIncoming(JOINED_GROUP);
-    c.sendSeek(0, 1);
-    c.sendSeek(1, 2);
-    await new Promise((r) => setTimeout(r, 25)); // an escape would fail the run
-    expect(sends).toBe(2);
+  it('SPY-20: onFrameDropped throwing inside the flush timer is swallowed', () => {
+    // S35 (phlix-syncplay-044): fake-timer advance replaces the real 25 ms
+    // yield. The flush callback now runs INSIDE advanceTimersByTime, so an
+    // escaped sink throw — or the onFrameDropped re-throw it triggers —
+    // re-throws from the advance synchronously: "an escape fails the run" is
+    // pinned by law, not by ambient-clock timing.
+    vi.useFakeTimers();
+    try {
+      let sends = 0;
+      let reports = 0;
+      const c = new SyncPlayClient({
+        send: () => {
+          sends += 1;
+          if (sends > 1) throw new Error('x');
+        },
+        memberId: 'me',
+        now: () => 1000,
+        seekThrottleMs: 5,
+        onFrameDropped: () => {
+          reports += 1;
+          throw new Error('report exploded');
+        },
+      });
+      c.handleIncoming(JOINED_GROUP);
+      c.sendSeek(0, 1);
+      c.sendSeek(1, 2);
+      expect(vi.getTimerCount()).toBe(1); // coalesced window owns exactly one flush timer
+      // EXACT-window advance (not a sweep): a timer surviving the double fault
+      // would still be armed when this returns.
+      vi.advanceTimersByTime(5);
+      expect(sends).toBe(2);
+      expect(reports).toBe(1); // the seam WAS invoked once — then its throw was swallowed
+      expect(vi.getTimerCount()).toBe(0); // the double fault left the instance timer-free
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('SPY-16: outbound positions must be finite and >= 0', () => {
