@@ -939,7 +939,8 @@ existing server/hub law; no wire shape changes.
   server's unit-less `50`. The server docblock's "50ms" (`TimeSync.php:39`
   @ `bc3b9b33`) labels the root's unit onto the variance — a mislabel owed
   to the server vein, not a different threshold.
-- **Drift** (EMA): over the recent window,
+- **Drift** (window slope, recomputed fresh on each call — no smoothing carry):
+  over the recent window,
   `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`, where `timeDelta`
   is in seconds (see the clock contract above). `1.0` = no drift. (Windows +
   Mobile omitted drift; it is restored here.) The result is then **clamped into
@@ -1088,6 +1089,8 @@ HOST_ELECT (never dedicated member types).
 > abbreviations are prose shorthand only; the wire always carries the full
 > underscore-prefixed names.
 
+> **Server clamp asymmetry (finding phlix-syncplay-019):** the server's `TimeSync.php::updateDriftRate()` (`262f01d3`) computes the same no-carry window slope but applies no `[0.99, 1.01]` rate clamp — the clamp is client-side hardening this library layers on top (§5).
+
 ### 7.1 The console port (`phlix-console-client`) — a third estimator variant
 
 `phlix-console-client/src/Api/SyncPlay/TimeSync.php` @ `9ef70cb` is the
@@ -1109,7 +1112,7 @@ this subsection is inventory, not new console obligations minted today.
 | Aggregation | median: sort, take index `intdiv(count, 2)` (upper-of-middle on even counts) for offset AND latency (`:131-140`) | weighted mean with `weight = 1 / max(1, rtt)` (offset); mean of `rtt / 2` (latency) |
 | Stability floor | `MIN_SAMPLES_FOR_STABLE = 3` (`:24`) | `samples >= OFFSET_SAMPLE_COUNT` (5) |
 | Stability threshold | `STABILITY_THRESHOLD = 100.0` over the whole window; the docblock labels the unit "in ms" (`:26-27`) — the root-unit labeling §5 already retires for the server | `< 50` ms², population variance of the RECENT integer-ms offsets |
-| Drift correction | `applyDriftCorrection` (`:78-89`) mutates `offset` OUTSIDE the sample window and is silently OVERWRITTEN by the next `processPong → recalculate()` | drift is a clamped EMA that drives position advance; it is never folded into `offset` |
+| Drift correction | `applyDriftCorrection` (`:78-89`) mutates `offset` OUTSIDE the sample window and is silently OVERWRITTEN by the next `processPong → recalculate()` | drift is a clamped window-slope rate that drives position advance; it is never folded into `offset` |
 | Freshness / degradation | none — no age accessor, no reject counter, no `time_sync` advisory emission | §5 client-observability law (`getSampleAgeMs`, `onSyncDegraded`) |
 
 Consequence: a console member estimates the same skew per sample (θ agrees) but

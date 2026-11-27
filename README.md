@@ -429,7 +429,10 @@ offset = t2 - t1 + trunc(rtt/2)   // add to local time to get server time —
 
 Offset is a low-RTT-weighted mean over the last 5 samples; sync is "stable" when
 ≥5 samples and the population variance of recent offsets is < 50 (unit ms² —
-variance of ms; mirrors the server's unit-less 50); drift is an EMA with factor 0.1.
+variance of ms; mirrors the server's unit-less 50); drift is a **window slope** —
+offset change per second across the recent samples (first to last), scaled by
+factor 0.1 and recomputed fresh on each call (no smoothing carry from the
+previous rate).
 
 One application law for `getAdjustedPosition()`: it advances the playhead
 unconditionally from the last commanded position on the corrected clock. Call

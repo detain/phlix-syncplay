@@ -56,7 +56,8 @@
  * `OFFSET_SAMPLE_COUNT` samples. Sync is "stable" once at least
  * `OFFSET_SAMPLE_COUNT` samples exist AND the population variance of recent
  * offsets is < 50 (unit ms² — variance of the integer-ms offsets; the server's
- * threshold is the same unit-less `50`). Drift is an EMA: `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`.
+ * threshold is the same unit-less `50`). Drift is a WINDOW SLOPE: `driftRate = 1.0 + 0.1 * (offsetDelta / timeDelta) / 1000`,
+ * recomputed from the recent window on every call with no carry from the previous rate.
  *
  * The clock is INJECTED (`now`) so this class is pure and deterministic — it
  * never calls `Date.now()` itself.
@@ -81,16 +82,16 @@ export const MAX_ACCEPTABLE_RTT = 1000;
 /** Offset-variance threshold (ms² — variance of ms; the server's constant is the unit-less 50) below which sync is stable. */
 export const STABILITY_VARIANCE_THRESHOLD = 50;
 
-/** Drift EMA smoothing factor (lower = smoother, slower to adapt). */
+/** Scale factor applied to the window-slope drift estimate (lower = a more conservative rate; no smoothing carry exists). */
 export const DRIFT_CORRECTION_FACTOR = 0.1;
 
 /**
  * Lower bound for the drift-rate multiplier. A `driftRate` below this would
  * mean the playback clock runs *slower* than wall-clock by more than 1%, and
  * any value `< 1.0` risks `getAdjustedPosition` moving the playhead BACKWARDS
- * for a forward-elapsed interval. Clamping the EMA into `[MIN, MAX]` is
- * client-side hardening against noisy/forged offset sequences and does not
- * change what is sent on the wire.
+ * for a forward-elapsed interval. Clamping the window-slope rate into
+ * `[MIN, MAX]` is client-side hardening against noisy/forged offset sequences
+ * and does not change what is sent on the wire.
  */
 export const DRIFT_RATE_MIN = 0.99;
 
@@ -325,11 +326,15 @@ export class TimeSync {
   }
 
   /**
-   * Recompute the local clock drift rate as an EMA of recent offset change per
-   * second. 1.0 = no drift; >1 = local clock gaining, <1 = losing.
+   * Recompute the local clock drift rate as a WINDOW SLOPE: the offset change
+   * per second across the recent sample window (first to last sample), scaled
+   * by DRIFT_CORRECTION_FACTOR. The result fully OVERWRITES the previous
+   * rate — there is no carry from it. 1.0 = no drift; >1 = local clock
+   * gaining, <1 = losing.
    *
    * Windows and Mobile omitted drift entirely; this restores it (matching the
-   * server and Tizen).
+   * server and Tizen). The server's copy shares the no-carry slope but applies
+   * no [DRIFT_RATE_MIN, DRIFT_RATE_MAX] clamp — recorded in SPEC §7.
    */
   updateDriftRate(): void {
     if (this.samples.length < 2) {
@@ -355,10 +360,10 @@ export class TimeSync {
     this.driftRate = 1.0 + (DRIFT_CORRECTION_FACTOR * drift) / 1000;
 
     // Clamp into [DRIFT_RATE_MIN, DRIFT_RATE_MAX]. A noisy or forged offset
-    // sequence could otherwise push the raw EMA out of range; a value < 1.0 in
-    // particular would let getAdjustedPosition move the playhead backwards for
-    // a forward-elapsed interval. Client-side hardening only — the wire is
-    // unaffected.
+    // sequence could otherwise push the raw window-slope estimate out of
+    // range; a value < 1.0 in particular would let getAdjustedPosition move
+    // the playhead backwards for a forward-elapsed interval. Client-side
+    // hardening only — the wire is unaffected.
     this.driftRate = Math.min(DRIFT_RATE_MAX, Math.max(DRIFT_RATE_MIN, this.driftRate));
   }
 
