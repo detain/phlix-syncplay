@@ -36,7 +36,12 @@ export default defineConfig({
     // a browser only fetches a .map when a reader opens devtools — consumers
     // pay install bytes, never load cost. The alternative (drop maps for a
     // smaller tarball) is also defensible; if taken, flip this flag AND adjust
-    // RELEASE.md, whose dist-identity md5 recipe already skips '*.map'.
+    // RELEASE.md: its step-3 dist-identity recipe carries a PRIMARY all-files
+    // aggregate — which today enumerates the map blobs, and CI's rebuild-
+    // equality check is exactly `git diff --exit-code -- dist/` — plus a
+    // documented "! -name '*.map'" non-map variant; the ritual records BOTH
+    // aggregates and the per-file md5s in the CHANGELOG, so every one of them
+    // must be re-derived once the maps retire.
     sourcemap: true,
   },
   resolve: {
