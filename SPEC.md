@@ -1025,6 +1025,27 @@ by the `JoinPasswordThrottle`. What entropy group ids MUST carry, and whether
 id-gated groups require a password by law, are policy questions for the server
 owners — noted here, not ruled.
 
+**The composed residual.** The §8.5 bounds table lists the two shipped join
+throttles apart; read together, they multiply. An attacker that already holds
+authenticated connections (§8.1) may open 30 fresh WebSocket handshakes per
+60 s per client IP (`RateLimitProfiles.php:137`, keyed per IP at
+`WebSocketServer.php:695`), and each connection may fail `password_hash`
+verification 10 times in its 60 s sliding window before reject-close
+(`JoinPasswordThrottle.php:39` / `:42`; enforcement at
+`SyncPlayManager.php:2007-2018`, window reset on an admitted join at `:1992`).
+The window is keyed per connection and dropped when the socket closes
+(`SyncPlayManager.php:1055`), so reconnecting is free: 30 connections per
+minute × 10 digests each composes an online ceiling of roughly **300 group
+password guesses per minute per IP** against a password-protected group
+(phlix-server @ `262f01d3`). The target is the unsalted digest itself, which
+§10.2 records as never rotating while the group lives — so the same guess
+space also falls offline to any observer of one valid wire hash (first bullet
+above). TLS hides the wire, not the rate. Two shaped remedies exist — binding
+each join attempt to a per-connection server nonce, or keying the throttle per
+IP rather than per connection (which would collapse the ceiling to
+~10/min/IP) — but neither is shipped, and choosing among them is server
+policy, not protocol law: noted here, not ruled.
+
 ### 8.3 Consumer-side display-string responsibility
 
 (Cross-reference for the later XSS contract step.) Peer-influenceable display
