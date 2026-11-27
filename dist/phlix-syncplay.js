@@ -305,6 +305,11 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			to: n
 		}, !0) : (this.dispatchSeek(e, n), this.seekThrottleMs > 0 && !this.seekWindowOpen && this.openSeekWindow(), !0);
 	}
+	seekTo(e) {
+		if (t.assertPosition("toPosition", e), this.group === null) return !1;
+		let n = this.group.playback_position;
+		return !Number.isFinite(n) || n < 0 ? !1 : this.sendSeek(n, e);
+	}
 	dispatchSeek(t, n) {
 		this.group !== null && this.dispatch(e.PLAYBACK_SEEK, {
 			group_id: this.group.group_id,

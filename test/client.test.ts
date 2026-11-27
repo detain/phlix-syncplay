@@ -74,6 +74,12 @@ function groupStateMessage(hostId: string, yourId: string): RawMessage {
   };
 }
 
+/** Same GROUP_STATE shape, with an explicit non-zero cached playback_position. */
+function groupStateMessageAt(hostId: string, yourId: string, playbackPosition: number): RawMessage {
+  const frame = groupStateMessage(hostId, yourId);
+  return { ...frame, group: { ...(frame.group as SyncPlayGroup), playback_position: playbackPosition } };
+}
+
 describe('SyncPlayClient — group management sends', () => {
   it('createGroup emits a flat group_create with member fields', () => {
     const h = makeHarness();
@@ -1516,6 +1522,68 @@ describe('SyncPlayClient — sendSeek when in a group', () => {
       to_position: 5000,
       server_time: 3000, // synchronized time (no offset set)
     });
+  });
+});
+
+describe('SyncPlayClient — seekTo convenience (phlix-syncplay-059)', () => {
+  it('seekTo dispatches PLAYBACK_SEEK with from_position = the cached group position', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessageAt('host1', 'me', 12345));
+    h.clock.set(3000);
+    expect(h.client.seekTo(9000)).toBe(true);
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]).toMatchObject({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+      group_id: 'sp_abc',
+      member_id: 'me',
+      from_position: 12345,
+      to_position: 9000,
+      server_time: 3000, // synchronized time (no offset set)
+    });
+  });
+
+  it('seekTo reads the CURRENT cached position each call (a newer GROUP_STATE re-anchors the origin)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessageAt('host1', 'me', 12345));
+    h.client.handleIncoming(groupStateMessageAt('host1', 'me', 222));
+    expect(h.client.seekTo(9000)).toBe(true);
+    expect(h.sent).toHaveLength(1);
+    // Stale-capture mutation teeth: a from fixed at first sight would send
+    // 12345 here; the live cached read sends 222.
+    expect(h.sent[0]).toMatchObject({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_SEEK,
+      from_position: 222,
+      to_position: 9000,
+    });
+  });
+
+  it('seekTo is a no-op returning false with no cached group', () => {
+    const h = makeHarness();
+    expect(h.client.seekTo(5000)).toBe(false);
+    expect(h.sent).toHaveLength(0);
+  });
+
+  it('seekTo throws TypeError on non-finite or negative toPosition, grouped or not (sendSeek assert law)', () => {
+    const h = makeHarness();
+    expect(() => h.client.seekTo(Number.NaN)).toThrow(TypeError);
+    expect(() => h.client.seekTo(-1)).toThrow(TypeError);
+    h.client.handleIncoming(groupStateMessageAt('host1', 'me', 12345));
+    expect(() => h.client.seekTo(Number.POSITIVE_INFINITY)).toThrow(TypeError);
+    expect(h.sent).toHaveLength(0); // the asserts precede any dispatch
+  });
+
+  it('seekTo REFUSES rather than fabricate from = 0 if a stored group ever violates the clamp invariant', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessageAt('host1', 'me', 12345));
+    // No wire path mints this (every store-site folds through clampedPosition)
+    // — injected past the boundary to pin the defensive arm itself: refuse,
+    // never substitute the origin 059 names as the consumer's lie.
+    (h.client as unknown as { group: SyncPlayGroup | null }).group = Object.freeze({
+      ...(h.client.getGroup() as SyncPlayGroup),
+      playback_position: Number.NaN,
+    });
+    expect(h.client.seekTo(9000)).toBe(false);
+    expect(h.sent).toHaveLength(0);
   });
 });
 

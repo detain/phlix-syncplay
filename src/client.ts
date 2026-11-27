@@ -848,6 +848,44 @@ export class SyncPlayClient {
     return true;
   }
 
+  /**
+   * Convenience for the "jump to" case (phlix-syncplay-059): seek the group to
+   * `toPosition` (ms) using the CACHED group's
+   * {@link SyncPlayGroup.playback_position} as the seek origin, instead of
+   * forcing every caller to carry its own `fromPos` (the shape that left a
+   * `fromPos = 0` stub in consumers — fabricating the origin is exactly the
+   * lie this method exists to remove). The cached read is safe by S-syncplay-08:
+   * the stored snapshot is frozen, and this method NEVER mutates it — it
+   * forwards the freshly-read number into {@link sendSeek} and touches nothing.
+   *
+   * Coalescing is sendSeek's: with {@link SyncPlayClientOptions.seekThrottleMs}
+   * on, a burst of `seekTo` calls merges latest-wins into one trailing frame,
+   * and a `seekTo` mixed with explicit two-arg `sendSeek` calls shares the same
+   * window. The boolean law is sendSeek's too (CONSOLIDATED m4): `false` with
+   * no cached group, `true` when the intent was accepted for the wire.
+   *
+   * Every store-site folds `playback_position` through `clampedPosition`, so a
+   * stored group always carries a finite number >= 0; the guard below is a
+   * backstop for a future nulling path (same defensive precedent as the
+   * vanished-group arm in `closeSeekWindow`) and REFUSES rather than dispatch a
+   * seek whose origin it cannot name.
+   *
+   * @throws TypeError on non-finite or negative toPosition
+   */
+  seekTo(toPosition: number): boolean {
+    SyncPlayClient.assertPosition('toPosition', toPosition);
+    if (this.group === null) {
+      return false;
+    }
+    const fromPosition = this.group.playback_position;
+    if (!Number.isFinite(fromPosition) || fromPosition < 0) {
+      // Defensive: violates the clampedPosition invariant of every store-site.
+      // Refuse honestly — fabricating from = 0 is the 059 bug, not a cure.
+      return false;
+    }
+    return this.sendSeek(fromPosition, toPosition);
+  }
+
   /** The single PLAYBACK_SEEK wire point — leading and trailing edges share it. */
   private dispatchSeek(fromPosition: number, toPosition: number): void {
     if (this.group === null) {
