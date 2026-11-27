@@ -599,8 +599,13 @@ describe('deferred-lane era-cite + TOC currency', () => {
     // relay-scope carve-out rotated the stamp; pin moves in the same commit
     // per the stamp-rotate⇒pin-rotate law. Re-blessed 2026-11-28 → 2026-11-29
     // (S-syncplay-01): the §5 offset-sign ruling (classical NTP θ) rotated the
-    // stamp; pin moves in the same commit, same law.
-    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-29/);
+    // stamp; pin moves in the same commit, same law. Re-blessed 2026-11-29 →
+    // 2026-11-27 (S-syncplay-01 fix round 1, review minor m6 class): the
+    // 2026-11-29 stamp was forward-dated against its 2026-11-27 landing; the
+    // stamp rotates BACK to the true calendar day of this fix commit — same-day
+    // law (stamp == date of the rotating commit, never forward) — and the pin
+    // moves with it in the same commit, same law.
+    expect(SPEC).toMatch(/\*\*Document revision:\*\* 2026-11-27/);
   });
 
   it('stamp is not older than the last commit that touched SPEC.md (staleness tripwire)', () => {
