@@ -237,6 +237,13 @@ export interface SyncPlayClientOptions {
      * {@link SyncPlayErrorCode} union re-exported from `messages.ts`
      * (LW-081) — consumers may narrow with it, but `handleError`'s `'UNKNOWN'`
      * fallback sentinel stays outside the union by design.
+     *
+     * The union mixes TWO casing dialects: the legacy SCREAMING names (the
+     * legacy 12 lead with `NOT_AUTHENTICATED`/`NOT_IN_GROUP`/`NOT_HOST`) and the
+     * dotted twins — 12 + 8 = 20 names measured at `#v0.5.8` (`messages.ts`
+     * lineage, pinned by `test/errorCodeUnion.test.ts`). An exhaustive switch
+     * covers both; a dotted/snake-only expectation is the surprise, not the
+     * wire (phlix-syncplay-042).
      */
     onError?: (_code: string, _message: string, _details?: Record<string, unknown>) => void;
     onInfo?: (_message: string) => void;
@@ -375,7 +382,10 @@ export interface SyncPlayClientOptions {
      * rejects or a handler refuses for garbage fire here instead of vanishing —
      * the "your play didn't start and nothing says so" class.
      *  - `'undecodable'` — {@link decodeMessage} returned null (bad JSON,
-     *    non-object, missing string `type`); `_frame` is the raw inbound value.
+     *    non-object, missing string `type`); `_frame` is the raw inbound value —
+     *    the attacker-chosen bytes themselves: **untrusted** input, sanitize
+     *    before logging or rendering (injection/ANSI-escape class) on that arm
+     *    (phlix-syncplay-058).
      *  - `'malformed'` — a canonical frame a handler refused for garbage
      *    (missing/non-finite/negative position, non-string ids, non-object
      *    `group`, non-array `queue`/`groups`) or an unimplementable
@@ -508,6 +518,15 @@ export declare class SyncPlayClient {
      * access control. `passwordHash` is an unsalted, **replayable** SHA-256 group
      * gate — not an identity. The server MUST authenticate the connection before
      * accepting this frame.
+     *
+     * Hub-relay caveat (phlix-syncplay-057): on the hub relay (`:8804`) this
+     * group password is inert — the hub's canonical create/join lanes collapse
+     * into `handleCanonicalJoin`, which accepts-and-ignores `password_hash` and
+     * `password` (phlix-hub `SyncPlayRelayWorker` @ b7ad2a3e). The room lives
+     * inside the caller's own `(server_id, owner)` scope, and that scope is the
+     * real gate on that carrier. Password enforcement exists only on the server
+     * `:8097` direct path (`SyncPlayManager` + `JoinPasswordThrottle`).
+     * See SPEC §8.2.
      */
     createGroup(groupName: string, passwordHash?: string): void;
     /**
@@ -517,6 +536,13 @@ export declare class SyncPlayClient {
      * and MUST NOT be trusted for authorization — the server derives the effective
      * id from the authenticated connection. `passwordHash` is an unsalted,
      * **replayable** SHA-256 group gate, not an identity.
+     *
+     * Hub-relay caveat (phlix-syncplay-057): on the hub relay (`:8804`) this
+     * group password is inert — the hub accepts-and-ignores `password_hash` and
+     * `password` on the canonical join lane, so a password-protected group is
+     * NOT gated on that carrier; the caller's own `(server_id, owner)` scope is.
+     * Enforcement is server-`:8097`-direct only. See {@link createGroup} and
+     * SPEC §8.2.
      */
     joinGroup(groupId: string, passwordHash?: string): void;
     /**
