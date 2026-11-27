@@ -343,6 +343,24 @@ password?: string          (DEPRECATED legacy plaintext arm — see note below)
 > future REST carrier migration. See §8.2 for why either field is a weak
 > group gate, never identity.
 
+> **Hex-case law — the canonical form is lowercase (053).** `password_hash`
+> is canonically 64 **lowercase** hex characters, `/^([0-9a-f]{64})$/` —
+> exactly the domain of the server's `GroupState::isCanonicalPasswordHash()`
+> (`phlix-server/src/Session/SyncPlay/GroupState.php:365-368` @ `262f01d3`),
+> and the form the store keeps: `hash('sha256')` emits lowercase and
+> `verifyPasswordHash` compares verbatim. **Clients MUST supply
+> `password_hash` lowercase** — a producer whose digest printer emits
+> uppercase MUST lowercase it before calling. The server's wire gate is
+> case-lenient: `groupPasswordGate()` folds the presented digest with
+> `strtolower()` before its canonical check
+> (`phlix-server/src/Session/SyncPlay/SyncPlayManager.php:2336-2354`
+> @ `262f01d3`), so mixed case is normalized server-side, never rejected —
+> that leniency is NOT wire freedom. This library goes further and enforces
+> the canonical form locally: `SyncPlayClient.parsePasswordHash`
+> (`src/client.ts`) refuses every non-lowercase value at the call boundary,
+> a fail-fast deliberately stricter than the server — the library never
+> ships a value it had to normalize to admit.
+
 `syncplay_group_leave` (client → server)
 ```
 group_id: string
