@@ -1027,8 +1027,8 @@ expects it dropped from the recent window: aggregating all six samples instead
 of the last five would read the offset back near `353` and destroy stability.
 `AGG-ODD` carries odd round-trip times on every row: the whole window is
 designed so `trunc(rtt / 2)` is a genuine half-millisecond DOWN each sample,
-making the weighted mean `103.75...` round to `104`; a port that divides by
-2 without truncating lands on `103.25` and reports `103` — the integer-halving
+making the weighted mean `103.74...` round to `104`; a port that divides by
+2 without truncating lands on `103.24...` and reports `103` — the integer-halving
 law is mechanical there, not decorative.
 A port whose aggregates follow these rows agrees with §5 simultaneously on
 sign, truncation, weights, the real divisor, rounding, the recent-window slice
