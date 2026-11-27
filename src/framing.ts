@@ -139,7 +139,21 @@ export function decodeMessage(raw: unknown): RawMessage | UnknownFrame | null {
           const rest: Record<string, unknown> = {};
           for (const key of Object.keys(record)) {
             if (key !== 'data') {
-              rest[key] = record[key];
+              // S39 (phlix-syncplay-050): copy as an OWN inert data property,
+              // never via [[Set]]. A JSON-parsed frame carries `__proto__` as an
+              // OWN key, so `rest[key] = record[key]` invoked the
+              // Object.prototype.__proto__ SETTER — swapping rest's prototype
+              // and silently dropping the key (harmless only as long as the
+              // trailing own-keys spread survives: fragile by construction).
+              // defineProperty bypasses the setter and keeps the unwrap
+              // byte-consistent with the canonical pass-through, which always
+              // preserved such keys untouched.
+              Object.defineProperty(rest, key, {
+                value: record[key],
+                enumerable: true,
+                writable: true,
+                configurable: true,
+              });
             }
           }
           return { ...(data as Record<string, unknown>), ...rest };
