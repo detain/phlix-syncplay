@@ -27,6 +27,16 @@ export default defineConfig({
     // renderers pinned to legacy Chromium) are all ES2017-capable, and the
     // bundle has no optional-chaining/nullish/class-field constructs leaking.
     target: 'es2017',
+    // Maps ship — a size decision, recorded (phlix-syncplay-037). package.json
+    // 'files' publishes dist wholesale, so both .map files ride in the tarball:
+    // 374,747 B together, larger than the ES (27,866 B) and UMD (22,751 B)
+    // payloads they cover. Deliberate: every runtime this bundle targets
+    // (older Tizen/WebOS WebViews, stock RN Hermes, legacy-Chromium Electron)
+    // debugs from stack traces produced against the ES2017 transpile above, and
+    // a browser only fetches a .map when a reader opens devtools — consumers
+    // pay install bytes, never load cost. The alternative (drop maps for a
+    // smaller tarball) is also defensible; if taken, flip this flag AND adjust
+    // RELEASE.md, whose dist-identity md5 recipe already skips '*.map'.
     sourcemap: true,
   },
   resolve: {
@@ -46,6 +56,15 @@ export default defineConfig({
       reporter: ['text-summary', 'text', 'html', 'lcov'],
       include: ['src/**/*.ts'],
       exclude: ['**/*.test.ts', 'src/index.ts'],
+      // No `thresholds` — coverage floors are intentionally NOT enforced in
+      // vitest (phlix-syncplay-046). CI runs this suite with --coverage purely
+      // to write ./coverage/lcov.info for the Codacy upload; the step comment
+      // in .github/workflows/ci.yml states the advisory-only law and pins the
+      // procedure for any future ratchet (introduce it deliberately HERE, not
+      // by editing that step). Recorded posture at decision time (Nov 2026):
+      // 99.26% statements / 97.66% branches / 100% functions / 99.25% lines —
+      // high enough that no floor is currently load-bearing; the absence of a
+      // thresholds key is a decision on record, not an oversight.
     },
   },
 });
