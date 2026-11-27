@@ -17,7 +17,9 @@
   },
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "SPEC.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json && vite build && tsc --declaration --emitDeclarationOnly -p tsconfig.build.json",
