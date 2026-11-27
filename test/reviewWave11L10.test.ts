@@ -314,11 +314,13 @@ describe('LW-047 — ungrouped host_elect fires ONLY onHostChanged (ratified exc
 // MessageHandler refuses > PROTOCOL_VERSION; hub :8804 gates nothing). Pre-wave
 // the LIBRARY also checked presence only — a protocol_version-2 frame drove the
 // v1 decoder's full state machine. Now refused: non-integer, above
-// PROTOCOL_VERSION, and (034) integers BELOW 1 — the sub-1 floor is stricter
-// than the server's is_int arm on purpose: `0`/negative have no honest producer
-// and are NOT the documented absent shape. Absent still falls through accepted
-// (the legacy Tizen/older-server lane, ratified); foreign vocabulary is
-// untouched (unknown-frame law).
+// PROTOCOL_VERSION, and (034) integers BELOW 1 — the sub-1 floor MATCHES the
+// server's current arm (SRV-46 era: is_int + < 1 + > PROTOCOL_VERSION): both
+// live producers mint `1` (server Messages::PROTOCOL_VERSION, hub
+// SyncPlayRelayWorker::CANONICAL_PROTOCOL_VERSION), so `0`/negative have no
+// honest producer and are NOT the documented absent shape. Absent still falls
+// through accepted (the legacy Tizen/older-server lane, ratified); foreign
+// vocabulary is untouched (unknown-frame law).
 // ---------------------------------------------------------------------------
 describe('LW-049 — handleIncoming mirrors the server protocol_version value law on canonical frames', () => {
   const badVersions: Array<[string, unknown]> = [

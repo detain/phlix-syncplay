@@ -1221,11 +1221,14 @@ export class SyncPlayClient {
     // key's existence), so a version-2 frame drove the v1 state machine. A
     // non-integer, an integer above what this decoder implements, or an
     // integer BELOW 1 is refused through the existing malformed-drop
-    // machinery — no new wire vocabulary. The `>= 1` floor is deliberately
-    // stricter than the server's `is_int` arm (which lets `0` and negatives
-    // fall through): both live producers mint `1`, so sub-1 stamps have no
-    // honest sender, and an explicit garbage version is NOT the documented
-    // absent shape (absent = legacy no-version; see SPY-S15 below).
+    // machinery — no new wire vocabulary. The `>= 1` floor MATCHES the
+    // server's current arm (SRV-46 era: `MessageHandler` rejects on
+    // `is_int` + `< 1` + `> PROTOCOL_VERSION`): both live producers mint
+    // `1` (server `Messages::PROTOCOL_VERSION`, hub
+    // `SyncPlayRelayWorker::CANONICAL_PROTOCOL_VERSION`), so sub-1 stamps
+    // have no honest sender, and an explicit garbage version is NOT the
+    // documented absent shape (absent = legacy no-version; see SPY-S15
+    // below).
     //
     // SPY-S15 (watch note — value arm TIGHTENED by phlix-syncplay-034): the
     // enforcement window is now loose on exactly one arm: an ABSENT
