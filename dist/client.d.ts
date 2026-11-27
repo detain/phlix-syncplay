@@ -178,6 +178,12 @@ export interface SyncPlayClientOptions {
      * frames that omitted the field; real producers always stamp it
      * (phlix-server `SyncPlayManager.php:1799`/`:1855`, phlix-hub
      * `SyncPlayRelayWorker.php:1490`).
+     *
+     * phlix-syncplay-008: the delivered group is the library's STORED object —
+     * `===` what `getGroup()` returns and frozen at the store (scope named on
+     * {@link SyncPlayClient.freezeGroup}): safe to keep and read, writes throw
+     * (strict-mode consumers) or are ignored (legacy sloppy scripts), never
+     * silently corrupt the model the next fold diffs against.
      */
     onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
     onSync?: (_status: TimeSyncStatus) => void;
@@ -491,7 +497,15 @@ export declare class SyncPlayClient {
     private static assertPosition;
     /** The TimeSync instance (for status/offset queries). */
     getTimeSync(): TimeSync;
-    /** The current group, or null if not in one. */
+    /**
+     * The current group, or null if not in one.
+     *
+     * phlix-syncplay-008: the returned object IS the library's stored model,
+     * frozen at every store (see {@link SyncPlayClient.freezeGroup} for the
+     * exact scope). Reading and keeping the reference is the contract; writing
+     * throws (strict-mode consumers) instead of corrupting the library's state
+     * and the next fold's diff baseline.
+     */
     getGroup(): SyncPlayGroup | null;
     /** This member's id. */
     getMemberId(): string;
@@ -768,6 +782,33 @@ export declare class SyncPlayClient {
      * null) is treated as empty, exactly as before.
      */
     private static normalizeMembers;
+    /**
+     * phlix-syncplay-008: parse-at-the-boundary immutability law. Every object
+     * ever stored in `this.group` is the SAME reference `getGroup()` returns,
+     * `onState` delivers, and the next fold's roster-diff reads as `previous`
+     * — pre-fix a consumer writing into a handed-out group mutated the
+     * library's live model (and corrupted that diff baseline: a renamed or
+     * ghost-pushed member surfaced as a false `onMemberLeft` event, a clobbered
+     * position poisoned every later reader). Every internal change is a
+     * whole-object REPLACE — this fold, {@link foldHostId}, and the queue fold
+     * all build fresh objects and never assign a field of the stored one — so
+     * freezing at the store costs the library nothing and closes the corruption
+     * vector for ALL hand-out paths at once.
+     *
+     * Frozen scope, stated exactly (no deep-freeze overclaim): the group object
+     * itself, its `members` array and every member object, and — when present —
+     * its `queue` array and every queue ITEM. That is the whole consumer model:
+     * `SyncPlayGroup` carries nothing else but primitives on these two arrays.
+     * The one open island is each item's `media_info` — an opaque wire record
+     * the library never reads, shared by reference with the decoded frame; a
+     * write inside it cannot reach the library's state or the diff baseline.
+     * A write to a frozen surface THROWS in strict-mode consumers (ESM and all
+     * TS-emitted modules are strict) and is silently ignored in legacy sloppy
+     * scripts — either way the stored model stays pristine. The TS type stays
+     * mutable (changing public type shape is another step's surface); the
+     * immutability is the runtime law documented at every hand-out.
+     */
+    private static freezeGroup;
     /**
      * Patch the cached group's `host_id` **and** recompute `members[].is_host`
      * in the same mutation (W-min119 M-SYNCPLAY-15, review `syncplay__gameux`

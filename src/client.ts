@@ -212,6 +212,12 @@ export interface SyncPlayClientOptions {
    * frames that omitted the field; real producers always stamp it
    * (phlix-server `SyncPlayManager.php:1799`/`:1855`, phlix-hub
    * `SyncPlayRelayWorker.php:1490`).
+   *
+   * phlix-syncplay-008: the delivered group is the library's STORED object —
+   * `===` what `getGroup()` returns and frozen at the store (scope named on
+   * {@link SyncPlayClient.freezeGroup}): safe to keep and read, writes throw
+   * (strict-mode consumers) or are ignored (legacy sloppy scripts), never
+   * silently corrupt the model the next fold diffs against.
    */
   onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
   onSync?: (_status: TimeSyncStatus) => void;
@@ -608,7 +614,15 @@ export class SyncPlayClient {
     return this.timeSync;
   }
 
-  /** The current group, or null if not in one. */
+  /**
+   * The current group, or null if not in one.
+   *
+   * phlix-syncplay-008: the returned object IS the library's stored model,
+   * frozen at every store (see {@link SyncPlayClient.freezeGroup} for the
+   * exact scope). Reading and keeping the reference is the contract; writing
+   * throws (strict-mode consumers) instead of corrupting the library's state
+   * and the next fold's diff baseline.
+   */
   getGroup(): SyncPlayGroup | null {
     return this.group;
   }
@@ -1484,6 +1498,46 @@ export class SyncPlayClient {
   }
 
   /**
+   * phlix-syncplay-008: parse-at-the-boundary immutability law. Every object
+   * ever stored in `this.group` is the SAME reference `getGroup()` returns,
+   * `onState` delivers, and the next fold's roster-diff reads as `previous`
+   * — pre-fix a consumer writing into a handed-out group mutated the
+   * library's live model (and corrupted that diff baseline: a renamed or
+   * ghost-pushed member surfaced as a false `onMemberLeft` event, a clobbered
+   * position poisoned every later reader). Every internal change is a
+   * whole-object REPLACE — this fold, {@link foldHostId}, and the queue fold
+   * all build fresh objects and never assign a field of the stored one — so
+   * freezing at the store costs the library nothing and closes the corruption
+   * vector for ALL hand-out paths at once.
+   *
+   * Frozen scope, stated exactly (no deep-freeze overclaim): the group object
+   * itself, its `members` array and every member object, and — when present —
+   * its `queue` array and every queue ITEM. That is the whole consumer model:
+   * `SyncPlayGroup` carries nothing else but primitives on these two arrays.
+   * The one open island is each item's `media_info` — an opaque wire record
+   * the library never reads, shared by reference with the decoded frame; a
+   * write inside it cannot reach the library's state or the diff baseline.
+   * A write to a frozen surface THROWS in strict-mode consumers (ESM and all
+   * TS-emitted modules are strict) and is silently ignored in legacy sloppy
+   * scripts — either way the stored model stays pristine. The TS type stays
+   * mutable (changing public type shape is another step's surface); the
+   * immutability is the runtime law documented at every hand-out.
+   */
+  private static freezeGroup(group: SyncPlayGroup): SyncPlayGroup {
+    for (const member of group.members) {
+      Object.freeze(member);
+    }
+    Object.freeze(group.members);
+    if (group.queue !== undefined) {
+      for (const item of group.queue) {
+        Object.freeze(item);
+      }
+      Object.freeze(group.queue);
+    }
+    return Object.freeze(group);
+  }
+
+  /**
    * Patch the cached group's `host_id` **and** recompute `members[].is_host`
    * in the same mutation (W-min119 M-SYNCPLAY-15, review `syncplay__gameux`
    * m4). `normalizeMembers` derives `is_host` from `host_id` at fold time —
@@ -1497,11 +1551,15 @@ export class SyncPlayClient {
    * cached session.
    */
   private static foldHostId(group: SyncPlayGroup, newHostId: string | null): SyncPlayGroup {
-    return {
+    // phlix-syncplay-008: fresh object each call, re-frozen at the store —
+    // the spread reads a frozen source (free), the remapped member objects
+    // are new builds that need their own freeze (freezeGroup re-applies
+    // idempotently; the already-frozen queue reference rides along untouched).
+    return SyncPlayClient.freezeGroup({
       ...group,
       host_id: newHostId,
       members: group.members.map((m) => ({ ...m, is_host: m.id === newHostId })),
-    };
+    });
   }
 
   /**
@@ -1834,7 +1892,10 @@ export class SyncPlayClient {
     // (clamp disarm closed), so only `> 0` ever invents a ceiling here.
     const duration = SyncPlayClient.nonnegOrNull(group.current_media_duration);
 
-    this.group = {
+    // phlix-syncplay-008: frozen at the store — this object is handed to
+    // onState and returned by getGroup() by reference, and it becomes the
+    // next fold's `previous` diff baseline.
+    this.group = SyncPlayClient.freezeGroup({
       group_id: groupId,
       group_name: SyncPlayClient.strOr(group.group_name, ''),
       members,
@@ -1847,7 +1908,7 @@ export class SyncPlayClient {
       queue: SyncPlayClient.normalizeQueue(group.queue),
       created_at: SyncPlayClient.finiteOrUndefined(group.created_at),
       last_activity_at: SyncPlayClient.finiteOrUndefined(group.last_activity_at),
-    };
+    });
 
     // M-SYNCPLAY-16: fire `onMemberLeft` for members this SAME room lost
     // since the previous fold. A room switch (different cached group_id) is
@@ -2124,7 +2185,10 @@ export class SyncPlayClient {
       this.options.onFrameDropped?.('malformed', msg);
       return;
     }
-    this.group = { ...group, queue };
+    // phlix-syncplay-008: fresh frozen store; the SAME array reference below
+    // goes to onQueueChanged, and it is frozen too (items rebuilt fresh by
+    // normalizeQueue, then sealed).
+    this.group = SyncPlayClient.freezeGroup({ ...group, queue });
     this.options.onQueueChanged?.(queue);
   }
 

@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SyncPlayClient, type PlaybackCommand } from '../src/client';
 import { encodeMessage, serializeMessage } from '../src/framing';
-import { SYNCPLAY_MESSAGE_TYPES, type GroupListSummaryRow, type RawMessage, type SyncPlayGroup, type TimeSyncPayload, type TimeSyncState, type UnknownFrame } from '../src/messages';
+import { SYNCPLAY_MESSAGE_TYPES, type GroupListSummaryRow, type PlaybackQueueItem, type RawMessage, type SyncPlayGroup, type TimeSyncPayload, type TimeSyncState, type UnknownFrame } from '../src/messages';
 
 /** A fake transport + clock harness. */
 function makeHarness(memberId = 'me') {
@@ -2846,5 +2846,162 @@ describe('SyncPlayClient — integer-ms time-sync symmetry (SPY-2)', () => {
     // 1125 and classical θ (S-syncplay-01) recovers offset = 1125 - 1000 - 25 = 100.
     expect(h.syncs[0]!.offset).toBe(100);
     expect(h.syncs[0]!.latency).toBe(25);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// phlix-syncplay-008 — frozen group hand-out.
+// Finding: getGroup() and onState handed out the LIVE internal group object;
+// a consumer writing into it mutated the library's model AND the next fold's
+// `previous` roster-diff baseline (a renamed member surfaced as a false
+// onMemberLeft payload). Cure: every store site freezes (all internal changes
+// are whole-object replaces, so freezing is internal-cost-free). The pins
+// assert the documented scope EXACTLY — no deep-freeze overclaim: each queue
+// item's media_info stays an open island the library never reads.
+// ---------------------------------------------------------------------------
+describe('SyncPlayClient — frozen group hand-out (phlix-syncplay-008)', () => {
+  it('getGroup() and the onState argument are the SAME object, frozen through the consumer model', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    const g = h.client.getGroup();
+    expect(g).not.toBeNull();
+    expect(h.states).toHaveLength(1);
+    expect(h.states[0]!.group).toBe(g);
+    expect(Object.isFrozen(g)).toBe(true);
+    expect(Object.isFrozen(g!.members)).toBe(true);
+    expect(g!.members.every((m) => Object.isFrozen(m))).toBe(true);
+  });
+
+  it('mutation attempts on a handed-out group are REFUSED (strict-mode TypeError) and the model stays pristine', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    const g = h.client.getGroup()!;
+    // Top-level field write (the TS type stays mutable — the refusal is the
+    // runtime law, asserted with a cast because compiling the write is the
+    // whole hazard this cure closes).
+    expect(() => {
+      (g as unknown as { group_name: string }).group_name = 'hijacked';
+    }).toThrow(TypeError);
+    // Ghost roster push (frozen array rejects growth).
+    expect(() => {
+      g.members.push({ id: 'ghost', name: 'Ghost', is_host: false, joined_at: 9 });
+    }).toThrow(TypeError);
+    // Element write on a live member row.
+    expect(() => {
+      (g.members[0] as unknown as { name: string }).name = 'hijacked';
+    }).toThrow(TypeError);
+    // Nothing landed: the stored model is byte-identical to the fold.
+    expect(g.group_name).toBe('Movie Night');
+    expect(g.members).toHaveLength(2);
+    expect(g.members[0]!.name).toBe('Host');
+  });
+
+  it('diff-baseline immunity: a refused hostile write cannot poison the NEXT fold’s onMemberLeft event', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    const g = h.client.getGroup()!;
+    // Pre-cure this write SUCCEEDED and the leaving-member event below would
+    // have carried name 'HACKED' — the exact corruption the finding names.
+    try {
+      (g.members[1] as unknown as { name: string }).name = 'HACKED';
+    } catch {
+      // strict-mode refusal — the cure under test; the catch keeps the pin
+      // honest under BOTH documented refusal modes (throws/ignored).
+    }
+    // Same room, follow-up state WITHOUT 'me' — fires the roster diff.
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: {
+        group_id: 'sp_abc',
+        group_name: 'Movie Night',
+        member_count: 1,
+        host_id: 'host1',
+        current_media_id: 'media_1',
+        current_media_duration: 0,
+        playback_position: 0,
+        playback_state: 'paused',
+        members: [{ id: 'host1', name: 'Host', is_host: true, joined_at: 1 }],
+      },
+    });
+    expect(h.left).toEqual([{ id: 'me', name: 'Tester' }]);
+    expect(h.client.getGroup()!.members).toHaveLength(1);
+  });
+
+  it('queue surfaces: stored queue and the onQueueChanged array are the SAME frozen reference; media_info is the documented open island', () => {
+    const queues: PlaybackQueueItem[][] = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      memberName: 'Tester',
+      onQueueChanged: (q) => queues.push(q),
+    });
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: {
+        group_id: 'sp_abc',
+        group_name: 'Movie Night',
+        member_count: 1,
+        host_id: 'host1',
+        current_media_id: null,
+        current_media_duration: 0,
+        playback_position: 0,
+        playback_state: 'paused',
+        members: [{ id: 'host1', name: 'Host', is_host: true, joined_at: 1 }],
+        queue: [{ media_id: 'm1', media_info: { title: 'A' } }],
+      },
+    });
+    const g = client.getGroup()!;
+    expect(Object.isFrozen(g.queue)).toBe(true);
+    expect(Object.isFrozen(g.queue![0])).toBe(true);
+    // Disclosed boundary: media_info is opaque consumer content the library
+    // never reads — freezing it would reach into shared decoded-frame bytes.
+    expect(Object.isFrozen(g.queue![0]!.media_info!)).toBe(false);
+    expect(() => {
+      g.queue!.push({ media_id: 'm2' });
+    }).toThrow(TypeError);
+
+    // Queue broadcast replaces the store: new array frozen, identical to the
+    // callback argument (both hand-outs sealed at once).
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.PLAYBACK_QUEUE,
+      protocol_version: 1,
+      queue: [{ media_id: 'm2', media_info: { title: 'B' }, added_by: 'host1' }],
+    });
+    expect(queues).toHaveLength(1);
+    expect(Object.isFrozen(queues[0])).toBe(true);
+    expect(client.getGroup()!.queue).toBe(queues[0]);
+    expect(() => {
+      (queues[0]![0] as unknown as { media_id: string }).media_id = 'tampered';
+    }).toThrow(TypeError);
+  });
+
+  it('foldHostId paths re-freeze the rebuilt roster (host_transfer store stays sealed)', () => {
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      memberName: 'Tester',
+    });
+    client.handleIncoming(groupStateMessage('host1', 'me'));
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_TRANSFER,
+      protocol_version: 1,
+      current_host_id: 'host1',
+      new_host_id: 'me',
+    });
+    const g = client.getGroup()!;
+    expect(g.host_id).toBe('me');
+    expect(Object.isFrozen(g)).toBe(true);
+    expect(Object.isFrozen(g.members)).toBe(true);
+    // The remapped member objects are NEW builds — they need their own freeze.
+    expect(g.members.every((m) => Object.isFrozen(m))).toBe(true);
+    expect(() => {
+      (g.members.find((m) => m.id === 'me') as unknown as { is_host: boolean }).is_host = false;
+    }).toThrow(TypeError);
   });
 });

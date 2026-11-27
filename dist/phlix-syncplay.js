@@ -502,11 +502,19 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			joined_at: typeof e.joined_at == "number" && Number.isFinite(e.joined_at) ? e.joined_at : 0
 		}));
 	}
-	static foldHostId(e, t) {
-		return l(l({}, e), {}, {
-			host_id: t,
-			members: e.members.map((e) => l(l({}, e), {}, { is_host: e.id === t }))
-		});
+	static freezeGroup(e) {
+		for (let t of e.members) Object.freeze(t);
+		if (Object.freeze(e.members), e.queue !== void 0) {
+			for (let t of e.queue) Object.freeze(t);
+			Object.freeze(e.queue);
+		}
+		return Object.freeze(e);
+	}
+	static foldHostId(e, n) {
+		return t.freezeGroup(l(l({}, e), {}, {
+			host_id: n,
+			members: e.members.map((e) => l(l({}, e), {}, { is_host: e.id === n }))
+		}));
 	}
 	static serverTimeToMs(e) {
 		return e < 0xe8d4a51000 ? e * 1e3 : e;
@@ -583,7 +591,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		let u = a.group_id, d = t.strOrNull(a.host_id);
 		this.group !== null && this.group.group_id !== u && this.cancelSeekCoalescing();
 		let f = this.group, p = t.normalizeMembers(a.members, d), m = t.nonnegOrNull(a.current_media_duration);
-		if (this.group = {
+		if (this.group = t.freezeGroup({
 			group_id: u,
 			group_name: t.strOr(a.group_name, ""),
 			members: p,
@@ -596,7 +604,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			queue: t.normalizeQueue(a.queue),
 			created_at: t.finiteOrUndefined(a.created_at),
 			last_activity_at: t.finiteOrUndefined(a.last_activity_at)
-		}, f !== null && f.group_id === u) {
+		}), f !== null && f.group_id === u) {
 			let e = new Set(p.map((e) => e.id));
 			for (let t of f.members) if (!e.has(t.id)) {
 				var h, g;
@@ -725,7 +733,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		if (c === void 0) {
 			var u, d;
 			(u = (d = this.options).onFrameDropped) == null || u.call(d, "malformed", e);
-		} else this.group = l(l({}, i), {}, { queue: c }), (n = (r = this.options).onQueueChanged) == null || n.call(r, c);
+		} else this.group = t.freezeGroup(l(l({}, i), {}, { queue: c })), (n = (r = this.options).onQueueChanged) == null || n.call(r, c);
 	}
 	handleHostTransfer(e) {
 		var n, r;
