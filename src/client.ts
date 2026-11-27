@@ -2243,10 +2243,24 @@ export class SyncPlayClient {
     // Parse-at-the-boundary against the REAL producer keys (server
     // groupSummary() :1740-1750, hub handleCanonicalGroupList() :1938-1943 —
     // every key always emitted, so each row is total-typed, never optional).
-    const rows = groups.filter((g) => typeof g === 'object' && g !== null);
+    // S-syncplay-27 (finding phlix-syncplay-032): the element guard now also
+    // DROPS non-string-`id` rows instead of minting `''`. `id` is identity —
+    // a coerced-empty row is a joinable nameless room one `joinGroup('')`
+    // away, the LW-041a hazard relocated one layer up from the group_state
+    // gate. Both producers emit `id` as a string (server groupSummary()
+    // takes a typed `string $id`; hub handleCanonicalGroupList()
+    // substr-derives theirs — re-checked against committed blobs
+    // 262f01d3 / b7ad2a3e), so a non-string id has NO honest producer: it is
+    // type-garbage and goes. A producer-SUPPLIED empty string is still a
+    // string and survives verbatim — the law is type-scoped, LW-041a parity.
+    // Element-level drops stay silent like the non-object skip; a
+    // well-formed `{groups: []}`-shaped frame still surfaces (possibly empty).
+    const rows = groups.filter(
+      (g) => typeof g === 'object' && g !== null && typeof g.id === 'string',
+    );
     const list: GroupListSummaryRow[] = rows.map(
       (g): GroupListSummaryRow => ({
-        id: typeof g.id === 'string' ? g.id : '',
+        id: g.id, // string by the element-drop law above (S-syncplay-27)
         name: typeof g.name === 'string' ? g.name : '',
         member_count: SyncPlayClient.finiteOr(g.member_count, 0), // M-SYNCPLAY-19
         has_password: typeof g.has_password === 'boolean' ? g.has_password : false,

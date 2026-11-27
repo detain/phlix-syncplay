@@ -1833,12 +1833,17 @@ describe('SyncPlayClient — handleTimeSync drops frames that miss the server sh
   });
 });
 
-describe('SyncPlayClient — handleGroupList type coercion defaults (producer keys)', () => {
-  // Every coercion is asserted on the REAL producer key names; the row that
-  // carries the OLD fabricated `{group_id, group_name}` spelling is pinned to
-  // decode into EMPTY defaults — the exact silent-`''` bug class this fix
-  // lane kills, now test-permanent.
-  it('coerces every non-conforming producer field to its total default', () => {
+describe('SyncPlayClient — handleGroupList boundary law (producer keys + id-drop)', () => {
+  // S-syncplay-27 (finding phlix-syncplay-032): every coercion below is
+  // asserted on the REAL producer key names, and the IDENTITY key is now a
+  // DROP law, not a default: the only source of a non-string `id` is wire
+  // garbage — server `groupSummary()` folds a typed string `$id` into the
+  // row and hub `handleCanonicalGroupList()` substr-derives theirs, so both
+  // always emit a string — and minting `''` handed consumers a joinable
+  // nameless room (the LW-041a hazard, one layer up). The pre-fix pins here
+  // asserted exactly that mint (`id: ''` surfacing from garbage); they are
+  // converted to the stricter drop law, disclosed in the commit body.
+  it('coerces every non-conforming NON-identity field of a string-id row to its total default', () => {
     const lists: GroupListSummaryRow[][] = [];
     const client = new SyncPlayClient({
       send: () => {},
@@ -1852,7 +1857,7 @@ describe('SyncPlayClient — handleGroupList type coercion defaults (producer ke
       protocol_version: 1,
       groups: [
         {
-          id: 123, // non-string id
+          id: 'g1', // string id — the row SURVIVES; only its other fields are garbage
           name: { text: 'nope' }, // non-string name
           member_count: 'three', // non-number
           has_password: 'yes', // non-bool
@@ -1864,7 +1869,7 @@ describe('SyncPlayClient — handleGroupList type coercion defaults (producer ke
     });
 
     expect(lists[0][0]).toEqual({
-      id: '',
+      id: 'g1',
       name: '',
       member_count: 0,
       has_password: false,
@@ -1873,7 +1878,45 @@ describe('SyncPlayClient — handleGroupList type coercion defaults (producer ke
     });
   });
 
-  it('a fabricated-shape row (group_id/group_name) yields empty producer fields', () => {
+  it('drops forged non-string-id rows (number, null, object, missing) and keeps valid rows in order', () => {
+    const lists: GroupListSummaryRow[][] = [];
+    const drops: Array<{ reason: string; frame: unknown }> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onGroupList: (groups) => lists.push(groups),
+      onFrameDropped: (reason, frame) => drops.push({ reason, frame }),
+    });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_LIST,
+      protocol_version: 1,
+      groups: [
+        { id: 123, name: 'num-id', member_count: 1, has_password: false, current_media: null, is_playing: false },
+        { id: null, name: 'null-id', member_count: 1, has_password: false, current_media: null, is_playing: false },
+        { id: { nested: 'obj' }, name: 'obj-id', member_count: 1, has_password: false, current_media: null, is_playing: false },
+        { name: 'missing-id', member_count: 1, has_password: false, current_media: null, is_playing: false },
+        { id: 'keep-1', name: 'Keep One', member_count: 2, has_password: true, current_media: 'm1', is_playing: true },
+        { id: 'keep-2', name: 'keep-2', member_count: 1, has_password: false, current_media: null, is_playing: false },
+      ],
+      count: 6,
+    });
+
+    // Exactly the two string-id rows survive, order unchanged, fields as sent.
+    expect(lists).toHaveLength(1);
+    expect(lists[0]).toEqual([
+      { id: 'keep-1', name: 'Keep One', member_count: 2, has_password: true, current_media: 'm1', is_playing: true },
+      { id: 'keep-2', name: 'keep-2', member_count: 1, has_password: false, current_media: null, is_playing: false },
+    ]);
+    // The frame itself is well-formed ({groups: array}); element-level drops
+    // are silent, sharing the normalizeMembers M10 precedent — no bogus frame-
+    // level onFrameDropped, and never a `''`-id row.
+    expect(drops).toHaveLength(0);
+    expect(lists[0].some((r) => r.id === '')).toBe(false);
+  });
+
+  it('a fabricated-shape row (group_id/group_name) is dropped whole — its has_password never surfaces', () => {
     const lists: GroupListSummaryRow[][] = [];
     const client = new SyncPlayClient({
       send: () => {},
@@ -1889,18 +1932,38 @@ describe('SyncPlayClient — handleGroupList type coercion defaults (producer ke
       count: 1,
     });
 
-    // The pre-fix reader would have seen 'g1'/'Group One' here; on the fixed
-    // boundary the invented IDENTITY names are absent data. `has_password`
-    // survives — it is a REAL producer key that happened to share the old
-    // fixture's spelling.
-    expect(lists[0][0]).toEqual({
-      id: '',
-      name: '',
-      member_count: 0,
-      has_password: true,
-      current_media: null,
-      is_playing: false,
+    // Pre-fix this row surfaced as `{id: '', ..., has_password: true}` — the
+    // joinable-empty-id mint AND a half-truth about a room that has no id.
+    // On the drop law the garbage row belongs to NO summary the consumer
+    // can render or join.
+    expect(lists).toHaveLength(1);
+    expect(lists[0]).toEqual([]);
+  });
+
+  it('an empty-string id is a STRING — the row survives verbatim (drop law is type-scoped, LW-041a parity)', () => {
+    const lists: GroupListSummaryRow[][] = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onGroupList: (groups) => lists.push(groups),
     });
+
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_LIST,
+      protocol_version: 1,
+      groups: [{ id: '', name: 'emitted-empty', member_count: 0, has_password: false, current_media: null, is_playing: false }],
+      count: 1,
+    });
+
+    // The step law is "drop NON-STRING-id rows"; `''` is a string, so a
+    // producer-supplied one is surfaced honestly as the producer's data.
+    // What the fix kills is the library MINTING `''` from type-garbage —
+    // mirrored by handleGroupState's LW-041a gate, which refuses a
+    // non-string group_id and admits the empty string.
+    expect(lists[0]).toEqual([
+      { id: '', name: 'emitted-empty', member_count: 0, has_password: false, current_media: null, is_playing: false },
+    ]);
   });
 });
 

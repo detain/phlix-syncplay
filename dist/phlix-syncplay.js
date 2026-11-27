@@ -780,8 +780,8 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			(a = (o = this.options).onFrameDropped) == null || a.call(o, "malformed", e);
 			return;
 		}
-		let s = i.filter((e) => typeof e == "object" && !!e).map((e) => ({
-			id: typeof e.id == "string" ? e.id : "",
+		let s = i.filter((e) => typeof e == "object" && !!e && typeof e.id == "string").map((e) => ({
+			id: e.id,
 			name: typeof e.name == "string" ? e.name : "",
 			member_count: t.finiteOr(e.member_count, 0),
 			has_password: typeof e.has_password == "boolean" && e.has_password,
