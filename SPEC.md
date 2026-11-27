@@ -27,7 +27,7 @@ The authoritative implementation is the PHP server:
 4. [Message payloads (exact wire fields)](#4-message-payloads-exact-wire-fields) — subsections `4.1`–`4.6`
 5. [NTP time synchronization (mirrors `TimeSync.php`)](#5-ntp-time-synchronization-mirrors-timesyncphp)
 6. [Member-event handling (what the server ACTUALLY does)](#6-member-event-handling-what-the-server-actually-does)
-7. [Normalized client divergences](#7-normalized-client-divergences)
+7. [Normalized client divergences](#7-normalized-client-divergences) — subsection `7.1`
 8. [Security model](#8-security-model) — subsections `8.1`–`8.5`
 9. [Server-derived identity contract](#9-server-derived-identity-contract-member_id--host_id) — subsections `9.1`–`9.3`
 10. [Reconnect & resume recovery](#10-reconnect--resume-recovery) — subsections `10.1`–`10.3`
@@ -976,6 +976,64 @@ existing server/hub law; no wire shape changes.
   server's `TimeSync.php` has neither a freshness bound nor a reject
   counter, so this is client-side observability only — no wire meaning.
 
+**Worked-example vectors (`S-syncplay-13`; findings phlix-syncplay-015,
+phlix-syncplay-056).** The table below is the normative acceptance vector set
+for the math above. A port that claims §5 conformance MUST reproduce every
+row: `rtt`/`one_way`/`theta` are the per-sample values of the formulas above;
+`offset`/`latency`/`stable` are the AGGREGATE state once that row's sample is
+in the window (for `AGG-*` multi-row vectors the aggregate columns are
+asserted at the LAST row of the group; `-` means "no assertion at this row").
+`accepted` is the admission rule's verdict. All timestamps are integer ms with
+`t3 == t2` per the estate frame above. This library asserts the table
+mechanically against `TimeSync` in `test/dialectSsot.test.ts` (leg 5); the
+server `TimeSync.php` leg and the console leg carry the same rows as their own
+acceptance vectors (routed to their waves).
+
+| vector | seq | t1 | t2 | t3 | t4 | accepted | rtt | one_way | theta | offset | latency | stable |
+|--------|-----|----|----|----|----|----------|-----|---------|-------|--------|---------|--------|
+| - | - | 1000 | 1150 | 1150 | 1300 | yes | 300 | 150 | 0 | 0 | 150 | no |
+| - | - | 1000 | 1120 | 1120 | 1221 | yes | 221 | 110 | 10 | 10 | 110 | no |
+| - | - | 5000 | 4900 | 4900 | 5040 | yes | 40 | 20 | -120 | -120 | 20 | no |
+| - | - | 2000 | 2100 | 2100 | 2000 | yes | 0 | 0 | 100 | 100 | 0 | no |
+| - | - | 1000 | 1900 | 1900 | 2000 | yes | 1000 | 500 | 400 | 400 | 500 | no |
+| - | - | 0 | 500 | 500 | 1001 | no | - | - | - | - | - | no |
+| - | - | 1000 | 1100 | 1100 | 900 | no | - | - | - | - | - | no |
+| - | - | 1000 | 1100 | 1300 | 1150 | no | - | - | - | - | - | no |
+| AGG-CRUSH | 1 | 10000 | 10200 | 10200 | 10200 | yes | 200 | 100 | 100 | - | - | - |
+| AGG-CRUSH | 2 | 11000 | 11160 | 11160 | 11100 | yes | 100 | 50 | 110 | - | - | - |
+| AGG-CRUSH | 3 | 12000 | 12290 | 12290 | 12400 | yes | 400 | 200 | 90 | - | - | - |
+| AGG-CRUSH | 4 | 13000 | 13130 | 13130 | 13050 | yes | 50 | 25 | 105 | - | - | - |
+| AGG-CRUSH | 5 | 14000 | 14220 | 14220 | 14250 | yes | 250 | 125 | 95 | 104 | 100 | no |
+| AGG-SLICE | 0 | 9000 | 19499 | 19499 | 10000 | yes | 1000 | 500 | 9999 | - | - | - |
+| AGG-SLICE | 1 | 15000 | 15220 | 15220 | 15200 | yes | 200 | 100 | 120 | - | - | - |
+| AGG-SLICE | 2 | 16000 | 16171 | 16171 | 16100 | yes | 100 | 50 | 121 | - | - | - |
+| AGG-SLICE | 3 | 17000 | 17319 | 17319 | 17400 | yes | 400 | 200 | 119 | - | - | - |
+| AGG-SLICE | 4 | 18000 | 18145 | 18145 | 18050 | yes | 50 | 25 | 120 | - | - | - |
+| AGG-SLICE | 5 | 19000 | 19245 | 19245 | 19250 | yes | 250 | 125 | 120 | 120 | 100 | yes |
+| AGG-ODD | 1 | 20000 | 20200 | 20200 | 20201 | yes | 201 | 100 | 100 | - | - | - |
+| AGG-ODD | 2 | 21000 | 21159 | 21159 | 21099 | yes | 99 | 49 | 110 | - | - | - |
+| AGG-ODD | 3 | 22000 | 22290 | 22290 | 22401 | yes | 401 | 200 | 90 | - | - | - |
+| AGG-ODD | 4 | 23000 | 23130 | 23130 | 23051 | yes | 51 | 25 | 105 | - | - | - |
+| AGG-ODD | 5 | 24000 | 24220 | 24220 | 24251 | yes | 251 | 125 | 95 | 104 | 100 | no |
+
+Reading the aggregate rows. `AGG-CRUSH`: the five per-sample weights sum to
+`0.0415`, and `4.305 / 0.0415 = 103.73...` rounds to `104` — under the server's
+legacy `max(1, $weightSum)` divisor the same window returns `4`, so a port
+reporting `4` here reproduces the ruled crush defect instead of this law. Its
+offsets `[100, 110, 90, 105, 95]` give a population variance of exactly `50`,
+which the `< 50` gate REJECTS — the stability boundary is strict, and this row
+pins it. `AGG-SLICE` feeds a stale `theta = 9999` sample first (seq `0`) and
+expects it dropped from the recent window: aggregating all six samples instead
+of the last five would read the offset back near `353` and destroy stability.
+`AGG-ODD` carries odd round-trip times on every row: the whole window is
+designed so `trunc(rtt / 2)` is a genuine half-millisecond DOWN each sample,
+making the weighted mean `103.75...` round to `104`; a port that divides by
+2 without truncating lands on `103.25` and reports `103` — the integer-halving
+law is mechanical there, not decorative.
+A port whose aggregates follow these rows agrees with §5 simultaneously on
+sign, truncation, weights, the real divisor, rounding, the recent-window slice
+and the strict boundary.
+
 ---
 
 ## 6. Member-event handling (what the server ACTUALLY does)
@@ -1029,6 +1087,38 @@ HOST_ELECT (never dedicated member types).
 > `syncplay_time_sync`, and likewise for every name in those lists). The
 > abbreviations are prose shorthand only; the wire always carries the full
 > underscore-prefixed names.
+
+### 7.1 The console port (`phlix-console-client`) — a third estimator variant
+
+`phlix-console-client/src/Api/SyncPlay/TimeSync.php` @ `9ef70cb` is the
+estate's third NTP-style estimator (after the server's `TimeSync.php` and this
+library). Its WIRE vocabulary is conformant — the `syncplay_*` type names it
+sends match the §3 catalog (verified; finding phlix-syncplay-015) — so its
+divergence is entirely in the LOCAL estimator: the same classical θ per sample,
+different constants, aggregation, and admission rules. Per finding
+phlix-syncplay-056 the inventory is recorded here; making the port conform,
+and adding assertions against it, are ROUTED to a phlix-console-client wave —
+this subsection is inventory, not new console obligations minted today.
+
+| Aspect | Console port @ `9ef70cb` | §5 law (this library; ruled server target) |
+|--------|--------------------------|--------------------------------------------|
+| Per-sample θ | `:60` `serverTime - t4 + rtt / 2` — algebraically `t2 - t1 - rtt / 2`, classical θ, ALIGNED with the §5 sign ruling | `t2 - t1 - trunc(rtt / 2)` |
+| RTT admission bounds | NONE — `processPong` admits any echo, negative or arbitrarily large | reject `rtt < 0 \|\| rtt > MAX_ACCEPTABLE_RTT` |
+| One-way latency | float `$rtt / 2.0`, no integer-ms truncation | integer-ms quad; `one_way = trunc(rtt / 2)` |
+| Window depth | `MAX_SAMPLES = 10` (`:21`); aggregates over the WHOLE window | buffer of up to `2 * OFFSET_SAMPLE_COUNT`; aggregates over the LAST `OFFSET_SAMPLE_COUNT` |
+| Aggregation | median: sort, take index `intdiv(count, 2)` (upper-of-middle on even counts) for offset AND latency (`:131-140`) | weighted mean with `weight = 1 / max(1, rtt)` (offset); mean of `rtt / 2` (latency) |
+| Stability floor | `MIN_SAMPLES_FOR_STABLE = 3` (`:24`) | `samples >= OFFSET_SAMPLE_COUNT` (5) |
+| Stability threshold | `STABILITY_THRESHOLD = 100.0` over the whole window; the docblock labels the unit "in ms" (`:26-27`) — the root-unit labeling §5 already retires for the server | `< 50` ms², population variance of the RECENT integer-ms offsets |
+| Drift correction | `applyDriftCorrection` (`:78-89`) mutates `offset` OUTSIDE the sample window and is silently OVERWRITTEN by the next `processPong → recalculate()` | drift is a clamped EMA that drives position advance; it is never folded into `offset` |
+| Freshness / degradation | none — no age accessor, no reject counter, no `time_sync` advisory emission | §5 client-observability law (`getSampleAgeMs`, `onSyncDegraded`) |
+
+Consequence: a console member estimates the same skew per sample (θ agrees) but
+aggregates differently (median-of-window vs weighted-mean-of-recent),
+stabilizes sooner against a looser threshold, and never discards a corrupt or
+rewound echo — so console-side position corrections can diverge from the other
+estimators under high RTT or clock rewind. Recorded as observed divergence;
+the estimator numbers never cross the wire (§5 ruling above), so no group can
+observe the console's aggregates — only its local corrections.
 
 ---
 
