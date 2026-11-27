@@ -620,79 +620,61 @@ describe('TimeSync window-aggregate memoization (P3)', () => {
   });
 });
 
-describe('TimeSync.updateDriftRate — early return guard (line 292)', () => {
-  it('returns early when samples.length < OFFSET_SAMPLE_COUNT after slice', () => {
-    const clock = makeClock(0);
+describe('TimeSync.updateDriftRate — early-return slope guards (time-sync.ts:339-368)', () => {
+  // S-syncplay-34 re-anchor: this block previously narrated a stale "(line 292)"
+  // cite and an `updateDrraftRate` typo, and its two `it()`s ended in clamp-
+  // bounds asserts that can never fail (the initial 1.0 and every clamped
+  // result both satisfy [DRIFT_RATE_MIN, DRIFT_RATE_MAX] by construction).
+  // The live guard chain, coordinates verified against the shipped code:
+  //   - `samples.length < 2` returns at time-sync.ts:340-342;
+  //   - `recent.length < 2` returns at time-sync.ts:345-347 — strictly
+  //     defensive: with OFFSET_SAMPLE_COUNT = 5, every samples.length >= 2
+  //     slice keeps at least two entries, so while the first guard stands this
+  //     arm cannot fire (the dead-guard conclusion the old narrative circled
+  //     for thirty comment lines — stated once, with its coordinates);
+  //   - `timeDelta <= 0` returns at time-sync.ts:353-355 — the slope guard the
+  //     dataset below pins DIRECTLY, which is what the old block only gestured
+  //     at through the vacuous bounds.
+  // Samples store `timestamp = now() / 1000` (SECONDS — the units bridge at
+  // time-sync.ts:188-191), so the clock values the dataset feeds are epoch ms.
+
+  it.each([
+    ['same-clock window (timeDelta === 0)', 1000, 1000],
+    ['backward clock step (timeDelta < 0)', 5000, 3000],
+  ] as Array<[string, number, number]>)(
+    'a non-forward window never sets a slope — %s holds the 1.0 default',
+    (_case, t1, t2) => {
+      const clock = makeClock(t1);
+      const ts = new TimeSync(clock.now);
+      ts.addSample(0, 0, 0, 0); // offset 0, timestamp t1/1000
+      clock.set(t2);
+      ts.addSample(0, 100, 100, 0); // offset 100, timestamp t2/1000
+
+      // The offsets DIFFER, so a computed slope would move the rate off the
+      // default: timeDelta === 0 gives drift = 100/0 = +Infinity → clamped to
+      // DRIFT_RATE_MAX; timeDelta < 0 gives drift = 100/-2 = -50 → raw 0.995.
+      // Neither is 1.0, so this exact pin convicts the guard — mutation-proven
+      // on a scratch copy: weakening `<= 0` to `< 0` reddens the zero row,
+      // deleting the arm reddens both.
+      expect(ts.getDriftRate()).toBe(1.0);
+    },
+  );
+
+  it('positive control: a forward window past the guards reaches the slope math and computes the interior rate', () => {
+    // The zero/negative pins above would also pass on an implementation whose
+    // guards latch the rate shut forever. This pins the other side of the
+    // time-sync.ts:353 boundary: timeDelta > 0 MUST reach the slope math —
+    // mutation-proven: inverting the guard to `>= 0` reddens this test.
+    const clock = makeClock(1000);
     const ts = new TimeSync(clock.now);
+    ts.addSample(0, 0, 0, 0); // offset 0, timestamp 1s
+    clock.set(101000);
+    ts.addSample(0, 100, 100, 0); // offset 100, timestamp 101s
 
-    // Add exactly 1 sample - passes first guard (samples.length < 2 returns)
-    clock.set(1000);
-    ts.addSample(0, 100, 100, 1);
-
-    // Calling updateDrraftRate with only 1 sample:
-    // - Line 286: samples.length (1) < 2 → return early
-    // But we need to test the case where we have >= 2 samples but < OFFSET_SAMPLE_COUNT
-    // after the slice. Since OFFSET_SAMPLE_COUNT = 5, if we have exactly 2 samples
-    // and slice(-5), we get 2 samples (all of them), so recent.length = 2 >= 2.
-    // However, if we mock or manually trigger the scenario where recent.length < 2
-    // after the slice, that would hit line 292.
-
-    // The actual scenario that hits line 292: after reset()+adding samples,
-    // if we call updateDriftRate when recent.length from slice is < 2.
-    // This happens when samples.length >= 2 but the recent window has < 2 items.
-    // With OFFSET_SAMPLE_COUNT=5, this means samples.length must be >= 2 but
-    // slice(-5) must return fewer than 2 - which can only happen if the array
-    // was modified between the two checks, or in edge cases.
-
-    // Actually: with 2 samples and OFFSET_SAMPLE_COUNT=5, slice(-5) returns
-    // all 2 samples, so recent.length = 2. Line 291 check passes.
-
-    // The uncovered line 292 is only reached when:
-    // 1. samples.length >= 2 (passes line 286)
-    // 2. recent.length < 2 (hits line 292)
-
-    // This can only happen if samples is modified between line 286 and 291,
-    // or if OFFSET_SAMPLE_COUNT is 0 (but it's 5).
-
-    // Therefore, line 292 is likely dead code OR requires a very specific
-    // race condition that can't be tested directly.
-
-    // For complete coverage, we verify the guards work correctly:
-    expect(ts.getDriftRate()).toBe(1.0); // default, no drift computed
-  });
-
-  it('updateDriftRate early return when recent slice has fewer than 2 items', () => {
-    // This tests the scenario where samples.length >= 2 but due to the slice
-    // window, recent.length < 2. With OFFSET_SAMPLE_COUNT = 5, this happens
-    // when samples.length is exactly 2 but somehow the slice returns fewer.
-    // Since slice(-5) on a 2-element array returns both elements,
-    // this branch is only hit if there's a race or the array was modified.
-    const clock = makeClock(0);
-    const ts = new TimeSync(clock.now);
-
-    // Add 2 samples
-    clock.set(1000);
-    ts.addSample(0, 0, 0, 0); // offset 0
-    clock.set(2000);
-    ts.addSample(0, 100, 100, 0); // offset 100
-
-    // At this point samples.length = 2
-    // slice(-5) on [sample1, sample2] returns [sample1, sample2], length = 2
-    // So we won't hit line 292
-
-    // But we can call updateDriftRate and verify it computes correctly
-    // The guard at line 291 checks recent.length < 2, but with 2 samples
-    // and OFFSET_SAMPLE_COUNT = 5, recent.length = 2, not < 2
-
-    // Line 292 is uncovered because the logic ensures:
-    // - If samples.length < 2: return at line 288
-    // - If samples.length >= 2: recent.length will be >= 2 (since recent = samples.slice(-5))
-
-    // This line may be uncovered due to the specific value of OFFSET_SAMPLE_COUNT
-    // relative to the typical number of samples. It's a defensive check that
-    // the code path doesn't reach in practice.
-    expect(ts.getDriftRate()).toBeGreaterThanOrEqual(DRIFT_RATE_MIN);
-    expect(ts.getDriftRate()).toBeLessThanOrEqual(DRIFT_RATE_MAX);
+    // timeDelta = 100s; offsetDelta = 100ms → drift = 1 ms/s;
+    // rate = 1 + 0.1*1/1000 = 1.0001 — interior, the clamp is a no-op.
+    expect(ts.getDriftRate()).toBeCloseTo(1.0001, 6);
+    expect(ts.getDriftRate()).not.toBe(1.0); // the window WAS observed
   });
 });
 
