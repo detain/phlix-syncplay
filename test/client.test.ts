@@ -3180,3 +3180,177 @@ describe('SyncPlayClient — frozen group hand-out (phlix-syncplay-008)', () => 
     }).toThrow(TypeError);
   });
 });
+
+/**
+ * S-syncplay-03 (finding phlix-syncplay-003, High) — the `your_id`
+ * reconciliation seam: `onIdentityMismatch` NAMES, `adoptServerIdentity`
+ * ENFORCES. SPEC §9.2 law preserved end-to-end: the library reconciles
+ * nothing on its own initiative — a contradicting stamp changes no state
+ * until the consumer acts; the seam only replaces the hand-rolled compare
+ * every platform was doing on its own. Order law mirrors c14
+ * (dedicated hook fires AFTER the general hook for the SAME frame).
+ */
+describe('S-syncplay-03 — adoptServerIdentity / onIdentityMismatch seam', () => {
+  type SeamEvent =
+    | { hook: 'state'; yourId: string | undefined }
+    | { hook: 'mismatch'; serverYourId: string; clientMemberId: string }
+    | { hook: 'dropped'; reason: string };
+
+  const OMIT = Symbol('omit-your_id');
+
+  function makeSeamHarness(memberId = 'ghost-1', withMismatchHook = true) {
+    const sent: RawMessage[] = [];
+    const events: SeamEvent[] = [];
+    const client = new SyncPlayClient({
+      send: (m) => sent.push(m),
+      now: () => 1000,
+      memberId,
+      memberName: 'Tester',
+      onState: (_g, yourId) => events.push({ hook: 'state', yourId }),
+      onFrameDropped: (reason) => events.push({ hook: 'dropped', reason }),
+      ...(withMismatchHook
+        ? {
+            onIdentityMismatch: (serverYourId: string, clientMemberId: string) =>
+              events.push({ hook: 'mismatch', serverYourId, clientMemberId }),
+          }
+        : {}),
+    });
+    return { client, sent, events };
+  }
+
+  /** group_state with an EXACT your_id value (OMIT symbol = key truly absent). */
+  function seamStateFrame(yourId: unknown, hostId: string, memberIds: string[]): RawMessage {
+    const frame: Record<string, unknown> = {
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      group: {
+        group_id: 'sp_seam',
+        group_name: 'Seam',
+        host_id: hostId,
+        playback_position: 0,
+        playback_state: 'paused',
+        members: memberIds.map((id) => ({
+          id,
+          name: id,
+          is_host: id === hostId,
+          joined_at: 1,
+        })),
+      },
+    };
+    if (yourId !== OMIT) {
+      frame.your_id = yourId;
+    }
+    return frame as RawMessage;
+  }
+
+  const SHA_EMPTY = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+  it('names the contradiction: mismatch fires per contradicting frame, AFTER that frames onState, (serverYourId, clientMemberId)', () => {
+    const h = makeSeamHarness('ghost-1');
+    h.client.handleIncoming(seamStateFrame('hub-uuid-9', 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    expect(h.events).toEqual([
+      { hook: 'state', yourId: 'hub-uuid-9' },
+      { hook: 'mismatch', serverYourId: 'hub-uuid-9', clientMemberId: 'ghost-1' },
+    ]);
+    // Per-redelivery law (streamed frames): every contradicting frame names it.
+    h.client.handleIncoming(seamStateFrame('hub-uuid-9', 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    expect(h.events.filter((e) => e.hook === 'mismatch')).toHaveLength(2);
+  });
+
+  it('equal, non-string, or absent your_id are NOT contradictions; onState still gets the verbatim/undefined law', () => {
+    const h = makeSeamHarness('ghost-1');
+    h.client.handleIncoming(seamStateFrame('ghost-1', 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    expect(h.events).toEqual([{ hook: 'state', yourId: 'ghost-1' }]);
+    h.client.handleIncoming(seamStateFrame(42, 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    // Non-string never reaches the mismatch arm (no compare against garbage)
+    // and the EXISTING onState law stands: surfaced as undefined.
+    expect(h.events).toEqual([
+      { hook: 'state', yourId: 'ghost-1' },
+      { hook: 'state', yourId: undefined },
+    ]);
+    h.client.handleIncoming(seamStateFrame(OMIT, 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    expect(h.events.filter((e) => e.hook === 'mismatch')).toHaveLength(0);
+    expect(h.events).toHaveLength(3);
+  });
+
+  it('adoption installs the stamped id — getMemberId/isHost/outbound stamps flip live, mismatch stops; store stays a frozen snapshot', () => {
+    const h = makeSeamHarness('ghost-1');
+    h.client.handleIncoming(seamStateFrame('hub-uuid-9', 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    expect(h.client.isHost()).toBe(false); // pre-adoption: true host, ghost id
+    expect(h.client.adoptServerIdentity('hub-uuid-9')).toBe(true);
+    expect(h.client.getMemberId()).toBe('hub-uuid-9');
+    expect(h.client.isHost()).toBe(true); // live read, no reconfiguration
+    // Outbound stamps use the adopted id (member_id stamp sites read live).
+    h.client.createGroup('Seam', SHA_EMPTY);
+    const frame = h.sent[h.sent.length - 1] as Record<string, unknown>;
+    expect(frame.member_id).toBe('hub-uuid-9');
+    // Reconciled now: the same frame no longer contradicts.
+    h.client.handleIncoming(seamStateFrame('hub-uuid-9', 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    expect(h.events.filter((e) => e.hook === 'mismatch')).toHaveLength(1);
+    // The store after the fold is the frozen delivered snapshot; adoption did
+    // NOT write into it (c08 replace-only law — the field swap is identity,
+    // never a mutation of delivered group bytes).
+    const store = h.client.getGroup();
+    expect(store).not.toBeNull();
+    expect(Object.isFrozen(store)).toBe(true);
+    expect(store?.host_id).toBe('hub-uuid-9');
+  });
+
+  it('REFUSED group_state fires neither onState nor onIdentityMismatch (c24 refusal purity, even with a contradicting stamp)', () => {
+    const h = makeSeamHarness('ghost-1');
+    const bad = seamStateFrame('hub-uuid-9', 'hub-uuid-9', []);
+    delete (bad.group as Record<string, unknown>).members; // c24: undefined members = refuse whole frame
+    h.client.handleIncoming(bad);
+    expect(h.events).toEqual([{ hook: 'dropped', reason: 'malformed' }]);
+    expect(h.client.getGroup()).toBeNull();
+    expect(h.client.getMemberId()).toBe('ghost-1'); // refusal never adopted anything
+  });
+
+  it('absent onIdentityMismatch option: contradicting frame handled with zero observable change, no throw (additive default)', () => {
+    const h = makeSeamHarness('ghost-1', false);
+    h.client.handleIncoming(seamStateFrame('hub-uuid-9', 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    expect(h.events).toEqual([{ hook: 'state', yourId: 'hub-uuid-9' }]);
+    expect(h.client.getMemberId()).toBe('ghost-1'); // nothing self-adopted
+    h.client.handleIncoming(seamStateFrame('hub-uuid-9', 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    expect(h.client.getMemberId()).toBe('ghost-1');
+  });
+
+  it('boundary law: bad shape THROWS TypeError even post-destroy (LW-045 parse-before-latch); destroyed is inert false; equal id false', () => {
+    const h = makeSeamHarness('ghost-1');
+    expect(() => h.client.adoptServerIdentity('')).toThrow(TypeError);
+    expect(() => h.client.adoptServerIdentity(7 as unknown as string)).toThrow(TypeError);
+    expect(() => h.client.adoptServerIdentity(null as unknown as string)).toThrow(TypeError);
+    expect(h.client.adoptServerIdentity('ghost-1')).toBe(false); // equal = no-op
+    h.client.destroy();
+    expect(() => h.client.adoptServerIdentity('')).toThrow(TypeError); // shape gate precedes latch
+    expect(h.client.adoptServerIdentity('hub-uuid-9')).toBe(false); // LW-046 inert
+    expect(h.client.getMemberId()).toBe('ghost-1'); // destroyed adoption changed nothing
+  });
+
+  it('onDisconnect does NOT revert an adoption; a fresh hub uuid surfaces a fresh mismatch; re-adoption is the consumers call', () => {
+    const h = makeSeamHarness('ghost-1');
+    h.client.handleIncoming(seamStateFrame('hub-uuid-9', 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    expect(h.client.adoptServerIdentity('hub-uuid-9')).toBe(true);
+    h.client.onDisconnect();
+    expect(h.client.getMemberId()).toBe('hub-uuid-9'); // identity is not transport history
+    h.client.handleIncoming(seamStateFrame('hub-uuid-NEW', 'hub-uuid-NEW', ['hub-uuid-NEW', 'hub-uuid-9']));
+    expect(h.events.filter((e) => e.hook === 'mismatch')).toEqual([
+      { hook: 'mismatch', serverYourId: 'hub-uuid-9', clientMemberId: 'ghost-1' },
+      { hook: 'mismatch', serverYourId: 'hub-uuid-NEW', clientMemberId: 'hub-uuid-9' },
+    ]);
+    expect(h.client.adoptServerIdentity('hub-uuid-NEW')).toBe(true);
+  });
+
+  it('replace-only discipline: second adoption swaps the field; every previously delivered snapshot keeps its own bytes', () => {
+    const h = makeSeamHarness('ghost-1');
+    h.client.handleIncoming(seamStateFrame('hub-uuid-9', 'hub-uuid-9', ['hub-uuid-9', 'ghost-1']));
+    h.client.adoptServerIdentity('hub-uuid-9');
+    const snapshotOne = h.client.getGroup() as SyncPlayGroup;
+    h.client.handleIncoming(seamStateFrame('hub-uuid-10', 'hub-uuid-10', ['hub-uuid-10', 'hub-uuid-9']));
+    h.client.adoptServerIdentity('hub-uuid-10');
+    expect(h.client.getMemberId()).toBe('hub-uuid-10');
+    expect(snapshotOne.host_id).toBe('hub-uuid-9'); // old snapshot unchanged
+    expect(Object.isFrozen(snapshotOne)).toBe(true);
+    expect(h.client.getGroup()?.host_id).toBe('hub-uuid-10'); // new store object
+  });
+});

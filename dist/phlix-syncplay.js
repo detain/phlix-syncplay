@@ -251,6 +251,10 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	isHost() {
 		return this.group !== null && this.group.host_id === this.memberId;
 	}
+	adoptServerIdentity(e) {
+		if (typeof e != "string" || e === "") throw TypeError("SyncPlayClient: adoptServerIdentity requires the server-stamped `your_id` as a non-empty string (SPEC §9.2 — it arrives via onState/onIdentityMismatch), got " + (typeof e == "string" ? "an empty string" : `a ${typeof e}`) + ".");
+		return this.destroyed || e === this.memberId ? !1 : (this.memberId = e, !0);
+	}
 	getSynchronizedTime() {
 		return this.timeSync.getSynchronizedTime(this.now());
 	}
@@ -625,6 +629,11 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			}
 		}
 		(n = (r = this.options).onState) == null || n.call(r, this.group, typeof i.your_id == "string" ? i.your_id : void 0);
+		let y = i.your_id;
+		if (typeof y == "string" && y !== this.memberId) {
+			var b, x;
+			(b = (x = this.options).onIdentityMismatch) == null || b.call(x, y, this.memberId);
+		}
 	}
 	handlePlayback(e, n) {
 		var r, i;

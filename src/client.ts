@@ -144,8 +144,11 @@ export interface SyncPlayClientOptions {
    *    ctor id is "only the pre-join placeholder claim" — phlix-mobile-client
    *    `src/syncplay/SyncPlayService.ts`, audit H4). On this carrier the
    *    ctor value cannot match the stamped id by construction: until the
-   *    adopted id is installed (rebuild the client, or gate host UX on
-   *    `group.host_id === yourId` from `onState`), `isHost()` and the
+   *    adopted id is installed — via {@link SyncPlayClient.adoptServerIdentity}
+   *    (S-syncplay-03: driven from {@link SyncPlayClientOptions.onIdentityMismatch},
+   *    the seam replacing the rebuild-the-client workaround every platform
+   *    hand-rolled), by rebuilding the client, or host UX gated on
+   *    `group.host_id === yourId` from `onState` — `isHost()` and the
    *    suppressions below are inert — that is the documented cost, not a
    *    silent one.
    *
@@ -218,8 +221,45 @@ export interface SyncPlayClientOptions {
    * {@link SyncPlayClient.freezeGroup}): safe to keep and read, writes throw
    * (strict-mode consumers) or are ignored (legacy sloppy scripts), never
    * silently corrupt the model the next fold diffs against.
+   *
+   * S-syncplay-03: the hand-rolled `yourId === getMemberId()` compare this
+   * docblock used to be the ONLY mismatch surface now has a dedicated sibling
+   * hook — {@link SyncPlayClientOptions.onIdentityMismatch} (observe) plus
+   * {@link SyncPlayClient.adoptServerIdentity} (enforce).
    */
   onState?: (_group: SyncPlayGroup, yourId: string | undefined) => void;
+  /**
+   * S-syncplay-03 (finding phlix-syncplay-003, High): an accepted
+   * `syncplay_group_state` carried a `your_id` — the identity THE SERVER
+   * stamped for THIS connection (SPEC §9) — that CONTRADICTS the id this
+   * client currently holds. Fires per contradicting frame with the
+   * server-stamped id first and the client-held id second, AFTER that frame's
+   * {@link SyncPlayClientOptions.onState} delivery (the c14
+   * onNudge-after-onPlaybackSync ordering precedent; a throwing `onState`
+   * short-circuits it — THROW LAW, class header).
+   *
+   * WHY: the ctor `memberId` MUST equal the stamped identity for `isHost()`
+   * and the echo suppressions to function (SPEC §9.2). The hub relay `:8804`
+   * stamps a per-connection uuid that is unknowable before the first frame,
+   * and a fabricated direct-`:8097` id (mobile's `memberId: 'mobile_*'`
+   * class) makes `isHost()` permanently false and self-echo double-apply.
+   * Pre-seam the contradiction surfaced only as the raw `yourId` argument —
+   * enforcement was a hand-rolled compare on every platform, which is exactly
+   * how it went missing. The seam splits the two halves:
+   *  - OBSERVE: this hook names the contradiction without acting on it;
+   *  - ENFORCE: {@link SyncPlayClient.adoptServerIdentity} from this handler
+   *    installs the server-stamped id (SPEC §9.2's consumer-adopts-it path,
+   *    first-class), or rebuild the client, or keep the ghost id by choice.
+   *
+   * The library NEVER self-adopts: a contradicting `your_id` changes no state
+   * until the consumer acts (SPEC §9.2 — "the consumer adopts it"; silently
+   * rewriting on first sight would mask the ghost-identity class instead of
+   * naming it). Absent by default — existing consumers and option shapes are
+   * untouched; a non-string or missing `your_id` is not a contradiction
+   * (`undefined` only on hand-built frames, real producers always stamp —
+   * nothing to compare against nothing).
+   */
+  onIdentityMismatch?: (_serverYourId: string, _clientMemberId: string) => void;
   onSync?: (_status: TimeSyncStatus) => void;
   /**
    * A matched pong completed its round trip but the sample was REJECTED: by
@@ -310,6 +350,9 @@ export interface SyncPlayClientOptions {
    * suppression keys on ctor-`memberId` vs stamped id, and that identity is
    * UNRECONCILED (SPEC §9; the review-M5 class — a fabricated ctor id would
    * make a peer's message look like your echo, or your echo look foreign).
+   * An {@link SyncPlayClient.adoptServerIdentity} seam-adoption reconciles
+   * it for the COMMAND arms but changes nothing here: chat stays echo-live
+   * by carrier wire law regardless (the paragraph above).
    * Consumers render chat from THIS callback only (do not also locally
    * append on {@link SyncPlayClient.sendChat}) and are correct on both
    * carriers by construction.
@@ -502,7 +545,20 @@ const DEFAULT_SEEK_THROTTLE_MS = 250;
 export class SyncPlayClient {
   private readonly send: (_message: RawMessage) => void;
   private readonly now: NowFn;
-  private readonly memberId: string;
+  /**
+   * This client's CURRENT identity — the ctor `memberId` unless a consumer
+   * replaced it through {@link SyncPlayClient.adoptServerIdentity}
+   * (S-syncplay-03). NOT readonly: the seam exists because a ghost ctor id
+   * permanently inerts `isHost()` and the echo suppressions, and rebuilding
+   * the client to recover was the workaround every platform hand-rolled. The
+   * CLASS never rewrites it on its own initiative (SPEC §9.2 — the consumer
+   * owns the adoption; silently rewriting on first sight would mask the
+   * ghost-identity class instead of naming it). All reads are live field
+   * reads, so an adoption takes effect on the next decision with no other
+   * reconfiguration — delivered frozen `group_state` snapshots are never
+   * touched by it (c08 replace-only store law).
+   */
+  private memberId: string;
   private readonly memberName: string;
   private readonly options: SyncPlayClientOptions;
   private readonly timeSync: TimeSync;
@@ -668,15 +724,73 @@ export class SyncPlayClient {
   /**
    * True if this member is the current host of the current group — i.e.
    * `group.host_id === this.memberId`, the server-stamped host against the
-   * CONSTRUCTOR id. Sound only under the identity coupling documented on
-   * {@link SyncPlayClientOptions.memberId}: with a fabricated/mismatched
-   * ctor id this is permanently false for a true host (the dead-host bug
-   * class, SPEC §9). Server truth: `host_id` is always the derived id
+   * CURRENT id (the ctor value unless a {@link SyncPlayClient.adoptServerIdentity}
+   * seam-adoption replaced it — S-syncplay-03; the read is live, so an
+   * adoption flips this immediately). Sound only under the identity coupling
+   * documented on {@link SyncPlayClientOptions.memberId}: with a
+   * fabricated/mismatched ctor id this is permanently false for a true host
+   * (the dead-host bug class, SPEC §9) until the consumer reconciles through
+   * the seam. Server truth: `host_id` is always the derived id
    * (`SyncPlayManager.php` groups key members by `$connection->getUserId()`;
    * hub rooms key by `$client->clientId`, `SyncPlayRelayWorker.php:1396`).
    */
   isHost(): boolean {
     return this.group !== null && this.group.host_id === this.memberId;
+  }
+
+  /**
+   * S-syncplay-03 (finding phlix-syncplay-003, High): install the
+   * server-stamped identity — SPEC §9.2's hub-relay adoption path promoted
+   * from a per-platform rebuild workaround to a first-class seam.
+   *
+   * CONSUMER-DRIVEN BY DESIGN: the class never calls this itself and never
+   * rewrites the ctor id on its own initiative — silently adopting on first
+   * sight would mask the ghost-identity class instead of naming it (the law
+   * on {@link SyncPlayClientOptions.memberId}). The intended call site is the
+   * {@link SyncPlayClientOptions.onIdentityMismatch} handler (or anywhere a
+   * consumer holds `onState`'s `yourId`): the consumer that wants server
+   * truth calls this with the server-stamped id; consumers that want the old
+   * behavior call nothing and change nothing.
+   *
+   * Once installed, EVERY identity decision uses it live:
+   * {@link SyncPlayClient.isHost}, the play/seek echo suppressions, the
+   * `member_id`/`user_id` stamps on outbound frames, and the
+   * `departed === me` check in `handleHostElect`. Delivered `group_state`
+   * snapshots are NOT rebuilt or written into — the replacement is a field
+   * swap, never an in-place write to a frozen delivered frame (c08 store law).
+   *
+   * Boundary rules follow the house order (cf. {@link SyncPlayClient.createGroup}
+   * / LW-045): a bad-shape argument THROWS a TypeError even on a destroyed
+   * instance — the accepted domain is a non-empty string (both carriers only
+   * ever stamp non-empty ids: JWT subject / per-connection uuid); after the
+   * parse, a destroyed instance is inert (LW-046) and returns false; an id
+   * equal to the current one is a no-op returning false. TRUE only when an
+   * actual replacement happened.
+   *
+   * Reconnect: {@link SyncPlayClient.onDisconnect} does NOT revert an
+   * adoption — identity is not transport history. A hub re-dial stamps a NEW
+   * per-connection uuid, which surfaces as a fresh
+   * {@link SyncPlayClientOptions.onIdentityMismatch} on the first frame after
+   * the rejoin; re-adopting is the consumer's decision again.
+   */
+  adoptServerIdentity(serverYourId: string): boolean {
+    if (typeof serverYourId !== 'string' || serverYourId === '') {
+      throw new TypeError(
+        'SyncPlayClient: adoptServerIdentity requires the server-stamped ' +
+          '`your_id` as a non-empty string (SPEC §9.2 — it arrives via ' +
+          'onState/onIdentityMismatch), got ' +
+          (typeof serverYourId === 'string' ? 'an empty string' : `a ${typeof serverYourId}`) +
+          '.',
+      );
+    }
+    if (this.destroyed) {
+      return false;
+    }
+    if (serverYourId === this.memberId) {
+      return false;
+    }
+    this.memberId = serverYourId;
+    return true;
   }
 
   /** Server-synchronized current time (ms). */
@@ -2021,16 +2135,34 @@ export class SyncPlayClient {
       }
     }
 
-    // `your_id` is surfaced VERBATIM and reconciled against nothing here:
-    // the ctor `memberId` is immutable by design, and silently rewriting it
-    // on first sight would mask the ghost-identity class instead of
-    // naming it (SPEC §9; coupling law + mismatch UX documented on
-    // {@link SyncPlayClientOptions.memberId}). Consumers own the
-    // `yourId === getMemberId()` assertion.
+    // `your_id` is surfaced VERBATIM and the CLASS reconciles nothing on its
+    // own initiative: silently rewriting the id on first sight would mask the
+    // ghost-identity class instead of naming it (SPEC §9; coupling law +
+    // mismatch UX documented on {@link SyncPlayClientOptions.memberId}).
+    // Consumers own the `yourId === getMemberId()` assertion — and since
+    // S-syncplay-03 they own it through a seam instead of a hand-rolled
+    // compare: the post-onState `onIdentityMismatch` hook NAMES every
+    // contradicting stamp, `adoptServerIdentity` is the enforcement hand
+    // (SPEC §9.2's consumer-adopts-it path, first-class).
     this.options.onState?.(
       this.group,
       typeof payload.your_id === 'string' ? payload.your_id : undefined,
     );
+
+    // S-syncplay-03 (finding phlix-syncplay-003, High): a server-stamped
+    // `your_id` that contradicts the current identity is the ghost-identity
+    // class SPEC §9.2 names — observable now, and enforceable through the
+    // seam, but NEVER acted on here: adoption stays consumer-driven (the
+    // method docblock carries the full law). Fires AFTER this frame's
+    // onState (c14 onNudge-after-onPlaybackSync ordering precedent, same
+    // frame, once per redelivery). A non-string/absent `your_id` is not a
+    // contradiction (undefined = hand-built frames only); reaching this line
+    // at all means the c24 members-refusal and the LW-041a group_id guard
+    // passed, so a REFUSED frame never fires it (refusal purity).
+    const serverYourId = payload.your_id;
+    if (typeof serverYourId === 'string' && serverYourId !== this.memberId) {
+      this.options.onIdentityMismatch?.(serverYourId, this.memberId);
+    }
   }
 
   private handlePlayback(type: 'play' | 'pause', msg: RawMessage): void {
