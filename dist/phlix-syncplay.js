@@ -140,7 +140,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 	addSample(e, t, n, r) {
 		let i = r - e - (n - t);
 		if (i < 0 || i > 1e3) return !1;
-		let a = i / 2, o = t - e + Math.trunc(a);
+		let a = i / 2, o = t - e - Math.trunc(a);
 		return this.samples.push({
 			offset: o,
 			rtt: i,

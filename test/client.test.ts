@@ -2775,10 +2775,12 @@ describe('SyncPlayClient — integer-ms time-sync symmetry (SPY-2)', () => {
       type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
       protocol_version: 1,
       client_time: 1000,
-      server_time: 1075,
+      server_time: 1125,
     });
     expect(h.syncs).toHaveLength(1);
-    // t4 = 1050 (truncated): rtt 50, offset = 1075 - 1000 + 25 = 100.
+    // t4 = 1050 (truncated): rtt 50, oneWay 25; the server answered 25 ms into
+    // the round trip, so a true +100 ms skew stamps t2 = 1000 + 100 + 25 =
+    // 1125 and classical θ (S-syncplay-01) recovers offset = 1125 - 1000 - 25 = 100.
     expect(h.syncs[0]!.offset).toBe(100);
     expect(h.syncs[0]!.latency).toBe(25);
   });

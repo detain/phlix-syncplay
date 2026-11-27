@@ -12,7 +12,7 @@ The authoritative implementation is the PHP server:
 
 `@phlix/syncplay` is the canonical JS port of that protocol.
 
-> **Document revision:** 2026-11-28 — wire era `@phlix/syncplay` v0.1.6. This
+> **Document revision:** 2026-11-29 — wire era `@phlix/syncplay` v0.1.6. This
 > stamp is rotated with every normative edit to this document (per §1 item 6's
 > era-pin discipline), so a consumer can answer "which spec revision does my
 > build conform to?" without git archaeology.
@@ -839,9 +839,34 @@ compute:
 
 ```
 rtt    = t4 - t1 - (t3 - t2)
-oneWay = rtt / 2
-offset = t2 - t1 + oneWay        // add offset to local time → server time
+oneWay = floor(rtt / 2)
+offset = t2 - t1 - oneWay        // classical NTP θ: add offset to local time → server time
 ```
+
+**Offset sign ruling (2026-11-27, `S-syncplay-01`; findings phlix-syncplay-001,
+phlix-syncplay-016).** `offset` is classical NTP θ:
+`(t2 - t1 + t3 - t4) / 2`, which with `t3 == t2` is exactly
+`t2 - t1 - rtt / 2`. The previously recorded `offset = t2 - t1 + oneWay`
+was sign-inverted: it ADDS the round-trip delay to the true clock skew, so a
+sample reads the real skew `S` plus `2 · oneWay` (for symmetric-path delay
+`d`, `rtt = 2d`) — a one-sided lead that grows with RTT and makes samples at
+different RTTs irreconcilable. The `floor()` on `oneWay` matches both shipped
+ports' integer-ms law: this library `Math.trunc`s the quotient in
+`addSample()` and the server `(int)`-casts it at its own compute site. The
+trailing comment's LAW is unchanged and was always the intent: ADD the
+offset to local time to obtain server time — only after this fix does the
+formula actually deliver that. The phlix-server twin row
+(`src/Session/SyncPlay/TimeSync.php:153`, `+ (int)$oneWayLatency`) and its
+class docblock (`:26`, "offset = server_time - client_time + latency") were
+ruled in the same estate release and the flip there is ROUTED to the
+phlix-server wave — the shipped server carries the biased form until that
+row lands. The port that already agreed with this ruling is the console:
+`phlix-console-client/src/Api/SyncPlay/TimeSync.php:60` computes
+`$serverTime - $t4 + $latency` with `$rtt = $t4 - $clientTime` and
+`$latency = $rtt / 2`, which is `t2 - t1 - rtt / 2` — classical θ written
+from the receive side. Divergence during the release window is SAFE for the
+same reason the aggregation fix above is: the offset never crosses the wire
+(ping/pong carry raw `t1`/`t2` only) and each side runs its local estimator.
 
 **Clock contract.** The injected `now()` MUST return **epoch milliseconds**
 (same scale as `Date.now()`). All quad timestamps (`t1`..`t4`), positions,

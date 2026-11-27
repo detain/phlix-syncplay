@@ -72,7 +72,7 @@ describe('TimeSync.addSample — server formula', () => {
     // t1=1000, t2=1100, t3=1100, t4=1001.
     // rtt = 1001 - 1000 - 0 = 1
     // oneWay = trunc(0.5) = 0
-    // offset = 1100 - 1000 + 0 = 100
+    // offset = 1100 - 1000 - 0 = 100   (classical θ, S-syncplay-01)
     // weight = 1/max(1,1) = 1 → getOffset = round(100*1 / 1) = 100
     const accepted = ts.addSample(1000, 1100, 1100, 1001);
     expect(accepted).toBe(true);
@@ -86,12 +86,12 @@ describe('TimeSync.addSample — server formula', () => {
 
     // t1=0, t2=100, t3=102 (2ms processing), t4=4
     // rtt = 4 - 0 - (102 - 100) = 2
-    // oneWay = 1, offset = 100 - 0 + 1 = 101, weight = 1/2 = 0.5
-    // getOffset = round(101*0.5 / 0.5) = 101 (true weighted mean; the pre-fix
+    // oneWay = 1, offset = 100 - 0 - 1 = 99, weight = 1/2 = 0.5
+    // getOffset = round(99*0.5 / 0.5) = 99 (true weighted mean; the pre-fix
     // max(1, weightSum) divisor froze at 1 and crushed this to 50).
     expect(ts.addSample(0, 100, 102, 4)).toBe(true);
     expect(ts.getLatency()).toBe(1);
-    expect(ts.getOffset()).toBe(101);
+    expect(ts.getOffset()).toBe(99);
   });
 
   it('does NOT crush a realistic-RTT single sample (regression: weightSum divisor)', () => {
@@ -100,7 +100,10 @@ describe('TimeSync.addSample — server formula', () => {
     // rtt=40 → weight 0.025. The pre-fix `max(1, weightSum)` divisor froze at
     // 1 and returned the crushed weighted SUM: trunc(120*0.025) = 3. The true
     // weighted mean divides by the real weight sum: round(3 / 0.025) = 120.
-    ts.addSample(0, 100, 100, 40);
+    // Quad rotated by S-syncplay-01 to the classical-θ shape: a true skew of
+    // 120 ms with symmetric 20 ms delay reads t2 = t1 + 120 + 20 = 140, and
+    // offset = 140 - 0 - 20 = 120.
+    ts.addSample(0, 140, 140, 40);
     expect(ts.getOffset()).toBe(120);
   });
 
@@ -153,7 +156,7 @@ describe('TimeSync.addSample — server formula', () => {
     const accepted = ts.addSample(1000, 1100, 1100, 1000);
     expect(accepted).toBe(true);
     expect(ts.getSampleCount()).toBe(1);
-    // oneWay = 0; offset = 1100 - 1000 + 0 = 100.
+    // oneWay = 0; offset = 1100 - 1000 - 0 = 100.
     expect(ts.getOffset()).toBe(100);
   });
 
@@ -192,8 +195,10 @@ describe('TimeSync.getOffset — weighted mean favours low RTT', () => {
 
     // Sample A: rtt 1, offset 100.  t1=0,t2=100,t3=100,t4=1 → offset 100, weight 1.
     ts.addSample(0, 100, 100, 1);
-    // Sample B: rtt 1000, offset 1000. t1=0,t2=500,t3=500,t4=1000 → offset 1000, weight 0.001.
-    ts.addSample(0, 500, 500, 1000);
+    // Sample B: rtt 1000, offset 1000. t1=0,t2=1500,t3=1500,t4=1000 →
+    // offset = 1500 - 0 - 500 = 1000, weight 0.001. (Quad rotated by
+    // S-syncplay-01: true skew 1000 ms + symmetric 500 ms delay ⇒ t2 = 1500.)
+    ts.addSample(0, 1500, 1500, 1000);
 
     const weightA = 1; // 1/max(1,1)
     const weightB = 1 / 1000;
@@ -225,11 +230,14 @@ describe('TimeSync.getOffset — realistic-sample vectors (crush-defect regressi
    * Build a t1..t4 quad whose per-sample offset equals TRUE_OFFSET_MS and
    * whose round-trip time is exactly `rtt` (pong carries no separate response
    * stamp, so t3 == t2 — the same-process wire law, SPEC §5).
-   * sample offset = t2 - t1 + trunc(rtt / 2) = TRUE_OFFSET_MS.
+   * Physical model: TRUE_OFFSET_MS is the server's true clock skew S; `oneWay`
+   * is the symmetric one-way delay, so the server receives at t2 = t1 + S +
+   * oneWay and the classical θ (S-syncplay-01) recovers it:
+   * sample offset = t2 - t1 - trunc(rtt / 2) = TRUE_OFFSET_MS.
    */
   function quadAtTrueOffset(t1: number, rtt: number): [number, number, number, number] {
     const oneWay = Math.trunc(rtt / 2);
-    const t2 = t1 + TRUE_OFFSET_MS - oneWay;
+    const t2 = t1 + TRUE_OFFSET_MS + oneWay;
     return [t1, t2, t2, t1 + rtt];
   }
 
@@ -274,7 +282,7 @@ describe('TimeSync.getOffset — realistic-sample vectors (crush-defect regressi
       clock.advance(1500);
       const t1 = 2_000_000 + i * 1500;
       const oneWay = Math.trunc(rtt / 2);
-      const t2 = t1 + TRUE_OFFSET_MS + jitter - oneWay;
+      const t2 = t1 + TRUE_OFFSET_MS + jitter + oneWay;
       expect(ts.addSample(t1, t2, t2, t1 + rtt)).toBe(true);
       sampleOffsets.push(TRUE_OFFSET_MS + jitter);
     });
@@ -296,11 +304,11 @@ describe('TimeSync.getOffset — realistic-sample vectors (crush-defect regressi
     // four consensus weights combined.
     for (let i = 0; i < 4; i++) {
       clock.advance(1000);
-      ts.addSample(0, 98, 98, 40); // rtt 40, oneWay 20, offset = 98 + 20 = 118
+      ts.addSample(0, 138, 138, 40); // rtt 40, oneWay 20, offset = 138 - 20 = 118
     }
-    ts.addSample(0, 199, 199, 2); // rtt 2, oneWay 1, offset = 199 + 1 = 200
+    ts.addSample(0, 201, 201, 2); // rtt 2, oneWay 1, offset = 201 - 1 = 200
 
-    // consensus samples: rtt 40, oneWay 20, offset = 98 + 20 = 118, w 0.025.
+    // consensus samples: rtt 40, oneWay 20, offset = 138 - 20 = 118, w 0.025.
     // crisp sample: offset 200, w 0.5.
     // weighted mean = (4*118*0.025 + 200*0.5) / (4*0.025 + 0.5)
     //               = (11.8 + 100) / 0.6 = 186.33… → round 186.
@@ -318,7 +326,7 @@ describe('TimeSync.getOffset — realistic-sample vectors (crush-defect regressi
       const t1 = 3_000_000 + i * 1000;
       const rtt = 40;
       const oneWay = Math.trunc(rtt / 2);
-      const t2 = t1 - 250 - oneWay;
+      const t2 = t1 - 250 + oneWay;
       expect(ts.addSample(t1, t2, t2, t1 + rtt)).toBe(true);
     }
 
@@ -579,9 +587,11 @@ describe('TimeSync window-aggregate memoization (P3)', () => {
     expect(stableBefore).toBe(false);
 
     // Add a sample with a very different offset/rtt; the cached aggregates must
-    // recompute rather than return the pre-addSample values.
+    // recompute rather than return the pre-addSample values. Physically honest
+    // under the S-syncplay-01 θ ruling: true skew 700 ms with symmetric 200 ms
+    // delay ⇒ t2 = 2000 + 700 + 200 = 2900, and offset = 2900 - 2000 - 200 = 700.
     clock.advance(10);
-    ts.addSample(2000, 2500, 2500, 2400);
+    ts.addSample(2000, 2900, 2900, 2400);
 
     expect(ts.getOffset()).not.toBe(offsetBefore);
     expect(ts.getLatency()).not.toBe(latencyBefore);

@@ -6,9 +6,18 @@
 /**
  * TimeSync — NTP-style network time synchronization.
  *
- * This is a faithful TypeScript port of the server's
- * `src/Session/SyncPlay/TimeSync.php`. The ping/quad math (rtt, one-way
- * latency, per-sample offset) reproduces the server formula exactly.
+ * This is the TypeScript port of the server's
+ * `src/Session/SyncPlay/TimeSync.php`. The ping/quad shape (rtt, one-way
+ * latency, per-sample offset) mirrors the server; since SPEC §5's
+ * `S-syncplay-01` ruling the OFFSET SIGN follows classical NTP θ
+ * (`t2 - t1 - oneWay`), which the shipped server does not yet compute —
+ * its twin flip at `TimeSync.php:153` was ruled in the same estate release
+ * and is routed to the phlix-server wave. Until that row lands, the two
+ * sides disagree on the local estimate; that is a SAFE divergence (the
+ * offset never crosses the wire — ping/pong carry raw t1/t2 only, see the
+ * aggregation note below). The console port
+ * (`phlix-console-client/src/Api/SyncPlay/TimeSync.php:60`) already agrees
+ * with this ruling: it computes `t2 - t1 - rtt/2` from the receive side.
  *
  * ## Documented divergence (offset aggregation)
  *
@@ -36,7 +45,8 @@
  *   rtt    = t4 - t1 - (t3 - t2)
  *   oneWay = trunc(rtt / 2)        // INTEGER-truncated — `Math.trunc` in
  *                                  // addSample, mirroring the server's int cast
- *   offset = t2 - t1 + oneWay        // add to local time to get server time
+ *   offset = t2 - t1 - oneWay        // classical NTP θ (SPEC §5, S-syncplay-01):
+ *                                  // add to local time to get server time
  *
  * Samples with `rtt < 0` (corrupt: negative one-way latency) or
  * `rtt > MAX_ACCEPTABLE_RTT` are rejected. `getOffset()` returns a
