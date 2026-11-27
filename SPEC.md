@@ -1252,8 +1252,8 @@ credential — log the endpoint without its query.
 
 | Endpoint | CURRENT law | Notes |
 |----------|-------------|-------|
-| Server direct WS `:8097` | **SHIPPED transitional dual carrier** (phlix-server `424c14d0`): the `Sec-WebSocket-Protocol: bearer, <jwt>` **two-entry subprotocol is PREFERRED** (priority 1, the estate TARGET); the legacy `?token=<jwt>` query is still accepted only while older client builds upgrade (priority 2, **RETIRED on fleet-update timing — an owner call, never assume a removal date**). Law SSOT `SyncPlayAuthMiddleware::resolveHandshakeToken()` — `phlix-server/src/Server/WebSocket/SyncPlayAuthMiddleware.php:471-489`; handshake gate `phlix-server/src/Server/WebSocket/WebSocketServer.php:522-526`. Full law doc: phlix-server `docs/dev/WEBSOCKET_AUTH_CARRIERS.md` @ `424c14d0`. | Missing/invalid/expired credential still rejects **pre-101** (§8.1). Both carriers present with **different** credentials also rejects pre-101 (pool removal + close, `WebSocketServer.php:528-543`) — a half-migrated client fails loudly instead of authenticating on a credential other than the one it presents. A client that **offered** `bearer` and passed is answered `Sec-WebSocket-Protocol: bearer` on the 101 — marker only, never the token, and gated on the offer (`WebSocketServer.php:554`, `:575-582`; echo const `SyncPlayAuthMiddleware.php:87`). New clients MUST dial the bearer form; `?token=` is legacy-only. |
-| Hub SyncPlay relay `:8804` | `Sec-WebSocket-Protocol: bearer, <token>` **two-entry subprotocol** (or `Authorization: Bearer` header) **only** — a `?token=` query is refused (S237). `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:52-55`, `:443-446`; JS clients: `new WebSocket(url, ['bearer', token])`. | The 101 echo answers with the `bearer` marker only — never the token (`:527-560`). |
+| Server direct WS `:8097` | **SHIPPED three-carrier resolution** (era phlix-server `262f01d3`): (1) the `Sec-WebSocket-Protocol: bearer, <jwt>` **two-entry subprotocol is PREFERRED** (priority 1, the estate TARGET); (2) the `phlix_session` session cookie RIDES THIRD (`AuthController.php:47` names the jar) — a same-origin browser socket sends it automatically so a hosted SPA needs no explicit credential — but only past the strict state-changing request-origin gate (`CookiePolicy::stateChangingRequestOriginAllowed`, `phlix-server/src/Auth/CookiePolicy.php:273-280`: byte-exact host, both-or-neither ports, both `Origin` and `Referer` absent FAILS CLOSED, `Sec-Fetch-Site: cross-site` belt rejects first), and a cookie-authenticated handshake is answered **NO** `bearer` marker on the 101 (`WebSocketServer.php:860-862`); (3) the legacy `?token=<jwt>` query is **REFUSED BY DEFAULT since CP-024 PHASE B** — an opt-in ladder decides every query handshake: EXPLICIT ENV `PHLIX_WS_QUERY_TOKEN` (restart-class; among SET values only exact `deny` denies — a misspelled value fails OPEN to allow) **>** ADMIN ROW `auth.ws_query_token` (allow/deny enum read LIVE per handshake, so a flip lands on the next connection; an unusable or unreadable row normalizes to DENY with a bounded warning that never logs the stored value) **>** shipped **DENY**, the only shipped default. Law SSOT `SyncPlayAuthMiddleware::resolveHandshakeToken()` — `phlix-server/src/Server/WebSocket/SyncPlayAuthMiddleware.php:578-605` (docblock `:535-577`); gate ladder SSOT `QueryTokenGatePolicy::allowsQueryCarrier()` — `phlix-server/src/Server/WebSocket/QueryTokenGatePolicy.php:125-162` (precedence docblock `:35-63`, row key const `:87`); handshake gate `phlix-server/src/Server/WebSocket/WebSocketServer.php:741-830`. Full law doc: phlix-server `docs/dev/WEBSOCKET_AUTH_CARRIERS.md` @ `262f01d3`. | Missing/invalid/expired credential still rejects **pre-101** (§8.1), and a query-gate refusal removes the connection and closes **before** the 101 with no envelope — zero new wire codes (`WebSocketServer.php:800-818`). The env tier wins BOTH directions (deny outranks a row-allow; allow outranks a row-deny as the straggler hatch), and the gate never runs for a bearer or admitted-cookie leg (CP-006 precedence). Bearer and query present with **different** credentials also rejects pre-101 (pool removal + reap + redacted forensics warn, `WebSocketServer.php:762-777`) — the law sits EXACTLY between the two EXPLICIT carriers: the ambient cookie may be stale, so an explicit credential silently outranks it (priority IS the disclosure), and a refused cookie never blocks the query carrier. A client that **offered** `bearer` and passed is answered `Sec-WebSocket-Protocol: bearer` on the 101 — marker only, never the token, and gated on the offer (`WebSocketServer.php:829`, `:858-869`; echo const `SyncPlayAuthMiddleware.php:77`). Reject logs pass through `redactTokenQuery` (`SyncPlayAuthMiddleware.php:636-641`), masking every `token=` param case-insensitively. New clients MUST dial the bearer form; `?token=` is legacy opt-in-only. |
+| Hub SyncPlay relay `:8804` | `Sec-WebSocket-Protocol: bearer, <token>` **two-entry subprotocol** (or `Authorization: Bearer` header) **only** — a `?token=` query is refused (S237; era phlix-hub `b7ad2a3e`): the reader is `ClientRelayWorker::extractClientToken()` called at `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:907` (carrier law docblock `:67-70`; the `$_GET['token']` it replaced was doubly broken — insecure by placement, and Workerman 5 never populates `$_GET`). The relay runs **no** cookie arm — the `:8804` surface admits no `phlix_session` jar and stays bearer-subprotocol-only by design. JS clients: `new WebSocket(url, ['bearer', token])`. | The 101 echo answers with the `bearer` marker only — never the token, and only to a client that OFFERED the bearer subprotocol (an `Authorization`-header-only dial gets no echo): `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:925-956` (consts `:223`, `:231`). |
 
 **Room-vocabulary dialect on `:8804` (owner decision #14, phlix-hub
 `cc1e128`).** The relay's room lane now serves this canonical §3 catalog. A
@@ -1324,19 +1324,24 @@ This fleet paragraph is era-pinned, and the era moved: at the
 ui bundle chunks booted by phlix-windows-client and phlix-tizen-client (the tag
 predated both flip commits). Both clients have since re-pinned through the
 `v0.99.13` cascade (disk-verified 2026-11-03), so current estate dials ride the
-bearer subprotocol. `?token=` stays accepted on `:8097` for third-party and
-pre-cascade builds; its retirement remains the owner fleet-update call named in
-the table above — never an assumed date.
+bearer subprotocol. `?token=` is no longer accepted by
+default anywhere in the estate: CP-024 PHASE B shipped the query carrier as
+deny-by-default on `:8097`, so a host runs it only for third-party or
+pre-cascade builds by opting in through the named ladder (admin row
+`auth.ws_query_token=allow`, or env `PHLIX_WS_QUERY_TOKEN=allow`); removing the
+branch outright (PHASE C) remains the owner call — never an assumed date.
 
-`@phlix/syncplay` itself opens no socket, so both carriers are consumer
+`@phlix/syncplay` itself opens no socket, so all three carriers are consumer
 transport concerns. The two-entry bearer subprotocol is now the universal
-estate carrier — it is accepted on **both** surfaces above; the `?token=`
-lane exists only on `:8097` for legacy builds and MUST NOT be added to new
-code paths (the hub refuses it).
+estate carrier — it is accepted on **both** surfaces above; the `phlix_session`
+cookie arm exists only on `:8097`, and only for same-origin browser sockets
+that clear the strict request-origin gate; and the `?token=` lane exists only
+on `:8097` where an operator has explicitly opted it in via the ladder above —
+it MUST NOT be added to new code paths (the hub refuses it outright).
 
 **Transport encryption is a deployment concern, not a wire field (`:8097`).**
 The server's SyncPlay worker binds a PLAINTEXT `websocket://` listener
-(`phlix-server/src/Server/WebSocket/WebSocketServer.php:186`); it holds no TLS
+(`phlix-server/src/Server/WebSocket/WebSocketServer.php:214`); it holds no TLS
 context of its own, so `wss://` on the dial path (§8.4's dial form) is served by
 an EXTERNAL reverse proxy / termination layer, not by the socket server. That
 means "the credential MUST ride an encrypted transport" cannot be enforced from
