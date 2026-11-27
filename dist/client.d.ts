@@ -799,12 +799,16 @@ export declare class SyncPlayClient {
      * itself, its `members` array and every member object, and — when present —
      * its `queue` array and every queue ITEM. That is the whole consumer model:
      * `SyncPlayGroup` carries nothing else but primitives on these two arrays.
-     * The one open island is each item's `media_info` — an opaque wire record
-     * the library never reads, shared by reference with the decoded frame; a
-     * write inside it cannot reach the library's state or the diff baseline.
-     * A write to a frozen surface THROWS in strict-mode consumers (ESM and all
+     * The one open island is each item's `media_info` — an opaque wire record,
+     * shared by reference with the decoded frame; a write inside it is invisible
+     * to the library's folds and the diff baseline — the library never reads
+     * media_info — but it is NOT isolated from other consumers: the record is
+     * part of the delivered graph, so writes there remain observable via
+     * getGroup()/onState until the next store replaces the item. An assignment
+     * to a frozen surface THROWS in strict-mode consumers (ESM and all
      * TS-emitted modules are strict) and is silently ignored in legacy sloppy
-     * scripts — either way the stored model stays pristine. The TS type stays
+     * scripts — method writes like `push` on a frozen array throw in either
+     * mode — either way the stored model stays pristine. The TS type stays
      * mutable (changing public type shape is another step's surface); the
      * immutability is the runtime law documented at every hand-out.
      */
