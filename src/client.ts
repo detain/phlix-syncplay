@@ -298,6 +298,16 @@ export interface SyncPlayClientOptions {
    * left, not to this one.
    */
   onMemberLeft?: (_member: { id: string; name: string }) => void;
+  /**
+   * The group host changed (`syncplay_host_elect`). Firing law
+   * (S-syncplay-41, finding phlix-syncplay-052): announced only on a
+   * REAL transition — a `host_elect` re-announcing the already-cached
+   * `host_id` (the duplicate-replay class: the wire has no frame-dedupe
+   * field, §4 known limits) is a whole no-op, no callback and no store
+   * write. The roster-eviction branch keeps its fire, and the ungrouped
+   * named exception (LW-047) announces with no cached group to compare
+   * against. See `handleHostElect`.
+   */
   onHostChanged?: (_newHostId: string | null) => void;
   /**
    * A server error frame. `_details` carries the frame's optional `details`
@@ -2449,6 +2459,24 @@ export class SyncPlayClient {
           this.options.onMemberLeft?.({ id: gone.id, name: gone.name });
         }
         this.options.onHostChanged?.(newHostId);
+        return;
+      }
+      // S-syncplay-41 (finding phlix-syncplay-052): the same-host no-op
+      // guard. The wire carries NO per-frame dedupe/sequence field (§4
+      // known limits; §10.1's stamp ordering is an ordering law, not frame
+      // identification), so a duplicate `host_elect` re-announcing the
+      // CURRENT host parses identically to a fresh election. The fold would
+      // be content-idempotent, but the ANNOUNCE is not: `onHostChanged`
+      // drives privilege repaints, and pre-guard a replay fired it with the
+      // unchanged id. Only a genuine `newHostId !== group.host_id`
+      // transition reaches the fold and the announce; a same-host replay is
+      // a whole no-op (no store write, no callback). Placement is
+      // deliberate: AFTER the shape gates and the eviction branch above (a
+      // roster-shrink elect is a real change by construction and keeps its
+      // fire), and it never touches the `group === null` fall-through
+      // below — the LW-047 named exception has no cached host to compare
+      // against and announces regardless.
+      if (newHostId === group.host_id) {
         return;
       }
       this.group = SyncPlayClient.foldHostId(group, newHostId);

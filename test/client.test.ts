@@ -3823,3 +3823,135 @@ describe('SyncPlayClient — opportunistic monotonic-stamp guard on state folds 
     expect(h.client.getGroup()?.playback_position).toBe(500_000); // store never moved
   });
 });
+
+// ------------------------------------------------ S-syncplay-41 (phlix-syncplay-052)
+
+describe('SyncPlayClient — host_elect re-announcing the CURRENT host is a no-op (phlix-syncplay-052, S-syncplay-41)', () => {
+  it('a duplicate leave-elect replay fires no second onHostChanged and writes no store', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    // Genuine election: host1 departs, 'me' is elected — eviction path, fires once.
+    const elect: RawMessage = {
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'me',
+      elected_by: 'host1',
+    };
+    h.client.handleIncoming(elect);
+    expect(h.hostChanges).toEqual(['me']);
+    const cached = h.client.getGroup();
+    expect(cached?.host_id).toBe('me');
+
+    // The convicted class: a byte-identical REPLAY of the same frame. host1
+    // is already gone from the cached roster so the eviction branch cannot
+    // fire, and pre-guard the handler fell through to the unconditional
+    // fold + announce — repainting privilege UI with the SAME host id.
+    h.client.handleIncoming(elect);
+    expect(h.hostChanges).toEqual(['me']); // no churn signal for a replay
+    expect(h.client.getGroup()).toBe(cached); // whole no-op: no store write
+    expect(h.client.isHost()).toBe(true); // crown unchanged
+  });
+
+  it('a no-shrink elect naming the cached host with a foreign elected_by churns nothing', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'host1', // already the cached host
+      elected_by: 'ghost9', // no such member: the eviction branch cannot fire
+    });
+    expect(h.hostChanges).toEqual([]); // pre-guard: ['host1']
+    expect(h.client.getGroup()?.host_id).toBe('host1');
+    expect(h.client.getGroup()?.members.map((m) => [m.id, m.is_host])).toEqual([
+      ['host1', true],
+      ['me', false],
+    ]);
+  });
+
+  it('BOUNDARY: genuine host transitions still fire — host→null, null→host first adoption, host→other', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    // host1 → null (declared defensive arm, no departure truth): a real
+    // transition, NOT the no-op class (cached host_id was 'host1').
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: null,
+      elected_by: 'ghost9',
+    });
+    expect(h.hostChanges).toEqual([null]);
+    expect(h.client.getGroup()?.host_id).toBeNull();
+    // null → host FIRST ADOPTION through the guard: cached host_id is null,
+    // the announced id differs, so the transition fires and folds.
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'host2',
+      elected_by: 'ghost9',
+    });
+    expect(h.hostChanges).toEqual([null, 'host2']);
+    expect(h.client.getGroup()?.host_id).toBe('host2');
+    // host2 → me: another genuine transition.
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'me',
+      elected_by: 'ghost9',
+    });
+    expect(h.hostChanges).toEqual([null, 'host2', 'me']);
+    expect(h.client.isHost()).toBe(true);
+  });
+
+  it('LW-047 exception survives: with NO cached group every host_elect still announces', () => {
+    const hostChanges: Array<string | null> = [];
+    const client = new SyncPlayClient({
+      send: () => {},
+      now: () => 1000,
+      memberId: 'me',
+      onHostChanged: (x) => hostChanges.push(x),
+    });
+    expect(client.getGroup()).toBeNull();
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'host2',
+      elected_by: 'host1',
+    });
+    client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'host2',
+      elected_by: 'host1',
+    });
+    // Ungrouped consumers have no cached host to compare against — the
+    // named exception fires for BOTH frames (banner UX law, untouched).
+    expect(hostChanges).toEqual(['host2', 'host2']);
+    expect(client.getGroup()).toBeNull();
+  });
+
+  it('eviction path still fires even when the frame ALSO names the cached host (guard slots after it)', () => {
+    const h = makeHarness();
+    // Cached roster: host1 + me, current host 'me'. A frame elects 'me'
+    // (same host, already folded) AND names a member present in the roster
+    // as departing — the roster shrink is a real change and keeps its fire;
+    // the guard must not swallow it.
+    const base = groupStateMessage('host1', 'me').group as SyncPlayGroup;
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_STATE,
+      protocol_version: 1,
+      your_id: 'me',
+      group: { ...base, host_id: 'me' },
+    });
+    h.hostChanges.length = 0;
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.HOST_ELECT,
+      protocol_version: 1,
+      elected_id: 'me',
+      elected_by: 'host1',
+    });
+    expect(h.hostChanges).toEqual(['me']); // fires despite newHostId === cached host
+    expect(h.client.getGroup()?.members.map((m) => m.id)).toEqual(['me']);
+    expect(h.left.map((m) => m.id)).toEqual(['host1']);
+  });
+});

@@ -271,6 +271,16 @@ export interface SyncPlayClientOptions {
         id: string;
         name: string;
     }) => void;
+    /**
+     * The group host changed (`syncplay_host_elect`). Firing law
+     * (S-syncplay-41, finding phlix-syncplay-052): announced only on a
+     * REAL transition — a `host_elect` re-announcing the already-cached
+     * `host_id` (the duplicate-replay class: the wire has no frame-dedupe
+     * field, §4 known limits) is a whole no-op, no callback and no store
+     * write. The roster-eviction branch keeps its fire, and the ungrouped
+     * named exception (LW-047) announces with no cached group to compare
+     * against. See `handleHostElect`.
+     */
     onHostChanged?: (_newHostId: string | null) => void;
     /**
      * A server error frame. `_details` carries the frame's optional `details`

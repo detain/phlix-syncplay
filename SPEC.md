@@ -305,6 +305,25 @@ All field names are **snake_case**.
 > `time_sync`/`time_pong`, `group_list`, `chat`, `typing`, `host_elect`, and
 > INFO message-frames; a join-announcement INFO names nobody until the
 > receiver has a group (its message half still rides).
+>
+> **Known limits — no frame dedupe field.** No wire type carries a frame id,
+> sequence number, or any other per-frame dedupe field: a receiver cannot
+> positively identify a re-sent frame from the frame itself. The only
+> wire-side defenses are the envelope-`timestamp` ordering law (§10.1's
+> opportunistic monotonic-stamp guard — `syncplay_group_state` only, keyed
+> on the stamp; a byte-identical replay of the NEWEST fold still ADOPTS,
+> because equality is not staleness) and the consumer-side chat echo
+> reconciliation tuple (§4.3, dedupe by `(member_id, message, timestamp)`)
+> — neither generalizes to every frame. Idempotent state folds make
+> duplicate adoption safe; announce-style callbacks do not — a duplicate is
+> indistinguishable from a fresh event unless the client compares the
+> frame's claim against cached state. `@phlix/syncplay` applies exactly that
+> comparison to `host_elect`: `handleHostElect` (src/client.ts) announces
+> `onHostChanged` only when the elected id differs from the cached
+> `group.host_id`, so a same-host replay is a whole no-op (S-syncplay-41,
+> finding phlix-syncplay-052); the roster-eviction branch and the ungrouped
+> named exception (LW-047) keep their fire. A true wire-level frame-dedupe
+> field would be a contract addition — not made here.
 
 ### 4.1 Group management
 

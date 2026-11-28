@@ -722,6 +722,7 @@ var m = 5, h = 1e3, g = 50, _ = .1, v = .99, y = 1.01, b = 1, x = class {
 				(o = (s = this.options).onHostChanged) == null || o.call(s, a);
 				return;
 			}
+			if (a === n.host_id) return;
 			this.group = t.foldHostId(n, a);
 		}
 		(n = (r = this.options).onHostChanged) == null || n.call(r, a);
