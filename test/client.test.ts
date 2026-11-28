@@ -3785,4 +3785,41 @@ describe('SyncPlayClient — opportunistic monotonic-stamp guard on state folds 
     expect(h.drops).toHaveLength(1);
     expect(h.states).toHaveLength(1);
   });
+
+  it('the watermark FOLLOWS a sustained stepped-epoch stream — a monotonic-max "never lowers" write would freeze the room behind the stale epoch (S-syncplay-25 r1, MUT-C2 conviction)', () => {
+    // Review verdict S-syncplay-25-r1 MAJOR leg 1: the boundary test's
+    // verdicts hold under BOTH follow and monotonic watermarks; this stream
+    // is where the two laws diverge. Under the landed bidirectional-follow
+    // write every frame below is within 2000 ms of the CURRENT watermark and
+    // adopts; under a monotonic-max write the watermark would be stranded at
+    // S and the stepped stream would be convicted frame-by-frame — exactly
+    // the "sustained clock step freezes the room" failure SPEC §10.1 rules
+    // out. Positions advance so each adoption is observably fresh state.
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000)); // watermark S
+    h.client.handleIncoming(stampedStateFrame(S - 2_000, 501_000)); // at tolerance → adopt, wm S-2000
+    h.client.handleIncoming(stampedStateFrame(S - 3_500, 502_000)); // 1500 below FOLLOWED wm → adopt (monotonic: 3500 below S → would drop)
+    h.client.handleIncoming(stampedStateFrame(S - 5_000, 503_000)); // 1500 below FOLLOWED wm → adopt (monotonic: 5000 below S → would drop)
+    expect(h.drops).toHaveLength(0);
+    expect(h.states).toHaveLength(4);
+    expect(h.client.getGroup()?.playback_position).toBe(503_000);
+  });
+
+  it('refusal never writes the watermark — the same stale stamp re-fed after a drop is convicted AGAIN (S-syncplay-25 r1, MUT-C3 conviction)', () => {
+    // Review verdict S-syncplay-25-r1 MAJOR leg 2: "Written ONLY on adoption".
+    // If the refusal branch touched the watermark, the SECOND feed of the
+    // identical stale stamp would sit at delta 0 behind its own write and
+    // adopt. Re-feeding is the only observation that separates purity from
+    // refusal-writes; single drops cannot see the difference.
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000)); // watermark S
+    const stale = stampedStateFrame(S - 10_000, 1_000);
+    h.client.handleIncoming(stale); // convicted once...
+    expect(h.drops).toHaveLength(1);
+    h.client.handleIncoming(stale); // ...and a replay of the SAME stale stamp is convicted again
+    expect(h.drops).toHaveLength(2);
+    expect(h.drops[1]).toEqual({ reason: 'malformed', frame: stale });
+    expect(h.states).toHaveLength(1); // only the honest S frame ever fired onState
+    expect(h.client.getGroup()?.playback_position).toBe(500_000); // store never moved
+  });
 });

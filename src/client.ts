@@ -2194,7 +2194,8 @@ export class SyncPlayClient {
     const hostId = SyncPlayClient.strOrNull(group.host_id);
 
     // S-syncplay-25 (finding phlix-syncplay-030, SPEC §10.1): the opportunistic
-    // monotonic-stamp guard. Runs AFTER the four shape gates and BEFORE every
+    // monotonic-stamp guard. Runs AFTER the membership gate (c17) and the three
+    // shape gates, and BEFORE every
     // fold side effect (room-change seek cancel, store, roster diff, onState,
     // mismatch probe) so a refusal is pure. RULING, honest about its evidence:
     // the envelope `timestamp` is minted server-side at emit by BOTH live
