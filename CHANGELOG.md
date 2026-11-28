@@ -7,8 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.1.10] - 2026-11-28
 
-Release-integrity cut: folds the whole post-v0.1.9 campaign — the 28 reviewed
-`S-syncplay-*` steps plus the three SPY-era rows folded from Unreleased below — including one
+Release-integrity cut: folds the whole post-v0.1.9 campaign — `git log v0.1.9..HEAD`
+carries 42 distinct `S-syncplay-*` step tokens (IDs 01-44 except the 02/28 gaps;
+re-derive with `git log --format='%s%b' v0.1.9..HEAD | grep -oE 'S-syncplay-[0-9]+' | sort -u`);
+the 32 IDs named in the rows below are exactly the steps that banked a release row —
+the remaining ten (06, 10, 13, 19, 26, 31, 33, 34, 36, 42) were spec-doc/test/comment-only
+passes that banked none — plus the three SPY-era rows folded from Unreleased below, including one
 DISCLOSED BEHAVIOR CHANGE (`memberName` default 'User' -> 'Host', owner ruling
 2026-11-13) and the sync-readiness `server_time` gate on the outbound playback
 senders. No new wire vocabulary; error-code registry untouched. Packaging:
@@ -104,11 +108,27 @@ Changes:
   github install of `@phlix/syncplay` whose tree lacks its own `@phlix/contracts` pin now
   fails at peer resolution with E404 - intended default-deny; every estate consumer tree
   already carries a contracts node.
+- S-syncplay-37 (folded as a round-1 errata row - the step banked no row of its own): the
+  `group_state` duration read becomes a duration-domain parse (`nonnegOrNull`): a forged
+  negative `current_media_duration` folds to `null` instead of storing the sentinel that
+  silently disarmed every duration > 0 ceiling law; zero stays honest; `finiteOrNull`
+  retires with its sole caller moved. Commit `039830d` (client.test.ts fold pins + dist regen).
 - S-syncplay-38 (phlix-syncplay-049, fuzz R-007): chat `onChat` `timestampMs` rides the
   shared sane-stamp gate (finite AND >=1000 AND LW-050 window, unit-normalized) instead of
   a finite-only gate - forged epoch-zero/negative/uptime-magnitude stamps deliver
   `undefined` and seconds-form stamps are promoted x1000 at decode; real epoch-ms
   producers pass through untouched.
+- S-syncplay-39 (phlix-syncplay-050): the legacy `{type,data,timestamp}` unwrap in
+  `decodeMessage` (`src/framing.ts`) copies envelope keys via `Object.defineProperty`
+  (own, enumerable, writable, configurable) - never through `[[Set]]` - so a wire-supplied
+  `__proto__` key (an OWN key after `JSON.parse`) can no longer trip the
+  `Object.prototype.__proto__` SETTER that silently dropped the key and swapped the
+  receiver's prototype; the planted key now rides as an own inert data property,
+  byte-consistent with the canonical pass-through path. Wire bytes for legitimate frames
+  unchanged (the lane's A/B harness decode-corpus fingerprint md5
+  `623cb50582605469b1f0a986d6044a63` identical pre/post). Ships to consumers via the
+  committed `dist` re-gen; three `test/messages.test.ts` unwrap pins. Commits `f04330c` +
+  `e7c0815`.
 - S-syncplay-41 (phlix-syncplay-052): `handleHostElect` no longer re-fires
   `onHostChanged` when a `host_elect` frame re-announces the already-cached host - a
   same-host replay is a whole no-op; genuine transitions (incl. roster-eviction and the
@@ -137,7 +157,8 @@ Changes:
   MIXED field).
 - Test-suite hardening riding the cut (no product change): seekCoalescing pins 17 -> 21 its
   (S-21), consolidatedGuards fake-timer advances (S-35), adversarial fuzz harness added
-  (S-40, findings it mints ride as separate rows), S-22 landed honest-zero (no row
+  (S-40, findings it mints ride as separate rows), S-22's review landed honest-zero (its
+  commit 0c38e0e added test-only gap pins phlix-syncplay-026/-027; no consumer-visible row
   warranted). Full battery at this cut: 20 files / 620 tests, 0 failures / 0 errors.
 
 ## [0.1.9] - 2026-11-12
