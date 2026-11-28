@@ -7,12 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.1.10] - 2026-11-28
 
-Release-integrity cut: folds the whole post-v0.1.9 campaign — `git log v0.1.9..HEAD`
-carries 42 distinct `S-syncplay-*` step tokens (IDs 01-44 except the 02/28 gaps;
-re-derive with `git log --format='%s%b' v0.1.9..HEAD | grep -oE 'S-syncplay-[0-9]+' | sort -u`);
-the 32 IDs named in the rows below are exactly the steps that banked a release row —
-the remaining ten (06, 10, 13, 19, 26, 31, 33, 34, 36, 42) were spec-doc/test/comment-only
-passes that banked none — plus the three SPY-era rows folded from Unreleased below, including one
+Release-integrity cut: folds the whole post-v0.1.9 campaign — the walk
+`git log --format='%s%b' v0.1.9..HEAD | grep -oE 'S-syncplay-[0-9]+' | sort -u` carries
+43 distinct `S-syncplay-*` tokens (IDs 01-44 minus the 28 gap); excluding this cut's own
+02 stamp — both release commit subjects carry it — that leaves 42 campaign steps: the
+32 IDs named below are exactly the steps that carry a row, banked or errata, and the ten
+that banked none (06, 10, 13, 19, 26, 31, 33, 34, 36, 42) were spec-doc/test/comment-only
+passes — plus the three SPY-era rows folded from Unreleased below, including one
 DISCLOSED BEHAVIOR CHANGE (`memberName` default 'User' -> 'Host', owner ruling
 2026-11-13) and the sync-readiness `server_time` gate on the outbound playback
 senders. No new wire vocabulary; error-code registry untouched. Packaging:
