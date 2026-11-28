@@ -524,6 +524,21 @@ export declare class SyncPlayClient {
     private seekFlushTimer;
     private group;
     /**
+     * S-syncplay-25 (finding phlix-syncplay-030): the monotonic-stamp watermark
+     * for the opportunistic `group_state` replay guard — the trusted envelope
+     * stamp ({@link SyncPlayClient.saneServerStamp}, unit-normalized to ms) of
+     * the LAST ADOPTED fold, scoped to that fold's room. Single slot, not a
+     * map: the replay class this cures is the same-room echo/backlog, and a
+     * stale stamp for a DIFFERENT room must still adopt (cross-room replays
+     * are never the convicted case — the slot moves with the adoption).
+     * Written ONLY on adoption — a refused frame moves neither the store nor
+     * the watermark. Deliberately NOT reset by `leaveGroup()`/`onDisconnect()`:
+     * in-flight stale backlog after a reconnect IS the replay class, and fresh
+     * server send-time stamps always outrank a surviving watermark (both live
+     * producers re-stamp every frame at emit — SPEC §10.1).
+     */
+    private stateFoldStamp;
+    /**
      * S-syncplay-17 (finding phlix-syncplay-020): the intended-membership latch.
      * `handleGroupState` adopts a room ONLY while this is armed, so an in-flight
      * `group_state` echo that arrives AFTER a voluntary `leaveGroup()` can no

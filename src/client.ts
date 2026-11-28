@@ -545,6 +545,19 @@ export interface SyncPlayClientOptions {
  */
 const DEFAULT_SEEK_THROTTLE_MS = 250;
 
+/**
+ * S-syncplay-25 (finding phlix-syncplay-030): clock-step tolerance for the
+ * opportunistic monotonic-stamp guard on `group_state` folds. A fold is
+ * refused as stale only when it sits MORE than this far below the last
+ * adopted stamp. 2000 ms is the estate's own repair-loop magnitude (server
+ * SyncPlayManager: "the 2000 ms tolerance loop is the repair path") and
+ * covers an NTP step or VM clock rescale; a genuine relay replay is an
+ * arbitrarily-old frame, so anything past the tolerance is convicted. The
+ * watermark FOLLOWS an adopted stamp in both directions, so a sustained
+ * clock step moves the guard with the clock instead of freezing the room.
+ */
+const STATE_STAMP_CLOCK_STEP_TOLERANCE_MS = 2000;
+
 export class SyncPlayClient {
   private readonly send: (_message: RawMessage) => void;
   private readonly now: NowFn;
@@ -575,6 +588,21 @@ export class SyncPlayClient {
   private seekFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
   private group: SyncPlayGroup | null = null;
+  /**
+   * S-syncplay-25 (finding phlix-syncplay-030): the monotonic-stamp watermark
+   * for the opportunistic `group_state` replay guard — the trusted envelope
+   * stamp ({@link SyncPlayClient.saneServerStamp}, unit-normalized to ms) of
+   * the LAST ADOPTED fold, scoped to that fold's room. Single slot, not a
+   * map: the replay class this cures is the same-room echo/backlog, and a
+   * stale stamp for a DIFFERENT room must still adopt (cross-room replays
+   * are never the convicted case — the slot moves with the adoption).
+   * Written ONLY on adoption — a refused frame moves neither the store nor
+   * the watermark. Deliberately NOT reset by `leaveGroup()`/`onDisconnect()`:
+   * in-flight stale backlog after a reconnect IS the replay class, and fresh
+   * server send-time stamps always outrank a surviving watermark (both live
+   * producers re-stamp every frame at emit — SPEC §10.1).
+   */
+  private stateFoldStamp: { groupId: string; stampMs: number } | null = null;
   /**
    * S-syncplay-17 (finding phlix-syncplay-020): the intended-membership latch.
    * `handleGroupState` adopts a room ONLY while this is armed, so an in-flight
@@ -2165,6 +2193,37 @@ export class SyncPlayClient {
     const groupId = group.group_id;
     const hostId = SyncPlayClient.strOrNull(group.host_id);
 
+    // S-syncplay-25 (finding phlix-syncplay-030, SPEC §10.1): the opportunistic
+    // monotonic-stamp guard. Runs AFTER the four shape gates and BEFORE every
+    // fold side effect (room-change seek cancel, store, roster diff, onState,
+    // mismatch probe) so a refusal is pure. RULING, honest about its evidence:
+    // the envelope `timestamp` is minted server-side at emit by BOTH live
+    // producers — phlix-server Messages::frame() strips any payload copy and
+    // stamps microtime-ms on every frame, phlix-hub SyncPlayRelayWorker::
+    // canonicalFrame() does the same with Clock::unixMs() — so within one
+    // server's clock it is a send-time ordering, not a client-forgeable
+    // claim. It is OPTIONAL on the wire (BaseMessage), so the guard is
+    // opportunistic: drop ONLY when both sides carry a
+    // TRUSTED stamp (saneServerStamp), the watermark belongs to THIS room,
+    // and the incoming stamp sits more than STATE_STAMP_CLOCK_STEP_TOLERANCE_MS
+    // below it. Absent/untrusted on EITHER side → adopt (absence is never
+    // evidence of staleness); EQUAL or within-tolerance-older → adopt — the
+    // strict `>` below is the boundary that CANNOT drop a fresher state,
+    // because same-millisecond refreshes are real on ms clocks and a sustained
+    // clock step is carried forward by the watermark-follows write below.
+    // Refusal is whole-frame: 'malformed' is the estate vocabulary for a frame
+    // this client will not attribute (LW-044 precedent, c17/c24 carriers).
+    const stampMs = SyncPlayClient.saneServerStamp(msg.timestamp);
+    if (
+      stampMs !== undefined &&
+      this.stateFoldStamp !== null &&
+      this.stateFoldStamp.groupId === groupId &&
+      this.stateFoldStamp.stampMs - stampMs > STATE_STAMP_CLOCK_STEP_TOLERANCE_MS
+    ) {
+      this.options.onFrameDropped?.('malformed', msg);
+      return;
+    }
+
     // Room change mid-window (R-SYNCPLAY-03): joinGroup(B) while a seek
     // coalescing window from room A is still open would otherwise flush A's
     // pending target stamped with B's group_id — the same "belongs to the
@@ -2208,6 +2267,21 @@ export class SyncPlayClient {
       created_at: SyncPlayClient.finiteOrUndefined(group.created_at),
       last_activity_at: SyncPlayClient.finiteOrUndefined(group.last_activity_at),
     });
+
+    // S-syncplay-25: the watermark follows every ADOPTED trusted stamp, in
+    // BOTH directions — adopting a within-tolerance older stamp moves the
+    // guard with a stepped server clock (a room must never freeze behind a
+    // watermark from the old epoch). An absent/untrusted adopted stamp never
+    // writes and never lowers the watermark; it clears the slot only when it
+    // belongs to a different room (the slot always describes the LAST
+    // adopted fold: a stale replay of a room we are no longer folded into is
+    // not the convicted class, and a junk stamp must not strand a live
+    // watermark that would never be trusted again anyway).
+    if (stampMs !== undefined) {
+      this.stateFoldStamp = { groupId, stampMs };
+    } else if (this.stateFoldStamp !== null && this.stateFoldStamp.groupId !== groupId) {
+      this.stateFoldStamp = null;
+    }
 
     // M-SYNCPLAY-16: fire `onMemberLeft` for members this SAME room lost
     // since the previous fold. A room switch (different cached group_id) is

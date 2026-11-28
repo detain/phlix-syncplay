@@ -223,10 +223,10 @@ var m = 5, h = 1e3, g = 50, _ = .1, v = .99, y = 1.01, b = 1, x = class {
 			sampleCount: this.samples.length
 		};
 	}
-}, S = 250, C = class t {
+}, S = 250, C = 2e3, w = class t {
 	constructor(e) {
 		var n;
-		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "intendsMembership", !0), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "Host" : n, this.timeSync = new x(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
+		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "stateFoldStamp", null), s(this, "intendsMembership", !0), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "Host" : n, this.timeSync = new x(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
 	}
 	static parseSeekThrottleMs(e) {
 		if (e === void 0) return S;
@@ -621,37 +621,45 @@ var m = 5, h = 1e3, g = 50, _ = .1, v = .99, y = 1.01, b = 1, x = class {
 			(f = (p = this.options).onFrameDropped) == null || f.call(p, "malformed", e);
 			return;
 		}
-		let m = s.group_id, h = t.strOrNull(s.host_id);
+		let m = s.group_id, h = t.strOrNull(s.host_id), g = t.saneServerStamp(e.timestamp);
+		if (g !== void 0 && this.stateFoldStamp !== null && this.stateFoldStamp.groupId === m && this.stateFoldStamp.stampMs - g > C) {
+			var _, v;
+			(_ = (v = this.options).onFrameDropped) == null || _.call(v, "malformed", e);
+			return;
+		}
 		this.group !== null && this.group.group_id !== m && this.cancelSeekCoalescing();
-		let g = this.group, _ = t.normalizeMembers(s.members, h), v = t.nonnegOrNull(s.current_media_duration);
+		let y = this.group, b = t.normalizeMembers(s.members, h), x = t.nonnegOrNull(s.current_media_duration);
 		if (this.group = t.freezeGroup({
 			group_id: m,
 			group_name: t.strOr(s.group_name, ""),
-			members: _,
+			members: b,
 			member_count: t.finiteOrUndefined(s.member_count),
 			host_id: h,
 			current_media_id: t.strOrNull(s.current_media_id),
-			current_media_duration: v,
-			playback_position: t.clampedPosition(s.playback_position, v),
+			current_media_duration: x,
+			playback_position: t.clampedPosition(s.playback_position, x),
 			playback_state: t.playbackState(s.playback_state),
 			queue: t.normalizeQueue(s.queue),
 			created_at: t.finiteOrUndefined(s.created_at),
 			last_activity_at: t.finiteOrUndefined(s.last_activity_at)
-		}), g !== null && g.group_id === m) {
-			let e = new Set(_.map((e) => e.id));
-			for (let t of g.members) if (!e.has(t.id)) {
-				var y, b;
-				(y = (b = this.options).onMemberLeft) == null || y.call(b, {
+		}), g === void 0 ? this.stateFoldStamp !== null && this.stateFoldStamp.groupId !== m && (this.stateFoldStamp = null) : this.stateFoldStamp = {
+			groupId: m,
+			stampMs: g
+		}, y !== null && y.group_id === m) {
+			let e = new Set(b.map((e) => e.id));
+			for (let t of y.members) if (!e.has(t.id)) {
+				var S, w;
+				(S = (w = this.options).onMemberLeft) == null || S.call(w, {
 					id: t.id,
 					name: t.name
 				});
 			}
 		}
 		(n = (r = this.options).onState) == null || n.call(r, this.group, typeof o.your_id == "string" ? o.your_id : void 0);
-		let x = o.your_id;
-		if (typeof x == "string" && x !== this.memberId) {
-			var S, C;
-			(S = (C = this.options).onIdentityMismatch) == null || S.call(C, x, this.memberId);
+		let T = o.your_id;
+		if (typeof T == "string" && T !== this.memberId) {
+			var E, D;
+			(E = (D = this.options).onIdentityMismatch) == null || E.call(D, T, this.memberId);
 		}
 	}
 	handlePlayback(e, n) {
@@ -843,6 +851,6 @@ var m = 5, h = 1e3, g = 50, _ = .1, v = .99, y = 1.01, b = 1, x = class {
 		this.send(u(e, t, this.now));
 	}
 };
-export { n as ALL_MESSAGE_TYPES, _ as DRIFT_CORRECTION_FACTOR, y as DRIFT_RATE_MAX, v as DRIFT_RATE_MIN, h as MAX_ACCEPTABLE_RTT, m as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, g as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, C as SyncPlayClient, b as TIME_SYNC_PROTOCOL_VERSION, x as TimeSync, d as decodeMessage, u as encodeMessage, f as isCanonicalFrame, r as isValidMessageType, p as serializeMessage };
+export { n as ALL_MESSAGE_TYPES, _ as DRIFT_CORRECTION_FACTOR, y as DRIFT_RATE_MAX, v as DRIFT_RATE_MIN, h as MAX_ACCEPTABLE_RTT, m as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, g as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, w as SyncPlayClient, b as TIME_SYNC_PROTOCOL_VERSION, x as TimeSync, d as decodeMessage, u as encodeMessage, f as isCanonicalFrame, r as isValidMessageType, p as serializeMessage };
 
 //# sourceMappingURL=phlix-syncplay.js.map

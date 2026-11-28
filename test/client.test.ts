@@ -3595,3 +3595,194 @@ describe('SyncPlayClient — intended-membership latch: post-leave group_state e
     expect(h.client.getGroup()?.group_id).toBe('sp_abc');
   });
 });
+
+describe('SyncPlayClient — opportunistic monotonic-stamp guard on state folds (phlix-syncplay-030, S-syncplay-25, 2026-11-27)', () => {
+  /** Recorder harness local to the replay law: every observable fold side effect. */
+  function makeStampHarness() {
+    const sent: RawMessage[] = [];
+    const drops: Array<{ reason: string; frame: unknown }> = [];
+    const states: Array<{ group: SyncPlayGroup; yourId: string | undefined }> = [];
+    const left: Array<{ id: string; name: string }> = [];
+    const mismatches: Array<{ serverYourId: string; clientMemberId: string }> = [];
+    const client = new SyncPlayClient({
+      send: (m) => sent.push(m),
+      now: () => 1000,
+      memberId: 'me',
+      memberName: 'Tester',
+      onFrameDropped: (reason, frame) => drops.push({ reason, frame }),
+      onState: (group, yourId) => states.push({ group, yourId }),
+      onMemberLeft: (member) => left.push(member),
+      onIdentityMismatch: (serverYourId, clientMemberId) => mismatches.push({ serverYourId, clientMemberId }),
+    });
+    return { client, sent, drops, states, left, mismatches };
+  }
+
+  /**
+   * A well-formed group_state for room `groupId` carrying envelope timestamp
+   * `stampMs` (typed unknown so the garbage-stamp legs can pass non-numbers —
+   * honest producers ALWAYS mint finite epoch ms, see SPEC §10.1) and cached
+   * playhead `playbackPosition`.
+   */
+  function stampedStateFrame(stampMs: unknown, playbackPosition: number, groupId = 'sp_abc'): RawMessage {
+    const frame = groupStateMessageAt('host1', 'me', playbackPosition);
+    return {
+      ...frame,
+      timestamp: stampMs as number,
+      group: { ...(frame.group as SyncPlayGroup), group_id: groupId },
+    };
+  }
+
+  // Real-band epoch ms (Nov 2026 is ≈ 1.79e12); saneServerStamp's LW-050 window.
+  const S = 1_790_000_000_000;
+
+  it('acceptance pair leg 1 — an older-stamp replay of the same room is dropped whole with zero side effects', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000)); // honest adopt, watermark = S
+    expect(h.states).toHaveLength(1);
+    h.drops.length = 0;
+    h.states.length = 0;
+    // The replay class from finding phlix-syncplay-030: a prior group_state
+    // (stale envelope stamp) whose adoption would rewind the room, empty the
+    // roster diff, and trip the mismatch probe. Pre-guard it rewound
+    // position 500000 → 1000 and fired onState — the playhead jump-back.
+    const replay = {
+      ...stampedStateFrame(S - 10_000, 1_000),
+      your_id: 'ghost-of-me',
+      group: { ...(stampedStateFrame(S - 10_000, 1_000).group as SyncPlayGroup), members: [{ id: 'host1', name: 'Host', is_host: true, joined_at: 1 }] },
+    };
+    h.client.handleIncoming(replay);
+    expect(h.drops).toEqual([{ reason: 'malformed', frame: replay }]); // LW-044 whole-frame refusal vocabulary
+    expect(h.states).toHaveLength(0); // no onState — no playhead jump-back
+    expect(h.left).toHaveLength(0); // no roster-diff onMemberLeft
+    expect(h.mismatches).toHaveLength(0); // no c03 probe on a refused frame
+    expect(h.client.getGroup()?.playback_position).toBe(500_000); // store untouched
+  });
+
+  it('acceptance pair leg 2 — both stamps absent, the fold is still adopted (opportunistic: never stricter than the data allows)', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(groupStateMessageAt('host1', 'me', 500_000)); // unstamped legacy frame
+    h.client.handleIncoming(groupStateMessageAt('host1', 'me', 1_000)); // unstamped, playhead rewound
+    expect(h.drops).toHaveLength(0); // absence is NOT evidence of staleness
+    expect(h.states).toHaveLength(2);
+    expect(h.client.getGroup()?.playback_position).toBe(1_000);
+  });
+
+  it('an absent stamp on the incoming frame never blocks adoption (same-group watermark survives)', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000));
+    h.client.handleIncoming(groupStateMessageAt('host1', 'me', 520_000)); // stamped→unstamped transition adopts
+    expect(h.drops).toHaveLength(0);
+    expect(h.states).toHaveLength(2);
+    // The watermark is untouched by an unstamped adoption: the next stale
+    // replay is still convicted against S (proved in the garbage-stamp leg).
+    h.client.handleIncoming(stampedStateFrame(S - 10_000, 1_000));
+    expect(h.drops).toHaveLength(1);
+    expect(h.states).toHaveLength(2);
+  });
+
+  it('equal stamps are adopted — a same-millisecond refresh is real on ms clocks (guard cannot drop a fresher state)', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000));
+    h.client.handleIncoming(stampedStateFrame(S, 520_000)); // same send-ms, later fold — MUST adopt
+    expect(h.drops).toHaveLength(0);
+    expect(h.states).toHaveLength(2);
+    expect(h.client.getGroup()?.playback_position).toBe(520_000);
+  });
+
+  it('drop boundary is strict at the tolerance and the watermark FOLLOWS an adopted older stamp (sustained clock steps move the guard, never freeze the room)', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000)); // watermark S
+    h.client.handleIncoming(stampedStateFrame(S - 2_000, 501_000)); // exactly at tolerance → adopt
+    expect(h.drops).toHaveLength(0);
+    // Watermark now S-2000. One ms past tolerance below THAT reads as stale.
+    h.client.handleIncoming(stampedStateFrame(S - 4_001, 1_000)); // delta 2001 > tolerance → drop
+    expect(h.drops).toHaveLength(1);
+    expect(h.client.getGroup()?.playback_position).toBe(501_000); // refusal moved neither store nor watermark...
+    h.client.handleIncoming(stampedStateFrame(S - 1_999, 502_000)); // ...so this is newer-than-watermark → adopt
+    expect(h.drops).toHaveLength(1);
+    expect(h.states).toHaveLength(3);
+    expect(h.client.getGroup()?.playback_position).toBe(502_000);
+  });
+
+  it('a drop is not sticky — the next fresher stamp re-adopts immediately', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000));
+    h.client.handleIncoming(stampedStateFrame(S - 10_000, 1_000)); // dropped
+    expect(h.drops).toHaveLength(1);
+    h.client.handleIncoming(stampedStateFrame(S + 1, 510_000)); // fresher than watermark → adopt
+    expect(h.drops).toHaveLength(1); // no repeat conviction
+    expect(h.states).toHaveLength(2);
+    expect(h.client.getGroup()?.playback_position).toBe(510_000);
+  });
+
+  it('the watermark is a single slot scoped to the LAST adopted room — a stale stamp for a DIFFERENT room is adopted', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000)); // watermark sp_abc@S
+    // Room B with an ancient stamp: no same-room watermark applies → adopt, slot moves to B.
+    h.client.handleIncoming(stampedStateFrame(S - 100_000, 2_000, 'sp_other'));
+    expect(h.drops).toHaveLength(0);
+    expect(h.client.getGroup()?.group_id).toBe('sp_other');
+    // The slot now guards sp_other only: an older sp_abc replay re-adopts.
+    // Honest boundary of the opportunistic law (cross-room replays are NOT
+    // the echo/backlog class this cures; see SPEC §10.1).
+    h.client.handleIncoming(stampedStateFrame(S - 50_000, 3_000));
+    expect(h.drops).toHaveLength(0);
+    expect(h.client.getGroup()?.group_id).toBe('sp_abc');
+  });
+
+  it('a position REWIND with a fresh stamp is still adopted — the guard keys on the stamp, never the playhead', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000));
+    h.client.handleIncoming(stampedStateFrame(S + 5_000, 1_000)); // server genuinely rewound (seek) — adopt
+    expect(h.drops).toHaveLength(0);
+    expect(h.states).toHaveLength(2);
+    expect(h.client.getGroup()?.playback_position).toBe(1_000);
+  });
+
+  it('untrusted stamps (off-window, non-finite, non-number) read as ABSENT: adopted, never drop, and never poison the watermark', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000)); // watermark S
+    for (const garbage of [5, -5, Number.POSITIVE_INFINITY, Number.NaN, 'x', 9e11]) {
+      h.client.handleIncoming(stampedStateFrame(garbage, 600)); // each treated as absent → adopt
+    }
+    expect(h.drops).toHaveLength(0);
+    expect(h.states).toHaveLength(7);
+    // The real watermark survived every junk adoption — a stale replay is
+    // still convicted against S (9e11 is the LW-050 uptime-clock case).
+    h.client.handleIncoming(stampedStateFrame(S - 10_000, 1_000));
+    expect(h.drops).toHaveLength(1);
+    expect(h.states).toHaveLength(7);
+  });
+
+  it('the watermark survives a voluntary leave and re-join — a reconnected in-flight stale frame for the same room is convicted', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000));
+    h.client.leaveGroup();
+    h.client.joinGroup('sp_abc'); // re-arms the membership latch (c17)
+    h.drops.length = 0;
+    h.states.length = 0;
+    // The deliberate law (SPEC §10.1): the watermark is NOT reset on leave,
+    // because in-flight stale backlog after a reconnect IS the replay class.
+    // A FRESH send-time stamp always outranks it (see next line's control).
+    h.client.handleIncoming(stampedStateFrame(S - 10_000, 1_000));
+    expect(h.drops).toHaveLength(1);
+    expect(h.states).toHaveLength(0);
+    h.client.handleIncoming(stampedStateFrame(S + 1, 510_000)); // honest resume frame adopts
+    expect(h.drops).toHaveLength(1);
+    expect(h.states).toHaveLength(1);
+  });
+
+  it('an involuntary disconnect keeps the watermark — §10.1 item 2 recovery frames with fresh stamps adopt, stale ones drop', () => {
+    const h = makeStampHarness();
+    h.client.handleIncoming(stampedStateFrame(S, 500_000));
+    h.client.onDisconnect(); // transport drop (c17 law: latch stays armed)
+    h.drops.length = 0;
+    h.states.length = 0;
+    h.client.handleIncoming(stampedStateFrame(S + 2_000, 520_000)); // resumed room, fresher stamp → adopt
+    expect(h.drops).toHaveLength(0);
+    expect(h.states).toHaveLength(1);
+    h.client.handleIncoming(stampedStateFrame(S - 10_000, 1_000)); // replay behind the resumed watermark → drop
+    expect(h.drops).toHaveLength(1);
+    expect(h.states).toHaveLength(1);
+  });
+});

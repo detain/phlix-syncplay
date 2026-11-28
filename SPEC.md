@@ -1606,6 +1606,37 @@ stays lawful, and §10.2's recovery re-arms by re-joining. `destroy()` needs no
 latch write; its routing halt already admits zero frames. The ONLY way back to
 adoption is an explicit join: want the room, `joinGroup()` again.
 
+**Stale replay — the opportunistic monotonic-stamp guard.** An in-flight or
+deliberately replayed `syncplay_group_state` carrying an OLDER server stamp
+would otherwise rewind the room whole: the cached playhead jumps back, `onState`
+fires, consumers seek backwards. The envelope `timestamp` orders this: both live
+producers mint it server-side at emit — `phlix-server` `Messages::frame()` strips
+any client-supplied copy of the envelope keys and stamps `microtime`-ms on every
+frame, `phlix-hub` `SyncPlayRelayWorker::canonicalFrame()` does the same with the
+server clock — so within one producer's clock it is a send-time ordering no
+payload writer can forge. A client MUST therefore fold a `group_state` whose
+trusted stamp (finite, epoch-band, unit-normalized — the §4 stamp-trust law) sits
+more than the clock-step tolerance (2000 ms, the estate's own repair-loop
+magnitude) below the stamp of the LAST ADOPTED fold OF THAT ROOM by refusing the
+frame whole through the `'malformed'` drop lane with zero side effects: no
+room-change seek cancel, no store write, no `onState`, no roster diff, no
+identity-mismatch probe. The guard is opportunistic, never stricter
+than the data allows: a stamp absent or untrusted on EITHER side adopts (absence
+is not evidence of staleness); an EQUAL or within-tolerance-older stamp adopts —
+the drop is a strict magnitude comparison, so it CANNOT discard a fresher state
+(same-millisecond refreshes are real on ms clocks). The watermark FOLLOWS every
+adopted trusted stamp in both directions, so a sustained server clock step moves
+the guard with the clock instead of freezing the room behind a stale epoch. The
+slot is single and scoped to the last adopted room — a stale stamp for a
+DIFFERENT room is not the convicted class and adopts, moving the slot — and it is
+deliberately NOT reset by `leaveGroup()` or `onDisconnect()`: the stale backlog
+in flight across a reconnect IS the replay class, and honest fresh frames always
+outrank a surviving watermark. It keys on the stamp, never on the playhead — a
+position rewind behind a fresh stamp is a real server-side seek and adopts. This
+is an ordering law, not frame identification: no dedup/sequence field exists on
+the wire (§4 known limits), so a byte-identical replay of the NEWEST fold still
+adopts (idempotent re-fold, honest position).
+
 ### 10.2 Required recovery sequence
 
 ```
