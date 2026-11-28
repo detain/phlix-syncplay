@@ -31,9 +31,8 @@
  * historical divergences).
  */
 
-import { decodeMessage, encodeMessage, type NowFn } from './framing';
+import { decodeMessage, encodeMessage, isCanonicalFrame, type NowFn } from './framing';
 import {
-  isValidMessageType,
   PROTOCOL_VERSION,
   SYNCPLAY_MESSAGE_TYPES,
   type ChatBroadcastPayload,
@@ -1457,17 +1456,18 @@ export class SyncPlayClient {
       this.options.onFrameDropped?.('undecodable', raw);
       return;
     }
-    if (!isValidMessageType(decoded.type)) {
-      // CONSOLIDATED m19: canonicality is now checked honestly, by the
-      // exported guard, BEFORE the switch. Foreign vocabulary (hub
-      // `pending_command` and any consumer dialect) surfaces on
-      // onUnknownFrame untouched — same behavior the old default arm
-      // provided, now typed as the honest UnknownFrame instead of a cast
-      // that pretended RawMessage.
+    if (!isCanonicalFrame(decoded)) {
+      // CONSOLIDATED m19: canonicality is checked honestly, by the exported
+      // guard, BEFORE the switch. S-syncplay-07: the guard is now the
+      // type-predicate `isCanonicalFrame`, so the negative branch arrives as
+      // the honest UnknownFrame WITHOUT a receiver-side cast. Foreign
+      // vocabulary (hub `pending_command` and any consumer dialect) surfaces
+      // on onUnknownFrame untouched — same behavior the old default arm
+      // provided.
       this.options.onUnknownFrame?.(decoded);
       return;
     }
-    const msg = decoded as RawMessage;
+    const msg = decoded;
 
     // LW-049 (review syncplay__secnet #4) + phlix-syncplay-034: the
     // receiver-side mirror of the server's `protocol_version` VALUE law, on
@@ -1498,7 +1498,10 @@ export class SyncPlayClient {
     // SPY-S15 note still narrate the pre-034 stale-integer arm; their
     // currency rides the S-syncplay-12 stamp of the decode-tolerance note.
     if ('protocol_version' in msg) {
-      const version = (msg as { protocol_version?: unknown }).protocol_version;
+      // S-syncplay-07: honest read — `msg.protocol_version` is typed
+      // `number | undefined` (WireEnvelope), so the value arms below handle
+      // the absent-but-keyed shape directly; no `as` cast laundering.
+      const version = msg.protocol_version;
       if (
         typeof version !== 'number' ||
         !Number.isInteger(version) ||
@@ -1558,7 +1561,7 @@ export class SyncPlayClient {
         break;
       default:
         // S298 (still true) + CONSOLIDATED m19: non-canonical vocabulary now
-        // exits handleIncoming through isValidMessageType ABOVE the switch,
+        // exits handleIncoming through isCanonicalFrame ABOVE the switch,
         // typed as UnknownFrame. This arm keeps its meaning for canonical
         // types with no honest inbound producer (an echoed outbound-only
         // group_create, a stray time_ping): surfaced as unknown-to-this-client

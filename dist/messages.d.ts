@@ -17,7 +17,11 @@
  * Canonical decisions (see SPEC.md for the full rationale):
  * - Every message `type` is prefixed `syncplay_` with an UNDERSCORE separator.
  *   (Roku's `syncplay.` dot prefix is WRONG and must not be used.)
- * - `protocol_version` is `1` and is included on every message.
+ * - Producers stamp `protocol_version` `1` on every message they send. The
+ *   wire decoder tolerates its absence (legacy Tizen wrappers and older
+ *   servers omit the key — LW-049/SPY-S15), which is why the receiving
+ *   envelope `WireEnvelope` types the field optional while the canonical
+ *   `BaseMessage` keeps it required (phlix-syncplay-007 / S-syncplay-07).
  * - Wire field names are snake_case (e.g. `group_id`, `member_id`,
  *   `current_media_id`, `playback_position`, `server_time`, `client_time`).
  */
@@ -150,12 +154,31 @@ export interface SyncPlayGroup {
      */
     has_password?: boolean;
 }
-/** Fields present on every framed SyncPlay message. */
-export interface BaseMessage {
+/**
+ * The envelope a RECEIVER may legitimately see on the wire.
+ *
+ * `protocol_version` is optional HERE because the legacy-unwrap path in
+ * framing.ts (deprecated Tizen `syncplay_*` wrapper) and older server builds
+ * hand through frames that carry no stamp at all — a decoder-mandated
+ * absence, tolerated by the LW-049/SPY-S15 value law (phlix-syncplay-007).
+ * `RawMessage` is built on this shape so decoded frames are typed honestly
+ * instead of via a cast that pretends the stamp is always present.
+ */
+export interface WireEnvelope {
     type: SyncPlayMessageType;
-    protocol_version: number;
+    /** Absent on legacy-wrapped and pre-stamp frames; readers must arm for it. */
+    protocol_version?: number;
     /** Sender wall-clock at send time, ms. Optional on the wire. */
     timestamp?: number;
+}
+/**
+ * The canonical STAMPED envelope: every message this client ENCODES carries
+ * `protocol_version` (`PROTOCOL_VERSION`), so producers keep the required
+ * typing. This is `WireEnvelope` narrowed by the stamp guarantee; the
+ * receiver-side decoded shape is the wider `WireEnvelope` (S-syncplay-07).
+ */
+export interface BaseMessage extends WireEnvelope {
+    protocol_version: number;
 }
 export interface GroupCreatePayload {
     group_name: string;
@@ -587,8 +610,13 @@ export interface InfoPayload {
     member_name?: string;
     data?: Record<string, unknown>;
 }
-/** A decoded raw message: the envelope plus arbitrary payload fields. */
-export type RawMessage = BaseMessage & Record<string, unknown>;
+/**
+ * A decoded raw message: the receiver-side envelope plus arbitrary payload
+ * fields. Built on `WireEnvelope` (not `BaseMessage`) because decoding
+ * legitimately yields frames without a `protocol_version` stamp — honest
+ * typing per phlix-syncplay-007 / S-syncplay-07.
+ */
+export type RawMessage = WireEnvelope & Record<string, unknown>;
 /**
  * A decoded frame the client does not orchestrate: one whose `type` is NOT one
  * of the 19 canonical SyncPlay types, or one of the four canonical types that

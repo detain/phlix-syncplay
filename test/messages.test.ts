@@ -10,13 +10,16 @@ import {
   ALL_MESSAGE_TYPES,
   PROTOCOL_VERSION,
   isValidMessageType,
+  type BaseMessage,
   type PlaybackState,
+  type RawMessage,
   type TimeSyncPayload,
   type HostElectPayload,
 } from '../src/messages';
 import {
   encodeMessage,
   decodeMessage,
+  isCanonicalFrame,
   serializeMessage,
 } from '../src/framing';
 
@@ -309,5 +312,60 @@ describe('HostElectPayload — SPEC §4 field-roster pin (M-SYNCPLAY-08)', () =>
     expect(liveBroadcastFrame).not.toHaveProperty('group_id');
     expect(liveBroadcastFrame.elected_id).toBe('m2');
     expect(liveBroadcastFrame.elected_by).toBe('m1');
+  });
+});
+
+describe('S-syncplay-07 — honest WireEnvelope typing (phlix-syncplay-007)', () => {
+  it('decodes a legacy-wrapped stamp-less frame as a RawMessage that honestly lacks the key', () => {
+    const decoded = decodeMessage(
+      '{"type":"syncplay_group_leave","data":{"group_id":"g1"}}',
+    ) as RawMessage;
+    expect(decoded.type).toBe(SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE);
+    expect(decoded).not.toHaveProperty('protocol_version');
+    expect(decoded.protocol_version).toBeUndefined();
+  });
+
+  it('COMPILE WITNESS: an un-stamped frame literal is assignable to RawMessage', () => {
+    // tsc must accept a decoded-shape frame WITHOUT the stamp. If the typing
+    // is ever laundered back to required on the receiver side, this line is
+    // the TS2741 conviction `npm run build` reports.
+    const unstamped: RawMessage = {
+      type: SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE,
+      group_id: 'g1',
+    };
+    expect(unstamped.protocol_version).toBeUndefined();
+  });
+
+  it('COMPILE WITNESS: BaseMessage (the producer envelope) still REQUIRES the stamp', () => {
+    // @ts-expect-error — S-syncplay-07 split the shapes: WireEnvelope makes the
+    // stamp optional for receivers; BaseMessage keeps it required for senders.
+    // If the required arm is ever relaxed, the unused directive reddens tsc.
+    const missingStamp: BaseMessage = { type: SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE };
+    expect(missingStamp.type).toBe(SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE);
+  });
+
+  it('isCanonicalFrame routes canonicity without a cast — both branches at runtime', () => {
+    const canonical = decodeMessage('{"type":"syncplay_group_state","protocol_version":1,"group_id":"g1"}');
+    const foreign = decodeMessage('{"type":"pending_command","id":7}');
+    expect(canonical).not.toBeNull();
+    expect(foreign).not.toBeNull();
+    if (canonical !== null && isCanonicalFrame(canonical)) {
+      // Compile witness: the narrowed branch exposes the wire stamp as
+      // `number | undefined` (WireEnvelope), not a laundered `number`.
+      const stamp: number | undefined = canonical.protocol_version;
+      expect(stamp).toBe(1);
+    } else {
+      expect.unreachable('canonical vocabulary must narrow to RawMessage');
+    }
+    expect(foreign !== null && isCanonicalFrame(foreign)).toBe(false);
+    if (foreign !== null && !isCanonicalFrame(foreign)) {
+      const rawType: string = foreign.type;
+      expect(rawType).toBe('pending_command');
+    }
+  });
+
+  it('encodeMessage still stamps PROTOCOL_VERSION on every outbound frame', () => {
+    const outbound = encodeMessage(SYNCPLAY_MESSAGE_TYPES.GROUP_LEAVE, {}, () => 1234);
+    expect(outbound.protocol_version).toBe(PROTOCOL_VERSION);
   });
 });

@@ -117,7 +117,7 @@ function d(e) {
 	if (typeof t != "object" || !t || Array.isArray(t)) return null;
 	let n = t;
 	if (typeof n.type != "string") return null;
-	let i = n.data, a = !("protocol_version" in n) && typeof i == "object" && i && !Array.isArray(i) ? (() => {
+	let r = n.data, i = !("protocol_version" in n) && typeof r == "object" && r && !Array.isArray(r) ? (() => {
 		let e = {};
 		for (let t of Object.keys(n)) t !== "data" && Object.defineProperty(e, t, {
 			value: n[t],
@@ -125,15 +125,18 @@ function d(e) {
 			writable: !0,
 			configurable: !0
 		});
-		return l(l({}, i), e);
+		return l(l({}, r), e);
 	})() : n;
-	return r(n.type), a;
+	return f(i), i;
 }
 function f(e) {
+	return typeof e.type == "string" && r(e.type);
+}
+function p(e) {
 	return JSON.stringify(e);
 }
 // src/time-sync.ts
-var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
+var m = 5, h = 1e3, g = 50, _ = .1, v = .99, y = 1.01, b = 1, x = class {
 	constructor(e) {
 		s(this, "samples", []), s(this, "driftRate", 1), s(this, "now", void 0), s(this, "samplesVersion", 0), s(this, "cacheVersion", -1), s(this, "cachedOffset", 0), s(this, "cachedLatency", 0), s(this, "cachedIsStable", !1), this.now = e;
 	}
@@ -190,7 +193,7 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		let t = e[0], n = e[e.length - 1], r = n.timestamp - t.timestamp;
 		if (r <= 0) return;
 		let i = (n.offset - t.offset) / r;
-		this.driftRate = 1 + g * i / 1e3, this.driftRate = Math.min(v, Math.max(_, this.driftRate));
+		this.driftRate = 1 + _ * i / 1e3, this.driftRate = Math.min(y, Math.max(v, this.driftRate));
 	}
 	getDriftRate() {
 		return this.driftRate;
@@ -220,13 +223,13 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 			sampleCount: this.samples.length
 		};
 	}
-}, x = 250, S = class t {
+}, S = 250, C = class t {
 	constructor(e) {
 		var n;
-		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "intendsMembership", !0), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "Host" : n, this.timeSync = new b(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
+		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "intendsMembership", !0), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "Host" : n, this.timeSync = new x(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
 	}
 	static parseSeekThrottleMs(e) {
-		if (e === void 0) return x;
+		if (e === void 0) return S;
 		if (typeof e != "number" || !Number.isFinite(e) || e < 0 || e > 2147483647) throw TypeError(`SyncPlayClient: seekThrottleMs must be a finite number in [0, 2147483647] (0 disables the seek coalescing throttle), got ${String(e)}`);
 		return e;
 	}
@@ -410,73 +413,73 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		if (this.destroyed) return;
 		let n = d(t);
 		if (n === null) {
-			var i, a;
-			(i = (a = this.options).onFrameDropped) == null || i.call(a, "undecodable", t);
+			var r, i;
+			(r = (i = this.options).onFrameDropped) == null || r.call(i, "undecodable", t);
 			return;
 		}
-		if (!r(n.type)) {
-			var o, s;
-			(o = (s = this.options).onUnknownFrame) == null || o.call(s, n);
+		if (!f(n)) {
+			var a, o;
+			(a = (o = this.options).onUnknownFrame) == null || a.call(o, n);
 			return;
 		}
-		let c = n;
-		if ("protocol_version" in c) {
-			let e = c.protocol_version;
+		let s = n;
+		if ("protocol_version" in s) {
+			let e = s.protocol_version;
 			if (typeof e != "number" || !Number.isInteger(e) || e < 1 || e > 1) {
-				var l, u;
-				(l = (u = this.options).onFrameDropped) == null || l.call(u, "malformed", c);
+				var c, l;
+				(c = (l = this.options).onFrameDropped) == null || c.call(l, "malformed", s);
 				return;
 			}
 		}
-		switch (c.type) {
+		switch (s.type) {
 			case e.TIME_PONG:
-				this.handleTimePong(c);
+				this.handleTimePong(s);
 				break;
 			case e.GROUP_STATE:
-				this.handleGroupState(c);
+				this.handleGroupState(s);
 				break;
 			case e.PLAYBACK_PLAY:
-				this.handlePlayback("play", c);
+				this.handlePlayback("play", s);
 				break;
 			case e.PLAYBACK_PAUSE:
-				this.handlePlayback("pause", c);
+				this.handlePlayback("pause", s);
 				break;
 			case e.PLAYBACK_SEEK:
-				this.handleSeek(c);
+				this.handleSeek(s);
 				break;
 			case e.HOST_ELECT:
-				this.handleHostElect(c);
+				this.handleHostElect(s);
 				break;
 			case e.INFO:
-				this.handleInfo(c);
+				this.handleInfo(s);
 				break;
 			case e.ERROR:
-				this.handleError(c);
+				this.handleError(s);
 				break;
 			case e.TYPING:
-				this.handleTyping(c);
+				this.handleTyping(s);
 				break;
 			case e.HOST_TRANSFER:
-				this.handleHostTransfer(c);
+				this.handleHostTransfer(s);
 				break;
 			case e.PLAYBACK_SYNC:
-				this.handlePlaybackSync(c);
+				this.handlePlaybackSync(s);
 				break;
 			case e.TIME_SYNC:
-				this.handleTimeSync(c);
+				this.handleTimeSync(s);
 				break;
 			case e.GROUP_LIST:
-				this.handleGroupList(c);
+				this.handleGroupList(s);
 				break;
 			case e.CHAT:
-				this.handleChat(c);
+				this.handleChat(s);
 				break;
 			case e.PLAYBACK_QUEUE:
-				this.handlePlaybackQueueBroadcast(c);
+				this.handlePlaybackQueueBroadcast(s);
 				break;
 			default:
-				var f, p;
-				(f = (p = this.options).onUnknownFrame) == null || f.call(p, c);
+				var u, p;
+				(u = (p = this.options).onUnknownFrame) == null || u.call(p, s);
 		}
 	}
 	handleTimePong(e) {
@@ -840,6 +843,6 @@ var p = 5, m = 1e3, h = 50, g = .1, _ = .99, v = 1.01, y = 1, b = class {
 		this.send(u(e, t, this.now));
 	}
 };
-export { n as ALL_MESSAGE_TYPES, g as DRIFT_CORRECTION_FACTOR, v as DRIFT_RATE_MAX, _ as DRIFT_RATE_MIN, m as MAX_ACCEPTABLE_RTT, p as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, h as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, S as SyncPlayClient, y as TIME_SYNC_PROTOCOL_VERSION, b as TimeSync, d as decodeMessage, u as encodeMessage, r as isValidMessageType, f as serializeMessage };
+export { n as ALL_MESSAGE_TYPES, _ as DRIFT_CORRECTION_FACTOR, y as DRIFT_RATE_MAX, v as DRIFT_RATE_MIN, h as MAX_ACCEPTABLE_RTT, m as OFFSET_SAMPLE_COUNT, t as PROTOCOL_VERSION, g as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, C as SyncPlayClient, b as TIME_SYNC_PROTOCOL_VERSION, x as TimeSync, d as decodeMessage, u as encodeMessage, f as isCanonicalFrame, r as isValidMessageType, p as serializeMessage };
 
 //# sourceMappingURL=phlix-syncplay.js.map

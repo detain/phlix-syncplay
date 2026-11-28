@@ -93,7 +93,9 @@ export function encodeMessage(
  * comes back as {@link RawMessage}; foreign vocabulary comes back as the
  * honest {@link UnknownFrame} — CONSOLIDATED m19 (review asphp MINOR-7): the
  * old blanket `as RawMessage` promised canonicity the decode never verified,
- * handing the `pending_command` lane compiler-false RawMessages.
+ * handing the `pending_command` lane compiler-false RawMessages. Since
+ * S-syncplay-07 the branch runs through the exported {@link isCanonicalFrame}
+ * predicate, so this function and its callers share one canonicity law.
  */
 export function decodeMessage(raw: unknown): RawMessage | UnknownFrame | null {
   let obj: unknown = raw;
@@ -160,10 +162,25 @@ export function decodeMessage(raw: unknown): RawMessage | UnknownFrame | null {
         })()
       : record;
 
-  // The canonicity check the return type always claimed (CONSOLIDATED m19).
-  return isValidMessageType(record.type)
-    ? (frame as RawMessage)
-    : (frame as UnknownFrame);
+  // The canonicity check the return type always claimed (CONSOLIDATED m19),
+  // asserted through the exported S-syncplay-07 predicate so callers narrow
+  // without a receiver-side cast. RawMessage now types an un-stamped frame
+  // honestly (WireEnvelope), so the positive branch carries no lie even for
+  // legacy-wrapped frames without `protocol_version`.
+  return isCanonicalFrame(frame) ? frame : (frame as UnknownFrame);
+}
+
+/**
+ * Honest canonicity check (phlix-syncplay-007 / S-syncplay-07): a decoded
+ * frame is a `RawMessage` exactly when its `type` is in the canonical
+ * vocabulary — the same law {@link decodeMessage}'s branch has always
+ * applied internally. Receivers should call THIS instead of casting a
+ * `RawMessage | UnknownFrame` union to RawMessage.
+ */
+export function isCanonicalFrame(
+  frame: { type: unknown } | Record<string, unknown>,
+): frame is RawMessage {
+  return typeof frame.type === 'string' && isValidMessageType(frame.type);
 }
 
 /** Serialize a raw message object to a JSON string for transmission. */

@@ -71,8 +71,20 @@ export declare function encodeMessage(type: SyncPlayMessageType, payload: Record
  * comes back as {@link RawMessage}; foreign vocabulary comes back as the
  * honest {@link UnknownFrame} — CONSOLIDATED m19 (review asphp MINOR-7): the
  * old blanket `as RawMessage` promised canonicity the decode never verified,
- * handing the `pending_command` lane compiler-false RawMessages.
+ * handing the `pending_command` lane compiler-false RawMessages. Since
+ * S-syncplay-07 the branch runs through the exported {@link isCanonicalFrame}
+ * predicate, so this function and its callers share one canonicity law.
  */
 export declare function decodeMessage(raw: unknown): RawMessage | UnknownFrame | null;
+/**
+ * Honest canonicity check (phlix-syncplay-007 / S-syncplay-07): a decoded
+ * frame is a `RawMessage` exactly when its `type` is in the canonical
+ * vocabulary — the same law {@link decodeMessage}'s branch has always
+ * applied internally. Receivers should call THIS instead of casting a
+ * `RawMessage | UnknownFrame` union to RawMessage.
+ */
+export declare function isCanonicalFrame(frame: {
+    type: unknown;
+} | Record<string, unknown>): frame is RawMessage;
 /** Serialize a raw message object to a JSON string for transmission. */
 export declare function serializeMessage(message: RawMessage): string;
