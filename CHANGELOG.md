@@ -10,7 +10,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 Release-integrity cut: folds the whole post-v0.1.9 campaign — the walk
 `git log --format='%s%b' v0.1.9..HEAD | grep -oE 'S-syncplay-[0-9]+' | sort -u` carries
 43 distinct `S-syncplay-*` tokens (IDs 01-44 minus the 28 gap); excluding this cut's own
-02 stamp — both release commit subjects carry it — that leaves 42 campaign steps: the
+02 stamp — the [S-syncplay-02] stamp rides the release-chain commit subjects, not a
+campaign step — that leaves 42 campaign steps: the
 32 IDs named below are exactly the steps that carry a row, banked or errata, and the ten
 that banked none (06, 10, 13, 19, 26, 31, 33, 34, 36, 42) were spec-doc/test/comment-only
 passes — plus the three SPY-era rows folded from Unreleased below, including one
