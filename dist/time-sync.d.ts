@@ -11,12 +11,12 @@
  * latency, per-sample offset) mirrors the server; since SPEC §5's
  * `S-syncplay-01` ruling the OFFSET SIGN follows classical NTP θ
  * (`t2 - t1 - oneWay`), which the shipped server does not yet compute —
- * its twin flip at `TimeSync.php:153` was ruled in the same estate release
+ * its twin flip at `TimeSync.php:153` @262f01d3 was ruled in the same estate release
  * and is routed to the phlix-server wave. Until that row lands, the two
  * sides disagree on the local estimate; that is a SAFE divergence (the
  * offset never crosses the wire — ping/pong carry raw t1/t2 only, see the
  * aggregation note below). The console port
- * (`phlix-console-client/src/Api/SyncPlay/TimeSync.php:60`) already agrees
+ * (`phlix-console-client/src/Api/SyncPlay/TimeSync.php:60` @9ef70cb) already agrees
  * with this ruling: it computes `t2 - t1 - rtt/2` from the receive side.
  *
  * ## Documented divergence (offset aggregation)

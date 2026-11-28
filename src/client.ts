@@ -123,7 +123,7 @@ export interface SyncPlayClientOptions {
    * What the server stamps, per carrier (both-sides verified):
    *  - Direct `:8097` (server WS + REST): the authenticated user id — the
    *    JWT subject. The create/join acks echo it as `your_id` on
-   *    `syncplay_group_state` (`SyncPlayManager.php:1853`, `:1909` —
+   *    `syncplay_group_state` (`SyncPlayManager.php:1853`, `:1909` @c904aa4d —
    *    `$connection->getUserId()`, @c904aa4d); REST mutations set
    *    `$memberId = $userId` from `$request->userId`
    *    (`SyncPlayController.php:173`, `:267`, `:305` @c904aa4d — S289
@@ -133,7 +133,7 @@ export interface SyncPlayClientOptions {
    *    The consumer knows this id BEFORE dialing — it is what the login /
    *    auth layer holds.
    *  - Hub relay `:8804`: a hub-generated PER-CONNECTION uuid
-   *    (phlix-hub `SyncPlayRelayWorker.php:694`, `generateClientId()`
+   *    (phlix-hub `SyncPlayRelayWorker.php:694` @8913ae11, `generateClientId()`
    *    `:2766-2779` @8913ae11), surfaced as `your_id` on the join ack
    *    (`:2059-2061`) and used as `member_id`/`host_id` on every later
    *    frame (`:1954` host_id, `:2186` member_id). It is NOT knowable
@@ -180,9 +180,9 @@ export interface SyncPlayClientOptions {
    * only WebSocket limiter guards the CONNECT handshake (30/60s, phlix-server
    * `RateLimitProfiles.php::WS_CONNECT`), its `JoinPasswordThrottle` guards
    * wrong group passwords only, and its `queue_limit_exceeded`
-   * (`SyncPlayManager.php:1256`) caps media-QUEUE depth, not command rate —
+   * (`SyncPlayManager.php:1256` @84e55800) caps media-QUEUE depth, not command rate —
    * while `handleSeek` rebroadcasts EVERY `syncplay_playback_seek` frame to
-   * the whole group (`SyncPlayManager.php:1182`). A TV remote key-repeats at
+   * the whole group (`SyncPlayManager.php:1182` @84e55800). A TV remote key-repeats at
    * 10–30 events/s, so each un-coalesced hold = 10-30 full player seeks
    * (HLS segment reload, buffer stall) per second on every screen in the room.
    *
@@ -338,8 +338,8 @@ export interface SyncPlayClientOptions {
    *  — wire value `syncplay_typing`; the phlix-server constant is
    *  `Messages::TYPE_CHAT_TYPING`).
    *  Unlike chat, this fan-out EXCLUDES the sender on both carriers (phlix-server
-   *  `SyncPlayManager.php:1377-1380` passes `[$memberId]`; hub
-   *  `SyncPlayRelayWorker.php:1825-1828` passes `$client->clientId`), so your own
+   *  `SyncPlayManager.php:1377-1380` @84e55800 passes `[$memberId]`; hub
+   *  `SyncPlayRelayWorker.php:1825-1828` @f85f48ec passes `$client->clientId`), so your own
    *  indicator never echoes back here. */
   onMemberTyping?: (_memberId: string, isTyping: boolean) => void;
   /**
@@ -353,8 +353,8 @@ export interface SyncPlayClientOptions {
    *
    * SELF-ECHO ARRIVES — this is wire law, not a leak: both carriers fan chat
    * out INCLUDING the sender (server `broadcastToGroup` default
-   * `$excludeIds = []`, `SyncPlayManager.php:1932`, chat call passes none
-   * :1323; hub call omits the exclusion, `SyncPlayRelayWorker.php:1795`).
+   * `$excludeIds = []`, `SyncPlayManager.php:1932` @84e55800, chat call passes none
+   * :1323 @84e55800; hub call omits the exclusion, `SyncPlayRelayWorker.php:1795` @f85f48ec).
    * The library deliberately does NOT suppress the echo here: command-echo
    * suppression keys on ctor-`memberId` vs stamped id, and that identity is
    * UNRECONCILED (SPEC §9; the review-M5 class — a fabricated ctor id would
@@ -368,7 +368,7 @@ export interface SyncPlayClientOptions {
    *
    * `_timestampMs` is the envelope `timestamp` — the server's send time,
    * authoritative MILLISECONDS on both carriers (S417;
-   * `Messages.php:924-927`, `SyncPlayRelayWorker.php:1230`). `undefined` on
+   * `Messages.php:924-927` @84e55800, `SyncPlayRelayWorker.php:1230` @f85f48ec). `undefined` on
    * hand-built frames that omitted it AND on stamps that fail the shared
    * sane-stamp law ({@link SyncPlayClient.serverTimeOrNow}'s finite AND ≥1000
    * AND LW-050-window core, phlix-syncplay-049 — a forged epoch-zero or
@@ -406,7 +406,7 @@ export interface SyncPlayClientOptions {
    * `nudge` (M-SYNCPLAY-08) is the S446 soft-desync correction object riding
    * the SAME frame family: defined only on the directed out-of-sync frame the
    * `:8097` server unicasts to the drifting member (phlix-server
-   * `SyncPlayManager.php:1569-1585` — its own echo and every hub-relay frame
+   * `SyncPlayManager.php:1569-1585` @84e55800 — its own echo and every hub-relay frame
    * leave it `undefined`, absent ≠ zeroed, SPEC §4/§8.4). On a directed frame
    * `_memberId` is THIS client's id and the four state args carry the same
    * authoritative group state as the echo; apply `nudge.suggested_rate`
@@ -430,7 +430,7 @@ export interface SyncPlayClientOptions {
    * S446 rate-policy delivery, dedicated hook (phlix-syncplay-017): fires
    * ONLY when a `syncplay_playback_sync` frame carried a `nudge` object —
    * the directed out-of-sync correction the `:8097` server unicasts to the
-   * drifting member (`SyncPlayManager.php:1569-1585`). The group echo and
+   * drifting member (`SyncPlayManager.php:1569-1585` @84e55800). The group echo and
    * every hub-relay frame carry no nudge and fire NOTHING here (absent ≠
    * zeroed, SPEC §4/§8.4).
    *
@@ -439,11 +439,11 @@ export interface SyncPlayClientOptions {
    * half in adoption — positional arity collapse. A NAMED option makes
    * ignoring the correction a visible, deliberate omission. Apply
    * `nudge.suggested_rate` as the server's "nudge, never seek" policy
-   * (`GroupState.php:39`) commands — do NOT seek in response.
+   * (`GroupState.php:39` @84e55800) commands — do NOT seek in response.
    *
    * `_memberId` is the frame's `member_id`: per wire law the DRIFTING
    * MEMBER's own id on a directed frame (recipient is the one nudged,
-   * `SyncPlayManager.php:1570`). `_nudge` is the SAME normalized object
+   * `SyncPlayManager.php:1570` @84e55800). `_nudge` is the SAME normalized object
    * delivered as the 5th {@link onPlaybackSync} argument (per-field
    * narrowing, every field optional). Ordering: fires after
    * `onPlaybackSync` for the same frame; like every callback here it is
@@ -457,7 +457,7 @@ export interface SyncPlayClientOptions {
    * the server's UNICAST reply to a `syncplay_time_sync` request. Units are
    * named per-field — `serverTimeSec` is UNIX seconds (the `:8097` seconds
    * quirk), `offsetMs`/`latencyMs` are ms. Server wire truth:
-   * `SyncPlayManager.php:1650-1658`. The pre-fix `(serverTime, clientTime)`
+   * `SyncPlayManager.php:1650-1658` @bc3b9b33. The pre-fix `(serverTime, clientTime)`
    * signature modeled a fabricated frame: the live wire carries no
    * `client_time`, so consumers silently received a defaulted `0`.
    */
@@ -478,7 +478,7 @@ export interface SyncPlayClientOptions {
    * {@link QueueBroadcastPayload}. (M-SYNCPLAY-11: the frame used to hit a
    * silent-ignore arm although SPEC §4 promised "verbatim getState()" queue
    * currency — and the server does NOT rebroadcast `group_state` after a
-   * queue update (`SyncPlayManager.php:1271-1278` broadcasts + publishes an
+   * queue update (`SyncPlayManager.php:1271-1278` @84e55800 broadcasts + publishes an
    * internal HTTP snapshot only), so before this callback a next-up UI had
    * either to re-poll or to sniff raw frames around `handleIncoming` — the
    * divergence economy this package exists to abolish.)
@@ -493,7 +493,7 @@ export interface SyncPlayClientOptions {
    * onChat rationale applies verbatim). Refusals never reach here: an
    * over-cap or non-host submission is answered with an error frame
    * (`syncplay.queue_limit_exceeded` :1253-1263 / `NOT_HOST` :1219, hub
-   * `SyncPlayRelayWorker.php:1707` / overflow :1748-1757) and arrives via `onError`, with the
+   * `SyncPlayRelayWorker.php:1707` @f85f48ec / overflow :1748-1757) and arrives via `onError`, with the
    * live queue left UNTOUCHED.
    */
   onQueueChanged?: (_queue: PlaybackQueueItem[]) => void;
@@ -788,7 +788,7 @@ export class SyncPlayClient {
    * (the dead-host bug class, SPEC §9) until the consumer reconciles through
    * the seam. Server truth: `host_id` is always the derived id
    * (`SyncPlayManager.php` groups key members by `$connection->getUserId()`;
-   * hub rooms key by `$client->clientId`, `SyncPlayRelayWorker.php:1396`).
+   * hub rooms key by `$client->clientId`, `SyncPlayRelayWorker.php:1041` @f85f48ec).
    */
   isHost(): boolean {
     return this.group !== null && this.group.host_id === this.memberId;
@@ -1320,13 +1320,13 @@ export class SyncPlayClient {
   /**
    * Send a chat message to the group. Outbound shape mirrors the server's own
    * factory `Messages::chatMessage` (phlix-server
-   * `src/Session/SyncPlay/Messages.php:564-574`): `group_id` + this client's
+   * `src/Session/SyncPlay/Messages.php:564-574` @84e55800): `group_id` + this client's
    * self-asserted `member_id` + `message`.
    *
    * Producer law this method deliberately does NOT paper over (each half is
    * documented on {@link ChatBroadcastPayload} with cites):
    *  - the server IGNORES the claimed `member_id` and stamps the
-   *    authenticated id on the rebroadcast (S289, `SyncPlayManager.php:1297`);
+   *    authenticated id on the rebroadcast (S289, `SyncPlayManager.php:1297` @84e55800);
    *  - a blank/whitespace `message` is dropped IN SILENCE on both carriers
    *    (server :1314-1316, hub :1791-1793) — no error frame, no echo. Gate
    *    your own senders (e.g. disable Send on empty) if you want that UX
@@ -1353,7 +1353,7 @@ export class SyncPlayClient {
    * Announce typing state (`syncplay_typing`, {@link SyncPlayClientOptions.onMemberTyping}
    * is the inbound arm). Shape mirrors `Messages::chatTyping` (phlix-server
    * `Messages.php:604-614` @ `262f01d3`). Producers read `is_typing` as `=== true` or the
-   * legacy `'1'` string (server `SyncPlayManager.php:1485`, hub
+   * legacy `'1'` string (server `SyncPlayManager.php:1485` @262f01d3, hub
    * `SyncPlayRelayWorker.php:2623-2625` @ `65a0bc9d`) — a real boolean passes cleanly.
    * Identity is again server-derived (S289 :1473-1474). Unlike chat, the typing
    * fan-out EXCLUDES the sender (server `[$memberId]` :1490, hub
@@ -1861,12 +1861,12 @@ export class SyncPlayClient {
    * The two carriers stamp the SAME field in DIFFERENT units — a per-carrier
    * split-brain invisible at the API:
    *  - `:8097` (phlix-server `SyncPlayManager`) stamps UNIX **seconds**: the
-   *    playback_sync group echo (`SyncPlayManager.php:1506` `$serverTime =
+   *    playback_sync group echo (`SyncPlayManager.php:1506` @84e55800 `$serverTime =
    *    time();` → broadcast `:1523`), the S446 nudge echo (`:1575`), and the
    *    play/pause/seek echo fallback when the sender omitted `server_time`
    *    (`:1076/:1128/:1175` `?? time()`);
-   *  - the hub relay stamps **milliseconds** (`SyncPlayRelayWorker.php:1105/
-   *    :1603` `self::nowMs()`), and its command echoes pass the sender's own
+   *  - the hub relay stamps **milliseconds** @f85f48ec (`SyncPlayRelayWorker.php:1143/
+   *    :1610` `self::nowMs()`), and its command echoes pass the sender's own
    *    ms stamp through `canonicalInt` (`:1535`).
    *
    * Handing a raw seconds stamp to the all-ms consumer contract
@@ -2451,8 +2451,8 @@ export class SyncPlayClient {
       // producers emit `host_elect` only on the host-LEAVE path, and on that
       // path `elected_by` IS the departing member's id (the same broadcasts
       // the {@link HostElectPayload} docblock pins: phlix-server
-      // `SyncPlayManager.php:941-944`, phlix-hub
-      // `SyncPlayRelayWorker.php:2073-2075`). The `:8097` surface broadcasts
+      // `SyncPlayManager.php:941-944` @814369eb, phlix-hub
+      // `SyncPlayRelayWorker.php:2073-2075` @f26eecad). The `:8097` surface broadcasts
       // no follow-up state, so pre-fix the departed host stayed a permanent
       // ghost in the cached roster. Drop it; the `foldHostId` below already
       // fixed the crown (W-min119 M-SYNCPLAY-15). Self-eviction guard: a
@@ -2692,7 +2692,7 @@ export class SyncPlayClient {
     );
     // S446 soft-correction carry (M-SYNCPLAY-08): the `:8097` server unicasts
     // a `nudge` object on the directed out-of-sync frame
-    // (`SyncPlayManager.php:1569-1585`) riding this SAME type. Before this it
+    // (`SyncPlayManager.php:1569-1585` @84e55800) riding this SAME type. Before this it
     // was dropped on the floor here, so embedders could not implement the
     // owner-ruled "nudge, never seek" correction at all. Delivered as the
     // 5th (additive, BREAKING-free) argument; `undefined` whenever the frame
@@ -2710,7 +2710,7 @@ export class SyncPlayClient {
   }
 
   private handleTimeSync(msg: RawMessage): void {
-    // Server wire truth: SyncPlayManager.php:1650-1658 — seven fields, mixed
+    // Server wire truth: SyncPlayManager.php:1650-1658 @bc3b9b33 — seven fields, mixed
     // units, NO `client_time`. Parse-at-the-boundary: an advisory snapshot is
     // only meaningful whole, so a frame failing the real shape is DROPPED
     // (handleGroupList precedent). The pre-fix code read the fabricated

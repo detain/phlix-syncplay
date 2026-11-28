@@ -287,7 +287,7 @@ export interface PlaybackSeekPayload {
  * One playback-queue entry, exactly as the live producers emit it.
  *
  * `:8097` `phlix-server`: `GroupState::getState()` nests `$this->playbackQueue`
- * under `group_state.group.queue` (`GroupState.php:1081`, inside `getState()`
+ * under `group_state.group.queue` (`GroupState.php:1081` @c904aa4d, inside `getState()`
  * from :1059, @c904aa4d), and `SyncPlayManager.php:1295-1297` (@c904aa4d)
  * broadcasts the same array under `syncplay_playback_queue`; items are built
  * by `GroupState::addToQueue()` (`GroupState.php:921-926`, @c904aa4d):
@@ -328,10 +328,10 @@ export type PlaybackSyncNudgeDirection = 'behind' | 'ahead';
 /**
  * The S446 soft-desync correction object riding a server-DIRECTED
  * `syncplay_playback_sync` frame ("a rate-limited NUDGE — never a seek",
- * phlix-server `GroupState.php:39` policy header). Emitted ONLY by
+ * phlix-server `GroupState.php:39` @84e55800 policy header). Emitted ONLY by
  * `SyncPlayManager::sendOutOfSyncNudge()`, unicast to the member whose
  * just-ingested position fell outside the group tolerance (guard
- * phlix-server `src/Session/SyncPlay/SyncPlayManager.php:1529-1531`,
+ * phlix-server `src/Session/SyncPlay/SyncPlayManager.php:1529-1531` @84e55800,
  * @84e55800); the group echo (:1517-1524) NEVER carries it, and the
  * `:8804` hub relay produces no nudge at all (phlix-hub
  * `src/SyncPlay/SyncPlayRelayWorker.php` has zero nudge producers;
@@ -360,7 +360,7 @@ export interface PlaybackSyncNudge {
   tolerance_ms?: number;
   /**
    * Minimum spacing before the SAME member can be nudged again —
-   * `GroupState::NUDGE_COOLDOWN_MS` = 1000 ms (`GroupState.php:157`,
+   * `GroupState::NUDGE_COOLDOWN_MS` = 1000 ms (`GroupState.php:157` @c904aa4d,
    * @c904aa4d; slot claim `SyncPlayManager.php:1561`, consumed on the
    * wire at :1583).
    */
@@ -373,8 +373,8 @@ export interface PlaybackSyncPayload {
    * MEMBER's own id (:1570) — the recipient is the one nudged, so
    * `member_id === your id` + `nudge` present identifies the directed frame. */
   member_id: string;
-  /** Stamped by BOTH live producers: echo phlix-server `SyncPlayManager.php:1520`,
-   * nudge :1572, hub relay phlix-hub `SyncPlayRelayWorker.php:1676`; nullable.
+  /** Stamped by BOTH live producers: echo phlix-server `SyncPlayManager.php:1520` @84e55800,
+   * nudge :1572, hub relay phlix-hub `SyncPlayRelayWorker.php:1676` @f85f48ec; nullable.
    * Not delivered as its own `onPlaybackSync` argument — read it off the
    * cached group (`SyncPlayGroup.current_media_id`). */
   current_media_id?: string | null;
@@ -382,16 +382,16 @@ export interface PlaybackSyncPayload {
   is_playing: boolean;
   /**
    * WIRE UNITS MIX PER CARRIER (SPEC §8.4): UNIX **seconds** on `:8097`
-   * (stamp site phlix-server `SyncPlayManager.php:1506` `time()`, echo
+   * (stamp site phlix-server `SyncPlayManager.php:1506` @84e55800 `time()`, echo
    * field :1523, nudge field :1575, @84e55800) vs **milliseconds**
-   * on the hub relay (field phlix-hub `SyncPlayRelayWorker.php:1679`
+   * on the hub relay (field phlix-hub `SyncPlayRelayWorker.php:1679` @f85f48ec
    * `nowMs()`, @f85f48ec). `SyncPlayClient.serverTimeToMs` normalizes
    * every delivered `server_time` to ms — the §4 ms law holds for consumers.
    */
   server_time: number;
   /**
    * `:8097` server ONLY, and only on the directed out-of-sync frame
-   * (`SyncPlayManager.php:1569-1585`); ABSENT on the group echo and on
+   * (`SyncPlayManager.php:1569-1585` @84e55800); ABSENT on the group echo and on
    * every hub-relay frame — absent, never zeroed (M-SYNCPLAY-08).
    */
   nudge?: PlaybackSyncNudge;
@@ -428,13 +428,13 @@ export interface TypingPayload {
  *    `member_name` = the relay display name, same silent-blank law (:1791-1793).
  * Envelope `timestamp` is authoritative MILLISECONDS on both carriers
  * (phlix-server `Messages::getCurrentTimestamp()` = `microtime(true) * 1000`,
- * `Messages.php:924-927`; hub `canonicalFrame` stamps `self::nowMs()`,
- * `SyncPlayRelayWorker.php:1230`) — the former seconds-level payload
+ * `Messages.php:924-927` @84e55800; hub `canonicalFrame` stamps `self::nowMs()`,
+ * `SyncPlayRelayWorker.php:1230` @f85f48ec) — the former seconds-level payload
  * duplicate was dropped at S417.
  * Fan-out INCLUDES the sender on both carriers: the server call passes no
  * exclusion list and `broadcastToGroup` defaults `$excludeIds = []`
- * (`SyncPlayManager.php:1932`), the hub calls `broadcastCanonical` without an
- * `$excludeClientId` (`SyncPlayRelayWorker.php:1795`). Your own message comes
+ * (`SyncPlayManager.php:1932` @84e55800), the hub calls `broadcastCanonical` without an
+ * `$excludeClientId` (`SyncPlayRelayWorker.php:1795` @f85f48ec). Your own message comes
  * back to you as a chat frame — see {@link SyncPlayClientOptions.onChat}.
  * (The `handleChatMessage` @fires docblock's "excluding sender" is stale
  * server-side prose — the code carries no exclusion; the sibling
@@ -453,7 +453,7 @@ export interface ChatBroadcastPayload {
  * payload carries EXACTLY ONE key beyond the envelope:
  *  - `:8097` phlix-server `SyncPlayManager::handlePlaybackQueue` broadcast
  *    :1271-1273 (@84e55800): `queue` = `GroupState::getPlaybackQueue()` —
- *    full four-field items per `addToQueue()` (`GroupState.php:921-926`,
+ *    full four-field items per `addToQueue()` (`GroupState.php:921-926` @c904aa4d,
  *    @c904aa4d:
  *    `media_id`, `media_info`, `added_at` UNIX seconds, `added_by` nullable).
  *  - `:8804` phlix-hub relay `handleCanonicalPlaybackQueue` broadcast
@@ -550,7 +550,7 @@ export interface TimePongPayload {
 
 /**
  * TIME_SYNC as the server emits it — SERVER WIRE TRUTH,
- * `phlix-server/src/Session/SyncPlay/SyncPlayManager.php:1650-1658`
+ * `phlix-server/src/Session/SyncPlay/SyncPlayManager.php:1650-1658` @bc3b9b33
  * (`handleTimeSync`, reply sent with `Messages::frame` over the requesting
  * connection). The previous model here was FABRICATED: it promised a
  * `client_time` the server has never emitted (the handler silently defaulted
@@ -613,7 +613,7 @@ export interface TimeSyncState {
  *    `groupSummary()` :1740-1750 (`'id'`:1743 `'name'`:1744 `'member_count'`:1745
  *    `'has_password'`:1746 `'current_media'`:1747 `'is_playing'`:1748;
  *    `current_media` is `GroupState::getCurrentMediaId(): ?string`,
- *    GroupState.php:565);
+ *    GroupState.php:565 @84e55800);
  *  - `:8804`: `phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php`
  *    `handleCanonicalGroupList()` row literal :1938-1943 (deliberately mirrors
  *    the Server summary; `has_password` is the truthful constant `false`).
