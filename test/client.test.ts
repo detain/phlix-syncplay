@@ -426,6 +426,97 @@ describe('SyncPlayClient — onDisconnect / reconnect reset (B4)', () => {
     h.client.handleIncoming(groupStateMessage('host1', 'me'));
     expect(h.client.getGroup()).not.toBeNull();
   });
+
+  it('CONSOLIDATED m22 (phlix-syncplay-027): post-reconnect pong rebuild — a LIVE-echo straggler against a stale-generation slot never advances the fresh window', () => {
+    // The recovery-sequence gap this pins is the ECHO arm of the SPY-S7
+    // generation law (SPEC §10.1 / src/client.ts handleTimePong): the
+    // pre-existing pin only exercises the NON-echo (legacy) shape. The live
+    // server ALWAYS echoes `client_time`, and a straggler whose echo EQUALS
+    // the slot's send time passes the echo-match — only `pingEpoch !==
+    // connectionEpoch` can refuse it. Pre-cure the echo arm was exempt
+    // (`echoed === null && …`), so this exact frame reached the estimator:
+    // with t3 == t2 the RTT never contains t2, the stale quad was VALID on
+    // its face (rtt 50 ≤ MAX_ACCEPTABLE_RTT) and it poisoned the freshly
+    // reset window with a cross-generation offset. The pin proves the
+    // refusal is epoch-sourced (not echo-sourced) and that the full
+    // §10.2 rebuild — re-join → fresh ping → matching pong — restores a
+    // clean window on the new generation.
+    const h = makeHarness();
+    const priv = h.client as unknown as { lastPingSendTime: number | null };
+
+    // Generation 0: established session — one accepted sample, offset 100.
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.clock.set(1000);
+    h.client.pingTime();
+    h.clock.set(1001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: 1100,
+    });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+    expect(h.client.getTimeSync().getOffset()).toBe(100);
+
+    // Socket drops; consumer calls onDisconnect BEFORE reconnecting (SPEC §10
+    // recovery law): samples reset, slot dropped, generation advanced — the
+    // rejection streak also starts honest at zero.
+    h.client.onDisconnect();
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(h.degraded).toHaveLength(0);
+    // The onSync log is cumulative consumer history (onDisconnect resets the
+    // measurement WINDOW, not the callback ledger): pin the straggler leg as
+    // a no-GROWTH delta against the generation-0 seed's single entry.
+    const syncsAfterReset = h.syncs.length;
+    expect(syncsAfterReset).toBe(1);
+
+    // Simulate the stale-generation slot still held (the SPY-S7 pattern on
+    // this file): `pingEpoch` stays 0 while `connectionEpoch` is now 1.
+    priv.lastPingSendTime = 1000;
+
+    // The straggler: LIVE-WIRE echo shape — client_time 1000 EQUALS the slot,
+    // so the echo-match lets it through; server_time is deliberately far off
+    // so that were the epoch check absent, the accepted sample (offset
+    // 2100 - 1000 - 25 = 1075) would be visibly absurd. Refused whole by the
+    // generation law: slot untouched, nothing sampled, no rejection counted
+    // (the frame never reaches the estimator — the refusal is upstream of it).
+    h.clock.set(1050);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: 2100,
+    });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(h.syncs).toHaveLength(syncsAfterReset); // no new sync fired
+    expect(h.degraded).toHaveLength(0);
+    expect(priv.lastPingSendTime).toBe(1000);
+
+    // Rebuild on generation 1: re-join, resume pinging, matching pong. The
+    // simulated stale slot (t1=1000) is aged out by the M-SYNCPLAY-13 escape
+    // (age 1001 > MAX_ACCEPTABLE_RTT at t=2001) — the new ping owns the slot
+    // and re-stamps pingEpoch to the current generation. Window rebuilds
+    // clean: exactly one fresh sample, sane offset.
+    h.client.joinGroup('sp_abc');
+    h.client.handleIncoming(groupStateMessage('host1', 'me'));
+    h.clock.set(2001);
+    h.client.pingTime();
+    const genOnePing = h.sent.filter(
+      (m) => m.type === SYNCPLAY_MESSAGE_TYPES.TIME_PING,
+    ).at(-1);
+    expect(genOnePing).toMatchObject({ client_time: 2001 });
+    h.clock.set(2002);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 2001,
+      server_time: 2101,
+    });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+    expect(h.client.getTimeSync().getOffset()).toBe(100); // rtt 1 → oneWay 0, θ = 100
+    expect(h.syncs).toHaveLength(syncsAfterReset + 1); // the rebuild round fired
+    expect(h.syncs.at(-1)).toMatchObject({ offset: 100, isStable: false }); // single sample: below OFFSET_SAMPLE_COUNT floor
+  });
 });
 
 describe('SyncPlayClient — host playback sends', () => {
@@ -1841,6 +1932,61 @@ describe('SyncPlayClient — pingTime single-flight (W-min123 M-SYNCPLAY-13, rev
     h.clock.set(2001); // one ms past: its pong could only be rtt-rejected → re-ping
     h.client.pingTime();
     expect(pings(h.sent)).toHaveLength(2);
+  });
+
+  it('CONSOLIDATED m22 (phlix-syncplay-026): a BACKWARD clock step escapes the single-flight slot instead of wedging it', () => {
+    // The forward-ageing escape above only fires for `age >= 0`. An NTP
+    // step/slew (or a manual set) that moves the wall clock BACKWARDS makes
+    // the age of an outstanding ping NEGATIVE — and a negative age passes
+    // `<= MAX_ACCEPTABLE_RTT` forever. Pre-cure, every later pingTime()
+    // returned early on that test: the slot stayed wedged to the stale send
+    // time, the estimator starved, and the client served stale offsets with
+    // full confidence. Current law (src/client.ts pingTime, the `age >= 0 &&`
+    // guard): a negative age is NOT a fresh ping — re-ping and let the newest
+    // send time own the slot. Pinned end-to-end: the escape, the stale-echo
+    // refusal it enables (the frame that WOULD have paired across the step
+    // can no longer match the slot — and crucially never reaches the
+    // estimator, so no rejection streak either), and the sane rebuild on the
+    // stepped clock.
+    const h = makeHarness();
+    h.clock.set(2000);
+    h.client.pingTime(); // slot owned by t1=2000
+
+    h.clock.set(1500); // wall clock steps BACK 500 ms mid-flight
+    h.client.pingTime();
+    const rounds = h.sent.filter((m) => m.type === SYNCPLAY_MESSAGE_TYPES.TIME_PING);
+    expect(rounds).toHaveLength(2); // escape fired — not swallowed by single-flight
+    expect(rounds[1]).toMatchObject({ client_time: 1500 }); // newest stamp owns the slot
+
+    // The straggler echoing the PRE-STEP t1 arrives on the stepped clock.
+    // Its echo no longer matches (slot is 1500 now): refused whole, slot
+    // kept, nothing sampled, and the round never reaches the estimator —
+    // so the rejection streak stays empty (absurd-offset state is impossible
+    // by construction: rtt = t4 - t1 - (t3 - t2) would have been -499 here,
+    // the estimator's own rtt < 0 law is the second belt).
+    h.clock.set(1501);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 2000,
+      server_time: 2600,
+    });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(0);
+    expect(h.syncs).toHaveLength(0);
+    expect(h.degraded).toHaveLength(0);
+
+    // Recovery on the stepped clock: the fresh round (t1=1500) completes and
+    // seeds a SANE sample — offset 1600 - 1500 - oneWay(trunc(2/2)=1) = 99.
+    h.clock.set(1502);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1500,
+      server_time: 1600,
+    });
+    expect(h.client.getTimeSync().getSampleCount()).toBe(1);
+    expect(h.client.getTimeSync().getOffset()).toBe(99);
+    expect(h.syncs).toHaveLength(1);
   });
 });
 
