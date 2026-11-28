@@ -103,12 +103,13 @@ Every message — inbound or outbound — is a single flat JSON object:
 >   / no-version lane and are accepted. The socket SURVIVES the refusal — only
 >   that one frame is dropped, so a mixed-version peer keeps its other traffic.
 > - **Hub relay `:8804`.** The relay's canonical dispatch keys on `type` alone
->   (`SyncPlayRelayWorker.php:1235-1296`, era `phlix-hub` @ `3c4723f4`, the
->   block's other three hub coordinates below measured at the same tree and
->   still exact at the current tip `31f694f4`); it stamps `CANONICAL_PROTOCOL_VERSION`
->   (`1`) on every OUTBOUND frame (`:254`, applied `:1687`) but does NOT
+>   (`SyncPlayRelayWorker.php:1235-1296`, era `phlix-hub` @ `3c4723f4`; the
+>   block's other three hub coordinates below were measured at that same tree
+>   and re-rotated at the current tip `65a0bc9d` — const `:254`→`:260`, applied
+>   `:1687`→`:1902`, error `:1269`→`:1479`); it stamps `CANONICAL_PROTOCOL_VERSION`
+>   (`1`) on every OUTBOUND frame (`:260`, applied `:1902` @ `65a0bc9d`) but does NOT
 >   value-validate an inbound `protocol_version` — there is no version gate on
->   that carrier today. The hub's `hub.protocol_unsupported` error (`:1269`) is
+>   that carrier today. The hub's `hub.protocol_unsupported` error (`:1479` @ `65a0bc9d`) is
 >   the `syncplay_time_sync` STATUS-QUERY refusal (the relay holds no server
 >   clock), NOT a protocol-version arm; do not read it as one.
 >
@@ -141,8 +142,8 @@ Every message — inbound or outbound — is a single flat JSON object:
 > server-stamped arms only; the §4 family-(ii) roster/lifecycle stamps
 > `joined_at`, `created_at`, `last_activity_at` and `added_at` are UNIX
 > SECONDS **here too** — the hub's own docblock concurs
-> (`phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:1367`; `$now = time()` at
-> `:1376`, emitted at `:1385`/`:1402`/`:1403`). The one unit stated as fact
+> (`phlix-hub/src/SyncPlay/SyncPlayRelayWorker.php:2119` @ `65a0bc9d`;
+> `$now = time()` at `:2128`, emitted at `:2137`/`:2154`/`:2155`). The one unit stated as fact
 > rather than delegated is outside §4's field scope: `pending_command` is the
 > push/Alexa delivery lane, not one of §3's syncplay types, and its envelope's
 > `issued_at` is **UNIX SECONDS** — deliberately, matching the DB `TIMESTAMP`
@@ -211,8 +212,9 @@ All field names are **snake_case**.
 > referenced by every mention-site in this section; (ii) the roster/lifecycle
 > stamps `joined_at`, `created_at`, `last_activity_at` and `added_at` are
 > **UNIX SECONDS on every carrier by design** — a stable per-field unit, not a
-> per-carrier quirk (server `GroupState.php:241-242`/`:399`/`:813` `time()`;
-> hub `SyncPlayRelayWorker.php:1367` states the same law) — and each names its
+> per-carrier quirk (server `GroupState.php:305-306`/`:464`/`:955` `time()`
+> @ `262f01d3`; hub `SyncPlayRelayWorker.php:2119` @ `65a0bc9d` states the
+> same law) — and each names its
 > unit inline at its field line. No other section states a unit law: the §2
 > units footnote and the §8.4 carrier table are detail sites for these
 > exceptions and defer to this text.
@@ -221,9 +223,9 @@ All field names are **snake_case**.
 > `:8097` server stamps `time()` (SECONDS) on every `server_time` it WRITES:
 > the `playback_sync` group echo and the S446 nudge unicast
 > (`phlix-server/src/Session/SyncPlay/SyncPlayManager.php` `handlePlaybackSync()`,
-> echo `:1517-1524`, nudge `:1569-1585`), the `time_sync` advisory reply
-> (`handleTimeSync()` `:1652-1660`), and the play/pause/seek echo FALLBACK
-> (`:1076` / `:1128` / `:1175` `?? time()`) — a sender-supplied ms stamp is
+> echo `:1636-1643`, nudge `:1694-1711` @ `262f01d3`), the `time_sync` advisory
+> reply (`handleTimeSync()` `:1792-1800`), and the play/pause/seek echo FALLBACK
+> (`:1150` / `:1202` / `:1249` `?? time()`) — a sender-supplied ms stamp is
 > echoed verbatim, so even one frame type can carry either scale depending on
 > the sender. Outside those arms the field is ms: the `:8804` hub relay NEVER
 > emits a seconds `server_time` (it stamps `nowMs()` and passes a sender's ms
@@ -421,10 +423,11 @@ your_id?: string           (the recipient's own member id)
 > every live frame — the exact bug class this note exists to kill.
 > `queue` item fields are **per-carrier**: the `:8097` server stamps every
 > item with `added_at` (UNIX seconds) + `added_by` (host member id at enqueue
-> time, nullable) — `GroupState.php` `addToQueue()` :812-817, nested at
-> `getState()` :970 — while the `:8804` hub relay narrows items to
-> `media_id` + `media_info` (`SyncPlayRelayWorker.php` :1713-1747, emitted
-> :1401/:1764); there those keys are ABSENT, never zeroed. The library
+> time, nullable) — `GroupState.php` `addToQueue()` :952-957, nested at
+> `getState()` :1122 (phlix-server @ `262f01d3`) — while the `:8804` hub relay
+> narrows items to
+> `media_id` + `media_info` (`SyncPlayRelayWorker.php` :2535-2543, emitted
+> :2153/:2562; phlix-hub @ `65a0bc9d`); there those keys are ABSENT, never zeroed. The library
 > delivers the array under `SyncPlayGroup.queue` exactly as the frame
 > carried it (M-SYNCPLAY-06: `handleGroupState` used to drop the field).
 > `has_password` is NOT emitted here — it appears only in the `listGroups()`
@@ -466,8 +469,8 @@ your_id?: string           (the recipient's own member id)
 
 `syncplay_group_list` (server → client reply) — **live-producer truth, both
 carriers** (`:8097` `phlix-server` `SyncPlayManager.php` `handleGroupList`
-reply send :1686-1689 + `groupSummary()` :1740-1750; `:8804` `phlix-hub`
-`SyncPlayRelayWorker.php` `handleCanonicalGroupList` :1925-1950, whose row
+reply send :1826-1828 + `groupSummary()` :1880-1889 @ `262f01d3`; `:8804` `phlix-hub`
+`SyncPlayRelayWorker.php` `handleCanonicalGroupList` :2726-2750 @ `65a0bc9d`, whose row
 literally mirrors the Server summary). Payload keys alongside the
 `Messages::frame` envelope:
 ```
@@ -549,17 +552,17 @@ queue: [ { media_id: string, media_info?: object,
            added_at?: number (unix s), added_by?: string | null }, ... ]
 ```
 > Same queue array semantics as `group_state.group.queue`, same per-carrier
-> item law (`:8097` `SyncPlayManager.php:1271-1273` broadcasts
+> item law (`:8097` `SyncPlayManager.php:1378-1380` @ `262f01d3` broadcasts
 > `getPlaybackQueue()` — full four-field items stamped by `addToQueue()`
-> (`GroupState.php:812-817`); the hub relay's broadcast
-> `SyncPlayRelayWorker.php:1763-1765` carries `media_id` + `media_info` only
-> — narrowed at :1713-1747, `added_*` ABSENT, never zeroed). The BROADCAST
+> (`GroupState.php:952-957`); the hub relay's broadcast
+> `SyncPlayRelayWorker.php:2561-2563` @ `65a0bc9d` carries `media_id` + `media_info` only
+> — narrowed at :2535-2543, `added_*` ABSENT, never zeroed). The BROADCAST
 > carries NO `group_id`/`member_id` (the producers derive both server-side,
 > S289); fan-out includes the sender on both carriers. Refusals are separate
-> error frames (`syncplay.queue_limit_exceeded` `SyncPlayManager.php:1253-1263`
-> / `NOT_HOST` :1219; hub :1707 / :1748-1757) with the live queue UNTOUCHED —
+> error frames (`syncplay.queue_limit_exceeded` `SyncPlayManager.php:1350-1369`
+> / `NOT_HOST` :1293; hub :2505 @ `65a0bc9d` / :2543-2552) with the live queue UNTOUCHED —
 > and there is no `group_state` re-broadcast after an accepted update
-> (`publishSnapshot()` :1278 is an internal HTTP-worker snapshot), so this
+> (`publishSnapshot()` :1385 is an internal HTTP-worker snapshot), so this
 > broadcast is the ONLY live queue-change signal. The library orchestrates
 > it since M-SYNCPLAY-11: `onQueueChanged` fires with the normalized queue
 > and the cached group is folded (former "carried-but-not-orchestrated /
@@ -578,20 +581,20 @@ queue: [ { media_id: string, media_info?: object,
 `syncplay_playback_sync` (periodic position broadcast)
 ```
 group_id: string
-member_id: string          (echo: HOST id — `SyncPlayManager.php:1518`; nudge frame:
-                            the DRIFTING member's own id — :1570)
-current_media_id: string|null  (:1520 echo, :1572 nudge; hub relay
-                                 `SyncPlayRelayWorker.php:1676`)
+member_id: string          (echo: HOST id — `SyncPlayManager.php:1637`; nudge frame:
+                            the DRIFTING member's own id — :1695)
+current_media_id: string|null  (:1639 echo, :1697 nudge; hub relay
+                                 `SyncPlayRelayWorker.php:2474` — both @ tips `262f01d3`/`65a0bc9d`)
 position: number
 is_playing: boolean
 server_time: number        (§4 named exception: UNIX seconds on :8097, ms on hub;
                             delivered as ms via serverTimeToMs — §4 delivery policy)
 nudge?: {                  (S446 soft-desync correction — directed frames ONLY, see below)
-  drift_ms: number,        (group position − reported position, ms; >0 = behind — :1566)
-  direction: 'behind' | 'ahead',   (:1578)
-  suggested_rate: number,  (1 ± 0.1 — `GroupState::NUDGE_RATE_STEP` `GroupState.php:179` @c904aa4d; :1579-1581)
-  tolerance_ms: number,    (group position tolerance — default 2000, `GroupState.php:136` @c904aa4d; :1582)
-  cooldown_ms: number      (`GroupState::NUDGE_COOLDOWN_MS` = 1000 — `GroupState.php:157` @c904aa4d; :1583)
+  drift_ms: number,        (group position − reported position, ms; >0 = behind — :1691)
+  direction: 'behind' | 'ahead',   (:1703)
+  suggested_rate: number,  (1 ± 0.1 — `GroupState::NUDGE_RATE_STEP` `GroupState.php:179` @c904aa4d; :1704-1706)
+  tolerance_ms: number,    (group position tolerance — default 2000, `GroupState.php:136` @c904aa4d; :1707)
+  cooldown_ms: number      (`GroupState::NUDGE_COOLDOWN_MS` = 1000 — `GroupState.php:157` @c904aa4d; :1708)
 }
 ```
 > Broadcast to every group member including the originator — the server does not
@@ -600,9 +603,9 @@ nudge?: {                  (S446 soft-desync correction — directed frames ONLY
 > (`SyncPlayManager.php:1517-1524`, phlix-server @84e55800); it never carries
 > `nudge`. The same frame type additionally serves the S446 out-of-sync
 > reaction: when a member's ingested report falls outside the group tolerance
-> (guard :1529-1531, cooldown slot claim :1561), the server UNICASTS that one
+> (guard :1649-1650, cooldown slot claim :1681), the server UNICASTS that one
 > member a second frame of this type carrying the `nudge` object above
-> (`sendOutOfSyncNudge()` :1569-1585) — an additive payload on the existing
+> (`sendOutOfSyncNudge()` :1694-1711 @ `262f01d3`) — an additive payload on the existing
 > type (S417 outbound rule), stamped with the recipient's own id, position
 > and `is_playing` from the authoritative group state. The owner policy is
 > "a rate-limited NUDGE — never a seek" (`GroupState.php:39`): a consumer
@@ -647,27 +650,27 @@ nudge?: {                  (S446 soft-desync correction — directed frames ONLY
 `syncplay_chat` (both directions — the shapes DIFFER; M-SYNCPLAY-11 cure of the
 single-shape drift)
 ```
-client → server (any member; Messages::chatMessage `Messages.php:564-574`):
+client → server (any member; Messages::chatMessage `Messages.php:578-588` @ `262f01d3`):
 group_id: string
 member_id: string          (SELF-ASSERTED — the server never reads it, S289:
-                            `SyncPlayManager.php:1297` derives the speaker from
+                            `SyncPlayManager.php:1404` @ `262f01d3` derives the speaker from
                             the authenticated connection)
 message: string
 
 server → group (broadcast of the accepted message):
 member_id: string          (AUTHENTICATED id — overwrites the claim)
-member_name: string        (group member record, server fallback 'Unknown' :1312)
+member_name: string        (group member record, server fallback 'Unknown' :1422)
 message: string
 ```
 > The broadcast carries NO `group_id` key — membership is implicit in the
 > fan-out. A blank/whitespace message is dropped IN SILENCE on both carriers
-> (server :1314-1316, hub `SyncPlayRelayWorker.php:1791-1793`): no error frame,
+> (server :1424-1426 @ `262f01d3`, hub `SyncPlayRelayWorker.php:2592-2594` @ `65a0bc9d`): no error frame,
 > no echo. Envelope `timestamp` is the authoritative send time in
-> MILLISECONDS on both carriers (`Messages.php:924-927` microtime×1000; hub
-> `canonicalFrame` `nowMs()` :1230) — the seconds-level payload duplicate was
+> MILLISECONDS on both carriers (`Messages.php:938-941` microtime×1000; hub
+> `canonicalFrame` `nowMs()` :1904 @ `65a0bc9d`) — the seconds-level payload duplicate was
 > dropped at S417. Fan-out INCLUDES the sender on both carriers
-> (`broadcastToGroup` default `$excludeIds = []`, `SyncPlayManager.php:1932`,
-> the chat call at :1323 passes none; hub :1795 omits the exclusion): your own
+> (`broadcastToGroup` default `$excludeIds = []`, `SyncPlayManager.php:2072` @ `262f01d3`,
+> the chat call at :1433 passes none; hub :2596 @ `65a0bc9d` omits the exclusion): your own
 > message comes back to you. The library delivers every chat frame — echo
 > included — via `onChat(memberId, memberName, message, timestampMs)`; the
 > outbound arm is `sendChat(message)`.
@@ -690,18 +693,18 @@ message: string
 
 `syncplay_typing` (both directions)
 ```
-client → server (any member; Messages::chatTyping `Messages.php:590-600`):
+client → server (any member; Messages::chatTyping `Messages.php:604-614` @ `262f01d3`):
 group_id: string
-member_id: string          (self-asserted — ignored, S289 :1364)
+member_id: string          (self-asserted — ignored, S289 :1473-1474 @ `262f01d3`)
 is_typing: boolean         (producers read `=== true` or legacy `'1'`:
-                            server :1375, hub :1822-1823)
+                            server :1485 @ `262f01d3`, hub :2623-2625 @ `65a0bc9d`)
 
 server → group (broadcast):
 member_id: string          (authenticated id)
 is_typing: boolean
 ```
 > Unlike chat, the typing fan-out EXCLUDES the sender (server `[$memberId]`
-> :1380, hub `$client->clientId` :1828) and guard misses are SILENT (no error
+> :1490 @ `262f01d3`, hub `$client->clientId` :2629 @ `65a0bc9d`) and guard misses are SILENT (no error
 > frames for a transient indicator). Inbound is delivered by `onMemberTyping`;
 > outbound is `sendTyping(isTyping)` since M-SYNCPLAY-11 (the inbound arm was
 > already wired — the missing sender half made the indicator one-way).
@@ -744,7 +747,7 @@ elected_by: string
 
 The `string | null` domain of `elected_id` has exactly three cases: a leave
 that EMPTIES the group broadcasts nothing at all (the cleanup branch destroys
-the group silently — phlix-server `SyncPlayManager.php:933-937`); when members
+the group silently — phlix-server `SyncPlayManager.php:1008-1011` @ `262f01d3`); when members
 remain, `GroupState::removeMember()` re-elects the oldest surviving member
 before the broadcast reads `getHostId()`, so a LIVE election frame always
 carries a non-null successor (`:938-946`, `GroupState.php` `removeMember()` →
@@ -830,7 +833,7 @@ is_stable: boolean         (server TimeSync::isSyncStable())
 
 `syncplay_error` (server → client)
 ```
-error_code: string         (the ONLY field live emitters set — Messages::error, `Messages.php:712-727`)
+error_code: string         (the ONLY field live emitters set — Messages::error, `Messages.php:728-740` @ `262f01d3`)
 code?: string              (RETIRED historical name — no live producer on either carrier; see below)
 message: string
 details?: object
@@ -1456,14 +1459,16 @@ A correct server MUST:
    and sets the resulting host id authoritatively.
    `syncplay_playback_sync` is **not** in that set: it is a member-permitted
    STATE REPORT (see §9.1). Both producers guard it only for authentication
-   and membership — server `handlePlaybackSync()` :1483 (`NOT_AUTHENTICATED`
-   :1490, `NOT_IN_GROUP` :1498, no `NOT_HOST` arm anywhere in the body; its
-   own docblock, :1452: "Any member can request a playback sync"), hub
-   `handleCanonicalPlaybackSync()` :1661 (docblock :1650: "state report,
-   anyone may send"; sole guard `NOT_IN_GROUP` :1665). The ungated arm is
+   and membership — server `handlePlaybackSync()` :1593 (`NOT_AUTHENTICATED`
+   :1600, `NOT_IN_GROUP` :1608, no `NOT_HOST` arm anywhere in the body; its
+   own docblock, :1562: "Any member can request a playback sync"); era
+   `phlix-server` @ `262f01d3`. Hub
+   `handleCanonicalPlaybackSync()` :2454 (docblock :2415: "state report,
+   anyone may send"; sole guard `NOT_IN_GROUP` :2458); era `phlix-hub` @
+   `65a0bc9d`. The ungated arm is
    intentional law, not a server gap: the whole S446 per-member drift policy
-   (the server ingests every reporter's position at :1513 and aims a nudge at
-   the drifting member — :1530, :1562) exists only because non-hosts report,
+   (the server ingests every reporter's position at :1632 and aims a nudge at
+   the drifting member — :1649-1650, :1673-1711) exists only because non-hosts report,
    and §9.1's S294 re-anchor design starves without them.
 
 3. **Set the true sender id on rebroadcast.** When the server rebroadcasts a
@@ -1513,13 +1518,17 @@ the server will stamp for **this** connection — the `your_id` the join/create
 ack carries:
 
 - Direct `:8097`: the authenticated **user id** (JWT subject). Producer bytes:
-  phlix-server `SyncPlayManager.php:1799` and `:1855`
-  (`'your_id' => $connection->getUserId()`), REST
-  `SyncPlayController.php:173`/`:267`/`:305` (`$memberId = $request->userId`,
-  S289). Knowable before dialing (the auth layer holds it).
+  phlix-server `SyncPlayManager.php:1939` and `:1995` — both
+  `'your_id' => $memberId,`, with `$memberId = $connection->getUserId()` at the
+  handler heads `:1907`/`:1963`; era `phlix-server` @ `262f01d3`. REST
+  `SyncPlayController.php:173`/`:267`/`:305` (`$memberId = $userId`, fed by
+  `$userId = $request->userId ?? '';`, S289). Both
+  knowable before dialing (the auth layer holds it).
 - Hub relay `:8804`: a hub-generated **per-connection uuid**
-  (phlix-hub `SyncPlayRelayWorker.php:423`, `generateClientId()` `:2107-2120`),
-  echoed as `your_id` at `:1486-1491`. NOT knowable before the first
+  (phlix-hub `SyncPlayRelayWorker.php:887` — `Ids::uuidV4()` inline in
+  `onWebSocketConnect()` `:834`; the old `generateClientId()` helper folded
+  away; era `phlix-hub` @ `65a0bc9d`),
+  echoed as `your_id` at `:2251-2256`. NOT knowable before the first
   `group_state`; the client surfaces `your_id` through `onState` and
   reconciles nothing (ctor id immutable by design) — the consumer adopts it.
 

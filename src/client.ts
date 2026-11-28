@@ -212,8 +212,8 @@ export interface SyncPlayClientOptions {
    * mismatch as the ghost-identity class documented on
    * {@link SyncPlayClientOptions.memberId} — `undefined` only on hand-built
    * frames that omitted the field; real producers always stamp it
-   * (phlix-server `SyncPlayManager.php:1799`/`:1855`, phlix-hub
-   * `SyncPlayRelayWorker.php:1490`).
+   * (phlix-server `SyncPlayManager.php:1939`/`:1995` @ `262f01d3`, phlix-hub
+   * `SyncPlayRelayWorker.php:2251-2256` @ `65a0bc9d`).
    *
    * phlix-syncplay-008: the delivered group is the library's STORED object —
    * `===` what `getGroup()` returns and frozen at the store (scope named on
@@ -1330,12 +1330,12 @@ export class SyncPlayClient {
   /**
    * Announce typing state (`syncplay_typing`, {@link SyncPlayClientOptions.onMemberTyping}
    * is the inbound arm). Shape mirrors `Messages::chatTyping` (phlix-server
-   * `Messages.php:590-600`). Producers read `is_typing` as `=== true` or the
-   * legacy `'1'` string (server `SyncPlayManager.php:1375`, hub
-   * `SyncPlayRelayWorker.php:1822-1823`) — a real boolean passes cleanly.
-   * Identity is again server-derived (S289 :1364). Unlike chat, the typing
-   * fan-out EXCLUDES the sender (server `[$memberId]` :1380, hub
-   * `$client->clientId` :1828), so your own indicator never echoes back, and
+   * `Messages.php:604-614` @ `262f01d3`). Producers read `is_typing` as `=== true` or the
+   * legacy `'1'` string (server `SyncPlayManager.php:1485`, hub
+   * `SyncPlayRelayWorker.php:2623-2625` @ `65a0bc9d`) — a real boolean passes cleanly.
+   * Identity is again server-derived (S289 :1473-1474). Unlike chat, the typing
+   * fan-out EXCLUDES the sender (server `[$memberId]` :1490, hub
+   * `$client->clientId` :2629), so your own indicator never echoes back, and
    * guard misses are SILENT for typing on both producers (no error frames for
    * a transient indicator — there is nothing to observe beyond the peers'
    * view).
