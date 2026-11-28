@@ -5,12 +5,140 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-11-28
+
+Release-integrity cut: folds the whole post-v0.1.9 campaign — the 28 reviewed
+`S-syncplay-*` steps plus the three SPY-era rows folded from Unreleased below — including one
+DISCLOSED BEHAVIOR CHANGE (`memberName` default 'User' -> 'Host', owner ruling
+2026-11-13) and the sync-readiness `server_time` gate on the outbound playback
+senders. No new wire vocabulary; error-code registry untouched. Packaging:
+installed trees now carry the normative `SPEC.md` and this `CHANGELOG.md` next to
+`dist/` (S-18). README install example re-anchored to this tag and the current
+contracts pin; the `dist/` aggregates below are recorded from the committed
+bytes, which this cut leaves untouched (no src/dist change; build x2 reproduces
+them). Dual-recipe dist aggregates at this cut (determinism x2, equal to
+committed): all-files `a34d4f13a236d5513314bfb29eb59401`, non-map
+`2728b9786a60e9609e4d1ebdea70a301`; `phlix-syncplay.js` `ae55d192d46a07be16f3e4902eebaa8d`,
+`.umd.cjs` `dc146a14195cc04bd15dbfd9895ac20e`.
+
+Changes:
+
 - Dependency upgrade: eslint 10.15 + @eslint/js 10.x, @types/node 26, vite 8.3.8, vitest + coverage-v8 5.1, typescript-eslint 8.72.2; CI actions bumped (checkout v7.0.1, setup-node v7.1.0). TypeScript stays 6.0.3: typescript-eslint 8.72 peers `typescript <6.1.0`, so TS 7 is not yet usable. dist/ rebuilt with the new vite (no API change). Dev-toolchain only; nothing runtime changes.
 - SPY-S13: `memberName` default changed from `'User'` to `'Host'` (behaviour change;
   owner ruling 2026-11-13) in code, README and docblock; matches the server's
   `createGroup` default, and the server join-frame fallback is aligned too.
 - Docs/docblock minors: seekThrottleMs range, `@throws TypeError` on position
   senders, docblock rewraps, README password_hash wording.
+
+- S-syncplay-01: NTP offset sign ruling (phlix-syncplay-001/-016). `TimeSync.addSample`
+  per-sample offset is now classical NTP theta: `offset = t2 - t1 - trunc(rtt / 2)` (was
+  `+ trunc(rtt / 2)`, a sign inversion that led the true skew by a full round-trip). SPEC
+  §5 pseudocode + dated ruling paragraph updated; the 'add offset to local time -> server
+  time' LAW is unchanged - the fixed formula is what makes it true. Wire untouched (the
+  offset never crosses the wire); the phlix-server twin flip is routed to that repo's wave.
+- S-syncplay-03 (phlix-syncplay-003, High): new client option `onIdentityMismatch(memberId,
+  serverYourId)` fires per accepted `group_state` whose server-stamped `your_id`
+  contradicts the client identity, and `SyncPlayClient.adoptServerIdentity(serverYourId)`
+  promotes the SPEC §9.2 hub-relay adoption path from rebuild-the-client workaround to a
+  first-class, consumer-driven seam. The library still NEVER self-adopts. +8 pins,
+  mutation-proven.
+- S-syncplay-04 (phlix-syncplay-004, High): new public pacing seam `startPinger({schedule,
+  cancel, ping, now, intervalMs?})` + pure predicate `timePingAllowed(outstanding, nowMs)`
+  (the §10.1 single-flight law, now called by `pingTime()` itself - client dispatch
+  byte-for-byte unchanged) + `PING_INTERVAL_MS = 30000` and the scheduler option types.
+  The library still owns no socket and no periodic timers. +14 tests.
+- S-syncplay-07 (phlix-syncplay-007): honest raw-frame typing - exported `WireEnvelope`
+  (receiver-side: optional `protocol_version`/`timestamp`) split from producer-side
+  `BaseMessage` (required stamp); `RawMessage = WireEnvelope & Record<string, unknown>`;
+  new exported `isCanonicalFrame()` predicate. CONSUMER-VISIBLE via the shipped .d.ts: a
+  reader that consumed `msg.protocol_version` as a plain `number` must now arm for
+  `undefined` (zero estate consumers do today, verified).
+- S-syncplay-08 (phlix-syncplay-008): the group handed out by `getGroup()` / `onState` is
+  `Object.freeze`d at every store site - consumer writes can no longer corrupt the client's
+  internal model or the member-leave diff baseline. Shallow by law: `queue[].media_info`
+  passes through unfrozen (documented island); TypeScript types stay mutable (runtime
+  enforcement).
+- S-syncplay-14 (phlix-syncplay-017): dedicated `onNudge(memberId, nudge)` option for the
+  S446 directed rate-policy, fired only on `:8097` unicast `playback_sync` frames carrying
+  a `nudge` object; the existing 5th positional `onPlaybackSync` argument is unchanged
+  (additive, BREAKING-free).
+- S-syncplay-15 (phlix-syncplay-018/-023), BREAKING-ADJACENT behavior (no wire-code
+  change): `sendPlay`/`sendPause`/`sendSeek`/`reportPosition` now OMIT `server_time`
+  entirely until the first TIME_PONG sample is accepted (new public `isSyncReady()`);
+  absence is legal per SPEC §4.2 echo law. Unsynced frames previously anchored the room to
+  an unverified raw local stamp. Additionally `TimeSync.getAdjustedPosition()` clamps
+  negative elapsed to 0 BEFORE drift: a future-landing `serverTime` holds the commanded
+  position instead of rewinding the playhead. SPEC §5 'Sync-readiness' and
+  'Negative-elapsed floor' MUSTs added.
+- S-syncplay-17 (phlix-syncplay-020): after a voluntary `leaveGroup()`, an in-flight
+  `group_state` echo no longer re-adopts the room just left - intended-membership latch;
+  while disarmed the frame is refused whole through the 'malformed' drop lane with zero
+  state writes and no callbacks (SPEC §10.1).
+- S-syncplay-23 (phlix-syncplay-028/-047): `time_pong`'s `server_time` (t2) passes the
+  LW-050 plausibility window via `serverTimeOrNow` - a corrupt or seconds-scaled pong can
+  no longer poison `getOffset()` by ~1e12 ms (out-of-window stamps ride the counted
+  `onSyncDegraded` refusal with sample-purity); the `pingEpoch`/`connectionEpoch`
+  generation check now also covers the pong ECHO arm.
+- S-syncplay-24 (phlix-syncplay-029), Breaking-ish (garbage-frame behavior only):
+  `group_state` frames OMITTING `members` are refused whole as 'malformed' (previously one
+  garbage frame folded an empty roster and fired `onMemberLeft` for every member). Both
+  live producers always emit the key and SPEC §4 requires it, so no honest frame changes
+  behavior; present-but-wrong-type keeps the ratified fold-to-empty law; refusal is pure.
+- S-syncplay-25 (phlix-syncplay-030): monotonic-stamp replay guard on `group_state` folds
+  (SPEC §10.1) - a same-room frame whose trusted envelope `timestamp` sits >2000 ms below
+  the last adopted fold's watermark is refused whole with zero side effects; equal,
+  within-tolerance and untrusted/absent stamps adopt; the watermark follows the clock in
+  both directions and is scoped to the adopted room.
+- S-syncplay-27 (phlix-syncplay-032): `handleGroupList` drops rows whose `id` is not a
+  string instead of minting a joinable empty-id row; producer-supplied `''` ids still
+  pass through verbatim (type-scoped law).
+- S-syncplay-29 (phlix-syncplay-034): the receiver-side `protocol_version` gate now
+  refuses explicit sub-1 stamps through the 'malformed' lane (floor identical to the
+  server's SRV-46-era arm); an ABSENT `protocol_version` keeps falling through accepted
+  (documented legacy Tizen/older-server shape). No new wire vocabulary.
+- S-syncplay-30 (phlix-syncplay-035/-036/-060): package manifest - `@phlix/contracts` is
+  now a REQUIRED `"*"` peer (`peerDependenciesMeta` optional flag deleted); the carrier
+  comment names `dist/messages.d.ts` as the real type re-export site; the contracts
+  devDep pin `#v0.5.8` is tripwired in `test/packageManifest.test.ts`. Install posture
+  consequence (disclosed): neither package is on the public npm registry, so a bare
+  github install of `@phlix/syncplay` whose tree lacks its own `@phlix/contracts` pin now
+  fails at peer resolution with E404 - intended default-deny; every estate consumer tree
+  already carries a contracts node.
+- S-syncplay-38 (phlix-syncplay-049, fuzz R-007): chat `onChat` `timestampMs` rides the
+  shared sane-stamp gate (finite AND >=1000 AND LW-050 window, unit-normalized) instead of
+  a finite-only gate - forged epoch-zero/negative/uptime-magnitude stamps deliver
+  `undefined` and seconds-form stamps are promoted x1000 at decode; real epoch-ms
+  producers pass through untouched.
+- S-syncplay-41 (phlix-syncplay-052): `handleHostElect` no longer re-fires
+  `onHostChanged` when a `host_elect` frame re-announces the already-cached host - a
+  same-host replay is a whole no-op; genuine transitions (incl. roster-eviction and the
+  ungrouped LW-047 exception) keep their fire.
+- S-syncplay-44 (phlix-syncplay-059): new `SyncPlayClient.seekTo(toPosition)` convenience -
+  PLAYBACK_SEEK with `from_position` read from the cached (frozen, S-08) group instead of
+  forcing callers to carry their own origin; coalescing, the boolean law and the TypeError
+  assert are exactly `sendSeek`'s; refuses rather than fabricate a bad origin.
+- S-syncplay-18 (phlix-syncplay-021): packaging - the npm tarball now ships `SPEC.md` and
+  `CHANGELOG.md` alongside `dist` (`files: ["dist"]` -> `["dist", "SPEC.md",
+  "CHANGELOG.md"]`); previously installed trees carried no cited protocol authority.
+  Additive; every dist entry retained. Cut law: v0.1.10 is the first tag that carries the
+  S-18 files list and the e468ba8-era manifest (cut only at/after that commit).
+- S-syncplay-05/-09/-11/-12/-16/-32/-43 (spec-doc + docblock truth pass, no behavior):
+  SPEC §4/§5 same-instant law and §4.5 estimator-constants honesty; §5 rtt<0 both-axes
+  restatement; §8.5 inbound package-size rows + caps table; §9.2 coordinate rotations with
+  era-pinned stamps; drift described as window slope (the label said EMA); the deliberate
+  no-`engines` posture documented in `package.json` (`//engines`) and the manifest test
+  header; PHP call-site stamps in docblocks re-anchored to their real server/hub shas.
+- S-syncplay-20: README docs-truth pass - the printed time-sync formula fixed to the
+  shipped S-01 estimator, `SYNCPLAY_MESSAGE_TYPES` relabeled (name->string MAP, the 19
+  frozen strings stay `ALL_MESSAGE_TYPES`), new error-code law note (branch on the wire
+  `error_code`, never the English message; `SyncPlayErrorCode` 20 names measured at the
+  #v0.5.7/#v0.5.8 pins), development-setup label on the install fence, and the SPEC §4
+  UNIT LAW restated at point of use (everything ms unless named; `server_time` is the only
+  MIXED field).
+- Test-suite hardening riding the cut (no product change): seekCoalescing pins 17 -> 21 its
+  (S-21), consolidatedGuards fake-timer advances (S-35), adversarial fuzz harness added
+  (S-40, findings it mints ride as separate rows), S-22 landed honest-zero (no row
+  warranted). Full battery at this cut: 20 files / 620 tests, 0 failures / 0 errors.
 
 ## [0.1.9] - 2026-11-12
 

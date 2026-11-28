@@ -57,17 +57,20 @@ npm). Pin an exact tag:
 // package.json
 {
   "dependencies": {
-    "@phlix/syncplay": "github:detain/phlix-syncplay#v0.1.9",
-    "@phlix/contracts": "github:detain/phlix-contracts#v0.5.7"
+    "@phlix/syncplay": "github:detain/phlix-syncplay#v0.1.10",
+    "@phlix/contracts": "github:detain/phlix-contracts#v0.5.8"
   }
 }
 ```
 
-`@phlix/contracts` is an (optional) **peer dependency**: the shipped type
-declarations re-export types from it, so TypeScript consumers must install it
-themselves. The peer range is `"*"` because contracts also comes from a GitHub
-tag, which semver ranges cannot match — pin the exact contracts tag directly, as
-above. The package declares no `engines` floor: the published `dist/` is
+`@phlix/contracts` is a **required peer dependency** (range `"*"`): the shipped
+type declarations re-export types from it, so TypeScript consumers must install
+it themselves. Neither package is published to the public npm registry — a bare
+install that lets npm try to resolve the `"*"` peer from npmjs.org fails with
+E404 — so the github: pin above is load-bearing, not decoration: install
+succeeds only when your tree carries its own `github:detain/phlix-contracts#...`
+pin. The range is `"*"` because GitHub tags cannot be matched by semver ranges;
+pin the exact contracts tag directly. The package declares no `engines` floor: the published `dist/` is
 dependency-free ES and runs on any runtime with `WebSocket`; the Node 22.12 floor
 applies only to this repo's dev/test toolchain (vitest 5 / vite 8).
 
