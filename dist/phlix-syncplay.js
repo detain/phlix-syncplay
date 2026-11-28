@@ -205,7 +205,8 @@ var m = 5, h = 1e3, g = 50, _ = .1, v = .99, y = 1.01, b = 1, x = class {
 		return e + this.getOffset();
 	}
 	getAdjustedPosition(e, t, n) {
-		return e + (this.getSynchronizedTime(n) - t) * this.driftRate;
+		let r = this.getSynchronizedTime(n);
+		return e + Math.max(0, r - t) * this.driftRate;
 	}
 	reset() {
 		this.samples = [], this.driftRate = 1, this.samplesVersion++;
@@ -286,6 +287,9 @@ var T = 250, E = 2e3, D = class t {
 	getSynchronizedTime() {
 		return this.timeSync.getSynchronizedTime(this.now());
 	}
+	isSyncReady() {
+		return this.timeSync.getSampleCount() > 0;
+	}
 	createGroup(n, r) {
 		let i = t.parsePasswordHash(r);
 		if (this.destroyed) return;
@@ -316,20 +320,18 @@ var T = 250, E = 2e3, D = class t {
 		}), !0;
 	}
 	sendPlay(n) {
-		return t.assertPosition("position", n), this.group !== null && (this.dispatch(e.PLAYBACK_PLAY, {
+		return t.assertPosition("position", n), this.group !== null && (this.dispatch(e.PLAYBACK_PLAY, l({
 			group_id: this.group.group_id,
 			member_id: this.memberId,
-			position: n,
-			server_time: this.getSynchronizedTime()
-		}), !0);
+			position: n
+		}, this.isSyncReady() ? { server_time: this.getSynchronizedTime() } : {})), !0);
 	}
 	sendPause(n) {
-		return t.assertPosition("position", n), this.group !== null && (this.dispatch(e.PLAYBACK_PAUSE, {
+		return t.assertPosition("position", n), this.group !== null && (this.dispatch(e.PLAYBACK_PAUSE, l({
 			group_id: this.group.group_id,
 			member_id: this.memberId,
-			position: n,
-			server_time: this.getSynchronizedTime()
-		}), !0);
+			position: n
+		}, this.isSyncReady() ? { server_time: this.getSynchronizedTime() } : {})), !0);
 	}
 	sendSeek(e, n) {
 		return t.assertPosition("fromPosition", e), t.assertPosition("toPosition", n), this.group === null ? !1 : this.seekWindowOpen ? (this.pendingSeek = {
@@ -343,13 +345,12 @@ var T = 250, E = 2e3, D = class t {
 		return !Number.isFinite(n) || n < 0 ? !1 : this.sendSeek(n, e);
 	}
 	dispatchSeek(t, n) {
-		this.group !== null && this.dispatch(e.PLAYBACK_SEEK, {
+		this.group !== null && this.dispatch(e.PLAYBACK_SEEK, l({
 			group_id: this.group.group_id,
 			member_id: this.memberId,
 			from_position: t,
-			to_position: n,
-			server_time: this.getSynchronizedTime()
-		});
+			to_position: n
+		}, this.isSyncReady() ? { server_time: this.getSynchronizedTime() } : {}));
 	}
 	openSeekWindow() {
 		this.seekWindowOpen = !0, this.seekFlushTimer = setTimeout(() => {
@@ -372,13 +373,12 @@ var T = 250, E = 2e3, D = class t {
 		this.pendingSeek = null, this.seekFlushTimer !== null && (clearTimeout(this.seekFlushTimer), this.seekFlushTimer = null), this.seekWindowOpen = !1;
 	}
 	reportPosition(n, r) {
-		return t.assertPosition("position", n), this.group !== null && (this.dispatch(e.PLAYBACK_SYNC, {
+		return t.assertPosition("position", n), this.group !== null && (this.dispatch(e.PLAYBACK_SYNC, l({
 			group_id: this.group.group_id,
 			member_id: this.memberId,
 			position: n,
-			is_playing: r,
-			server_time: this.getSynchronizedTime()
-		}), !0);
+			is_playing: r
+		}, this.isSyncReady() ? { server_time: this.getSynchronizedTime() } : {})), !0);
 	}
 	listGroups() {
 		return !this.destroyed && (this.dispatch(e.GROUP_LIST, {}), !0);

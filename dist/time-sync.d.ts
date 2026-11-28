@@ -207,6 +207,12 @@ export declare class TimeSync {
      * position the frames carry (a paused player that interpolates drifts off
      * the pause every peer honored).
      *
+     * NEGATIVE-ELAPSED FLOOR (SPEC §5, MUST): elapsed is clamped to >= 0 BEFORE
+     * drift is applied, so a future-landing `serverTime` (clock skew, forged or
+     * reordered stamp) holds the commanded `position` instead of rewinding the
+     * playhead through the content. Same discipline as getSampleAgeMs()'s
+     * clamp-at-0 and the CONSOLIDATED m22 backward-step clamp.
+     *
      * @param position   Host position (ms) at the moment of `serverTime`.
      * @param serverTime Server-synchronized timestamp the position was captured at (ms).
      * @param now        Current local wall-clock (ms).

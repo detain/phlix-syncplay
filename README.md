@@ -190,8 +190,11 @@ actually dispatched (`false` with no cached group), and always cancels a
 pending coalesced seek; `isHost()` / `getGroup()` / `getMemberId()` (the
 constructor identity — on `:8804` adopt `yourId` per the identity contract
 below); `getTimeSync()` (the live `TimeSync` instance); `getSynchronizedTime()`
-(server-corrected clock in ms — the value the outbound frames stamp as
-`server_time`); and `destroy()` (cancel the seek timer, reset time-sync, drop
+(server-corrected clock in ms — the value the sync-ready outbound frames
+stamp as `server_time`; with zero accepted TIME_PONG samples it is the raw local
+clock and `isSyncReady()` is false, so the playback senders omit `server_time`
+entirely — SPEC §5 sync-readiness law); `isSyncReady()` (that gate itself);
+and `destroy()` (cancel the seek timer, reset time-sync, drop
 the group; fires no `onDisconnect` callback — close your transport yourself,
 and build the next client fresh rather than re-joining on an inert instance).
 
@@ -439,6 +442,11 @@ unconditionally from the last commanded position on the corrected clock. Call
 it ONLY while the group's `playback_state` is playing — while paused, HOLD the
 commanded position (the seek/playback frames carry it); interpolating past a
 pause drifts the picture off the frame every peer honored.
+
+Second law, floor-only: — advance, never rewind. A `serverTime` landing in the
+future (clock skew, forged or reordered stamp) clamps to zero elapsed BEFORE
+drift is applied, so the call holds the commanded position instead of pulling
+the playhead backwards through the content (SPEC §5 negative-elapsed floor).
 
 ## Develop
 

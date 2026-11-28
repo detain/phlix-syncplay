@@ -523,6 +523,39 @@ describe('TimeSync time helpers', () => {
     expect(ts.getAdjustedPosition(5000, 10000, 10000)).toBe(5100);
   });
 
+  it('getAdjustedPosition clamps negative elapsed — a future-landing stamp floors at the commanded position (S-syncplay-15, phlix-syncplay-023)', () => {
+    const clock = makeClock();
+    const ts = new TimeSync(clock.now);
+    ts.addSample(0, 100, 100, 1); // offset 100, drift 1.0 (single sample)
+
+    // now=10000 → synchronizedNow = 10100. serverTime=20000 lands 9900 ms in
+    // the future. Pre-clamp math returned 5000 - 9900 = -4900 (playhead
+    // rewound through the content); the floor law holds the commanded 5000.
+    expect(ts.getAdjustedPosition(5000, 20000, 10000)).toBe(5000);
+    // Exact boundary: elapsed === 0 rides the same floor.
+    expect(ts.getAdjustedPosition(5000, 10100, 10000)).toBe(5000);
+    // One ms of TRUE elapsed still advances — the floor is not a freeze.
+    expect(ts.getAdjustedPosition(5000, 10099, 10000)).toBe(5001);
+  });
+
+  it('the negative-elapsed floor holds under a clamped-below-1.0 drift rate (drift cannot resurrect the rewind)', () => {
+    const clock = makeClock(0);
+    const ts = new TimeSync(clock.now);
+
+    // Recreate the drift-suppressing sequence from the monotone-forward
+    // regression: drift ends clamped at DRIFT_RATE_MIN (< 1.0).
+    clock.set(1000);
+    ts.addSample(0, 100000, 100000, 0);
+    clock.set(2000);
+    ts.addSample(0, 0, 0, 0);
+    expect(ts.getDriftRate()).toBe(DRIFT_RATE_MIN);
+
+    // serverTime far in any achievable future: pre-clamp the elapsed would go
+    // negative and drift (< 1.0) would scale the rewind — the floor holds
+    // position exactly regardless of the rate.
+    expect(ts.getAdjustedPosition(5000, 1_000_000_000, 0)).toBe(5000);
+  });
+
   it('reset clears samples and drift', () => {
     const clock = makeClock();
     const ts = new TimeSync(clock.now);

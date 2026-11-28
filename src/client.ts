@@ -854,6 +854,20 @@ export class SyncPlayClient {
     return this.timeSync.getSynchronizedTime(this.now());
   }
 
+  /**
+   * SYNC-READINESS (SPEC §5, finding phlix-syncplay-018): `true` once at least
+   * one TIME_PONG sample has been accepted, i.e. getSynchronizedTime() answers
+   * with a server-verified clock instead of the raw local one. Readiness is ONE
+   * accepted sample — deliberately NOT isStable() (SPEC §5 STABLE_OFFSETS):
+   * waiting for stability would stall first stamps for the whole buffer warm-up.
+   * While false, the outbound playback senders below OMIT `server_time`
+   * entirely (§4.2 echo law: the server's `?? time()` arm owns the absence);
+   * stamping an unverified skew would anchor the entire room to it.
+   */
+  isSyncReady(): boolean {
+    return this.timeSync.getSampleCount() > 0;
+  }
+
   // --- Group management ----------------------------------------------------
 
   /**
@@ -970,11 +984,18 @@ export class SyncPlayClient {
   // STATE REPORT any authenticated group member may send on both carriers.
   //
   // SECURITY (see SPEC §9): every playback sender below stamps the frame with
-  // this client's self-asserted `member_id`. The server MUST authorize the
-  // action by the *authenticated connection's* identity (not by the claimed
-  // `member_id`) and MUST overwrite the sender id with the authenticated one
-  // before rebroadcasting. The echo-suppression in handlePlayback/handleSeek
-  // relies on that server-set sender id.
+  // this client's self-asserted `member_id` and — once isSyncReady() is true —
+  // a synchronized `server_time`. The server MUST authorize the action by the
+  // *authenticated connection's* identity (not by the claimed `member_id`) and
+  // MUST overwrite the sender id with the authenticated one before
+  // rebroadcasting. The echo-suppression in handlePlayback/handleSeek relies on
+  // that server-set sender id.
+  //
+  // SYNC-READINESS STAMP LAW (SPEC §5, finding phlix-syncplay-018): before the
+  // first accepted TIME_PONG a stamp would merely be the raw local clock —
+  // anchoring the whole room to an unverified skew is worse than silence, so
+  // the key is OMITTED entirely while isSyncReady() is false and §4.2's echo
+  // law lets the server's `?? time()` arm own the absence.
 
   /**
    * Host command: play at `position` (ms). Returns whether the frame
@@ -996,7 +1017,7 @@ export class SyncPlayClient {
       group_id: this.group.group_id,
       member_id: this.memberId,
       position,
-      server_time: this.getSynchronizedTime(),
+      ...(this.isSyncReady() ? { server_time: this.getSynchronizedTime() } : {}),
     });
     return true;
   }
@@ -1015,7 +1036,7 @@ export class SyncPlayClient {
       group_id: this.group.group_id,
       member_id: this.memberId,
       position,
-      server_time: this.getSynchronizedTime(),
+      ...(this.isSyncReady() ? { server_time: this.getSynchronizedTime() } : {}),
     });
     return true;
   }
@@ -1111,7 +1132,7 @@ export class SyncPlayClient {
       member_id: this.memberId,
       from_position: fromPosition,
       to_position: toPosition,
-      server_time: this.getSynchronizedTime(),
+      ...(this.isSyncReady() ? { server_time: this.getSynchronizedTime() } : {}),
     });
   }
 
@@ -1200,7 +1221,7 @@ export class SyncPlayClient {
       member_id: this.memberId,
       position,
       is_playing: isPlaying,
-      server_time: this.getSynchronizedTime(),
+      ...(this.isSyncReady() ? { server_time: this.getSynchronizedTime() } : {}),
     });
     return true;
   }

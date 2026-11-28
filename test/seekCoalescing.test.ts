@@ -87,6 +87,23 @@ function makeHarness(seekThrottleMs?: number) {
       members: [{ id: 'me', name: 'Tester', is_host: true, joined_at: 1 }],
     },
   });
+  // S-syncplay-15 sync-readiness seed (finding phlix-syncplay-018): outbound
+  // stamps now ride only once a TIME_PONG sample has been accepted, so an
+  // unsynced harness omits server_time and this file's stamp pins would go
+  // vacuous. Seed a ZERO-OFFSET round (client_time 1000, server_time 1000,
+  // received at 1001 → rtt 1, oneWay trunc(0.5) = 0, θ = 0 exactly) and
+  // restore the clock, so every stamp value pinned below stays BYTE-IDENTICAL
+  // to the pre-seed raw-clock readings (1000 / 1120) — truth rotated in
+  // placement, teeth preserved.
+  client.pingTime();
+  clock.set(1001);
+  client.handleIncoming({
+    type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+    protocol_version: 1,
+    client_time: 1000,
+    server_time: 1000,
+  });
+  clock.set(1000);
   sent.length = 0;
   events.length = 0;
   return { client, sent, clock, commands, events };

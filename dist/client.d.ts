@@ -695,6 +695,17 @@ export declare class SyncPlayClient {
     /** Server-synchronized current time (ms). */
     getSynchronizedTime(): number;
     /**
+     * SYNC-READINESS (SPEC §5, finding phlix-syncplay-018): `true` once at least
+     * one TIME_PONG sample has been accepted, i.e. getSynchronizedTime() answers
+     * with a server-verified clock instead of the raw local one. Readiness is ONE
+     * accepted sample — deliberately NOT isStable() (SPEC §5 STABLE_OFFSETS):
+     * waiting for stability would stall first stamps for the whole buffer warm-up.
+     * While false, the outbound playback senders below OMIT `server_time`
+     * entirely (§4.2 echo law: the server's `?? time()` arm owns the absence);
+     * stamping an unverified skew would anchor the entire room to it.
+     */
+    isSyncReady(): boolean;
+    /**
      * Create a group with this member as host. `passwordHash` is SHA-256 hex.
      *
      * SECURITY (see SPEC §8/§9): the `member_id` placed on this frame is

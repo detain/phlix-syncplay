@@ -1007,6 +1007,25 @@ existing server/hub law; no wire shape changes.
   hands the normalized pair through, and `TimeSync.getAdjustedPosition`
   (`src/time-sync.ts`) documents the same-instant input it assumes. The
   durable cure is §4's producer-side fix, not a client-side fudge.
+- **Sync-readiness for outbound stamps (MUST).** While zero TIME_PONG samples
+  have been accepted, `getSynchronizedTime()` is the RAW local clock, and the
+  outbound playback senders (`playback_play`, `playback_pause`,
+  `playback_seek`, `playback_sync`) MUST omit the `server_time` key ENTIRELY —
+  not `0`, not the frame's own `timestamp`. A raw-clock stamp anchors the whole
+  room to an unverified skew; silence is safer, and absence is legal per §4.2's
+  echo law (the server owns a missing stamp via its `?? time()` arm). Readiness
+  is ONE accepted sample — deliberately not the STABLE_OFFSETS threshold;
+  waiting for stability would stall every stamp through the buffer warm-up.
+  (`SyncPlayClient.isSyncReady()`, `src/client.ts`.)
+- **Negative-elapsed floor (MUST).** `getAdjustedPosition()` clamps
+  `synchronizedNow - serverTime` to `>= 0` BEFORE applying `driftRate`. A
+  `serverTime` landing in the future — host clock skew, a forged or reordered
+  stamp — otherwise yields negative elapsed and the formula REWINDS the playhead
+  through the content. The floor holds the commanded `position` exactly under
+  any drift rate. This is the same defensive discipline as `getSampleAgeMs()`'s
+  clamp-at-0 and the CONSOLIDATED m22 backward-step clamp; it does not weaken
+  the advance law's "unconditional" wording above, which gates on playback
+  STATE — a rewind was never a legitimate advance.
 - **Freshness and degradation (client observability).** The window above has
   no expiry: after a sleep or a frozen timer tab the aggregates serve a hours-
   old window with full confidence. The library therefore exposes the inputs

@@ -587,6 +587,67 @@ describe('SyncPlayClient — outbound playback (reportPosition)', () => {
   });
 });
 
+describe('SyncPlayClient — sync-readiness gate on outbound stamps (S-syncplay-15, phlix-syncplay-018)', () => {
+  it('sendPlay/sendPause/sendSeek/reportPosition OMIT server_time entirely while zero sync samples', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('me', 'me'));
+    h.clock.set(2000);
+    h.sent.length = 0;
+
+    h.client.sendPlay(7000);
+    h.client.sendPause(8000);
+    h.client.sendSeek(0, 9000);
+    h.client.reportPosition(7000, true);
+
+    const byType = (type: string) => h.sent.find((m) => m.type === type);
+    const play = byType('syncplay_playback_play');
+    const pause = byType('syncplay_playback_pause');
+    const seek = byType('syncplay_playback_seek');
+    const sync = byType('syncplay_playback_sync');
+    expect([play, pause, seek, sync].every((m) => m !== undefined)).toBe(true);
+
+    // A raw-clock stamp would anchor the whole room to an UNVERIFIED skew —
+    // worse than silence. The key is ABSENT (not 0, not the frame timestamp);
+    // §4.2's echo law hands the missing stamp to the server's `?? time()` arm.
+    for (const frame of [play, pause, seek, sync] as RawMessage[]) {
+      expect(Object.keys(frame)).not.toContain('server_time');
+    }
+
+    // Every other field rides unchanged — the gate covers server_time ONLY.
+    expect(play).toMatchObject({
+      type: 'syncplay_playback_play',
+      protocol_version: 1,
+      timestamp: 2000,
+      group_id: 'sp_abc',
+      member_id: 'me',
+      position: 7000,
+    });
+    expect(sync).toMatchObject({ position: 7000, is_playing: true });
+    expect(seek).toMatchObject({ from_position: 0, to_position: 9000 });
+  });
+
+  it('stamps return on the very next send after ONE accepted TIME_PONG (gate is readiness, not stability)', () => {
+    const h = makeHarness();
+    h.client.handleIncoming(groupStateMessage('me', 'me'));
+    h.sent.length = 0;
+    h.client.sendPlay(7000); // clock 1000, zero samples → omitted
+    expect(Object.keys(h.sent[0])).not.toContain('server_time');
+
+    h.client.pingTime(); // clock still 1000 → client_time 1000
+    h.clock.set(1001);
+    h.client.handleIncoming({
+      type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+      protocol_version: 1,
+      client_time: 1000,
+      server_time: 1100,
+    }); // offset 100, single sample — isStable() is FALSE at one sample
+
+    h.clock.set(2000); // synchronized = 2000 + 100 = 2100
+    h.client.sendPlay(7000);
+    expect(h.sent.at(-1)).toMatchObject({ server_time: 2100 });
+  });
+});
+
 describe('SyncPlayClient — sendPlay/sendPause/sendSeek early returns', () => {
   it('sendPlay is a no-op when not in a group', () => {
     const h = makeHarness();
@@ -1582,11 +1643,31 @@ describe('SyncPlayClient — joinGroup with password hash', () => {
   });
 });
 
+// S-syncplay-15 (finding phlix-syncplay-018): outbound stamps now require
+// sync-readiness. Seeds a ZERO-OFFSET TIME_PONG round (client_time t,
+// server_time t, received at t+1 → rtt 1, oneWay trunc(0.5)=0, θ=0 exactly)
+// and restores the clock, so `server_time` rides synchronized == raw and
+// every stamp value pinned in the tests below stays byte-identical — truth
+// rotated in placement, teeth preserved.
+function seedZeroOffsetSync(h: ReturnType<typeof makeHarness>, t: number): void {
+  h.clock.set(t);
+  h.client.pingTime();
+  h.clock.set(t + 1);
+  h.client.handleIncoming({
+    type: SYNCPLAY_MESSAGE_TYPES.TIME_PONG,
+    protocol_version: 1,
+    client_time: t,
+    server_time: t,
+  });
+  h.clock.set(t);
+  h.sent.length = 0; // the seed's own TIME_PING frame is not the frame under test
+}
+
 describe('SyncPlayClient — sendPause when in a group', () => {
   it('sendPause dispatches PLAYBACK_PAUSE when in a group (line 232)', () => {
     const h = makeHarness();
     h.client.handleIncoming(groupStateMessage('host1', 'me'));
-    h.clock.set(2000);
+    seedZeroOffsetSync(h, 2000);
     h.client.sendPause(5000);
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]).toMatchObject({
@@ -1603,7 +1684,7 @@ describe('SyncPlayClient — sendSeek when in a group', () => {
   it('sendSeek dispatches PLAYBACK_SEEK when in a group (line 244)', () => {
     const h = makeHarness();
     h.client.handleIncoming(groupStateMessage('host1', 'me'));
-    h.clock.set(3000);
+    seedZeroOffsetSync(h, 3000);
     h.client.sendSeek(1000, 5000);
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]).toMatchObject({
@@ -1621,7 +1702,7 @@ describe('SyncPlayClient — seekTo convenience (phlix-syncplay-059)', () => {
   it('seekTo dispatches PLAYBACK_SEEK with from_position = the cached group position', () => {
     const h = makeHarness();
     h.client.handleIncoming(groupStateMessageAt('host1', 'me', 12345));
-    h.clock.set(3000);
+    seedZeroOffsetSync(h, 3000);
     expect(h.client.seekTo(9000)).toBe(true);
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]).toMatchObject({
