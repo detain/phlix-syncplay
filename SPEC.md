@@ -1014,7 +1014,8 @@ existing server/hub law; no wire shape changes.
   not `0`, not the frame's own `timestamp`. A raw-clock stamp anchors the whole
   room to an unverified skew; silence is safer, and absence is legal per §4.2's
   echo law (the server owns a missing stamp via its `?? time()` arm). Readiness
-  is ONE accepted sample — deliberately not the STABLE_OFFSETS threshold;
+  is ONE accepted sample — deliberately not the isStable() law (`samples ≥
+  OFFSET_SAMPLE_COUNT` with offset variance `< STABILITY_VARIANCE_THRESHOLD`);
   waiting for stability would stall every stamp through the buffer warm-up.
   (`SyncPlayClient.isSyncReady()`, `src/client.ts`.)
 - **Negative-elapsed floor (MUST).** `getAdjustedPosition()` clamps

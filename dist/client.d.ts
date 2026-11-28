@@ -698,7 +698,8 @@ export declare class SyncPlayClient {
      * SYNC-READINESS (SPEC §5, finding phlix-syncplay-018): `true` once at least
      * one TIME_PONG sample has been accepted, i.e. getSynchronizedTime() answers
      * with a server-verified clock instead of the raw local one. Readiness is ONE
-     * accepted sample — deliberately NOT isStable() (SPEC §5 STABLE_OFFSETS):
+     * accepted sample — deliberately NOT the isStable() law (SPEC §5: `samples ≥
+     * OFFSET_SAMPLE_COUNT` with offset variance `< STABILITY_VARIANCE_THRESHOLD`):
      * waiting for stability would stall first stamps for the whole buffer warm-up.
      * While false, the outbound playback senders below OMIT `server_time`
      * entirely (§4.2 echo law: the server's `?? time()` arm owns the absence);
