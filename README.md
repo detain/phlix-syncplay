@@ -72,6 +72,9 @@ dependency-free ES and runs on any runtime with `WebSocket`; the Node 22.12 floo
 applies only to this repo's dev/test toolchain (vitest 5 / vite 8).
 
 ```sh
+# development setup only — clone THIS repo and `npm install` to run its own
+# lint / typecheck / build / vitest toolchain. Consumers never run this: they
+# add the pinned dependency above to their own package.json and install there.
 npm install
 ```
 
@@ -146,7 +149,7 @@ const client = new SyncPlayClient({
   onMemberJoined: ({ id, name }) => {},
   onMemberLeft: ({ id, name }) => {}, // roster diff inside a same-group group_state (SPEC §6 leave law)
   onHostChanged: (hostId) => {},
-  onError: (code, message) => {},
+  onError: (code, message) => {}, // the wire `error_code` + an advisory message — branch on the CODE, never the English text (SPEC §4.6; "Error codes are the contract" below)
   onInfo: (message) => { /* syncplay_info text frames (member-join INFOs also drive onMemberJoined) */ },
   onMemberTyping: (memberId, isTyping) => {},
   onChat: (memberId, memberName, message, timestampMs) => { /* every accepted message, INCLUDING your own echo (fan-out includes the sender) — render chat from here only */ },
@@ -184,6 +187,24 @@ client.reportPosition(positionMs, isPlaying);
 client.sendChat('popcorn tonight?');   // your message arrives back via onChat
 client.sendTyping(true);               // peers see it on THEIR onMemberTyping
 ```
+
+**Error codes are the contract.** `onError`'s first argument is the wire's
+`error_code` — the ONLY field live emitters set; `code` is the RETIRED
+historical name, read last purely as tolerance for stale senders (SPEC §4.6).
+Branch on the **code**, never on the English `message`: the message is
+advisory display text, and being server-supplied it must be sanitized before
+rendering regardless (SPEC §8.3's display-string law). Two families arrive on
+the wire: the registry-SSOT dotted codes (`syncplay.*`, `hub.*` — minted in
+exactly one place, the `@phlix/contracts` error-codes registry; additions
+cascade through contracts) and the pre-registry SCREAMING_SNAKE per-handler
+codes that are still sent (`NOT_HOST`, `NOT_IN_GROUP`, `NOT_AUTHENTICATED`,
+`UNKNOWN_MESSAGE`). The package re-exports the typed union
+`SyncPlayErrorCode` from `@phlix/contracts` (legacy SCREAMING 12 ∪ dotted
+twins 8 = 20 names; the set is identical at the `#v0.5.7` and `#v0.5.8` pins)
+for type-switch ergonomics — the wire field itself deliberately stays a free
+`string` (parse-don't-validate: contracts can mint codes after your build
+pins this package), and the client's `'UNKNOWN'` fallback sentinel is
+deliberately NOT a union member.
 
 The rest of the surface: `leaveGroup()` — returns whether the LEAVE frame
 actually dispatched (`false` with no cached group), and always cancels a
@@ -398,7 +419,7 @@ function connect() {
 
 ```ts
 import {
-  SYNCPLAY_MESSAGE_TYPES, // the 19 canonical type strings
+  SYNCPLAY_MESSAGE_TYPES, // the 19 canonical types as an `as const` name→string MAP ({ GROUP_CREATE: 'syncplay_group_create', … })
   ALL_MESSAGE_TYPES,      // the same 19 as a runtime-frozen (Object.freeze) readonly array
   PROTOCOL_VERSION,       // 1
   encodeMessage,          // (type, payload, now) -> flat RAW JSON object
@@ -421,13 +442,28 @@ member id) and `SyncPlayGroup` (the normalized model with `members: SyncPlayMemb
 
 ## Time sync
 
-`TimeSync` reproduces the server's `TimeSync.php` math:
+`TimeSync` implements the **SPEC §5 estimator math** — and that claim is
+scoped to §5, not to a byte-for-byte mirror of the shipped `TimeSync.php`. §5's
+worked-example vector table and its prose are the authority (the `AGG-ODD`
+rows show the integer-halving is mechanical: a port that divides `rtt` by 2
+without truncating reports `103` where the table pins `104`), and
+`test/dialectSsot.test.ts` reproduces this port against every standalone §5
+vector and every aggregate window. Three server-side forms are ruled-against
+divergences the server still carries until the phlix-server wave lands them:
+the offset SIGN (the server's `+ (int)$oneWayLatency` twin was ruled flipped by
+`S-syncplay-01` and routed to that wave), the weighted-mean DIVISOR (the
+server's legacy `max(1, $weightSum)` crush is ruled a defect; this port
+divides by the real weight sum), and the aggregate's rounding (`Math.round`
+here vs the server's toward-zero int cast — §5 requires whole-ms output but
+names no round-vs-trunc rule; disclosed divergence). None of it can disagree
+on the wire: ping/pong carry raw `t1`/`t2` only and each side runs its own
+local estimator (SPEC §5).
 
 ```
 rtt    = t4 - t1 - (t3 - t2)      // server pong has no t3 → pass t3 = t2
-offset = t2 - t1 + trunc(rtt/2)   // add to local time to get server time —
-                                  // rtt/2 is INTEGER-TRUNCATED (`Math.trunc`
-                                  // in addSample), mirroring the server's int cast
+oneWay = trunc(rtt / 2)           // integer-ms law — `Math.trunc` in addSample
+offset = t2 - t1 - oneWay         // classical NTP θ (S-syncplay-01 ruling) —
+                                  // ADD to local time to get server time
 ```
 
 Offset is a low-RTT-weighted mean over the last 5 samples; sync is "stable" when
@@ -436,6 +472,39 @@ variance of ms; mirrors the server's unit-less 50); drift is a **window slope** 
 offset change per second across the recent samples (first to last), scaled by
 factor 0.1 and recomputed fresh on each call (no smoothing carry from the
 previous rate).
+
+> **Units — every value above is MILLISECONDS unless named otherwise.** SPEC
+> §4's UNIT LAW is the single authority for the wire's time units; this is the
+> time-sync-local restatement at the point of use. The injected `now()` must
+> return epoch **ms** (`Date.now()` scale — a seconds clock breaks the drift
+> math, which presumes ms); the quad timestamps `t1..t4`, `rtt`, each
+> per-sample `offset`, `getOffset()`, `getLatency()`, `getSynchronizedTime()`,
+> playhead positions and durations (`sendPlay`/`sendPause`/`sendSeek` args,
+> `reportPosition`, `onPlaybackCommand.position`, `getAdjustedPosition()` in
+> and out), the envelope `timestamp`, `onChat`'s `timestampMs`,
+> `getSampleAgeMs()`, `seekThrottleMs`, and the S446 nudge's `drift_ms` /
+> `tolerance_ms` / `cooldown_ms` are all **ms**. `t1`/`t4` are additionally
+> INTEGER ms — a fractional `now()` is truncated there, because the server
+> int-casts the `client_time` it echoes and a fractional stamp could never
+> match its own echo (SPEC §5, integer-ms quad). The named seconds values:
+> each sample's stored `timestamp` is `now() / 1000` — the deliberate units
+> bridge that makes drift's `timeDelta` **seconds**, matching the server's
+> per-second `microtime(true)` scale; the roster/lifecycle stamps
+> `joined_at` / `created_at` / `last_activity_at` / `added_at` are **UNIX
+> SECONDS on every carrier by design**; and `server_time` — the protocol's
+> only MIXED field — is UNIX SECONDS whenever the `:8097` server stamps it
+> itself (the `playback_sync` group echo and S446 nudge unicast, the
+> `time_sync` advisory reply, and the play/pause/seek echo FALLBACK; a
+> sender-supplied ms stamp is echoed verbatim) but ALWAYS ms on the `:8804`
+> hub relay, and ms on BOTH carriers for `time_pong`. The library resolves
+> the mix at parse per §4's delivery policy: the playback arms'
+> server-stamped seconds `server_time` is normalized to ms
+> (`serverTimeToMs`, `src/client.ts`) so `serverTime` as delivered is always
+> ms, while the `time_sync` advisory's raw seconds stamp is delivered
+> VERBATIM under its honest name — `serverTimeSec` in `onTimeSync` state —
+> never normalized (SPEC §4.5). Finally: `pingTime()` has no wire cadence —
+> pacing (the suggested ~10–30 s) is consumer-scheduled SECONDS, client law
+> not wire shape, and a call with a ping outstanding is ignored (SPEC §10.1).
 
 One application law for `getAdjustedPosition()`: it advances the playhead
 unconditionally from the last commanded position on the corrected clock. Call
