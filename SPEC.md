@@ -223,8 +223,8 @@ All field names are **snake_case**.
 > `:8097` server stamps `time()` (SECONDS) on every `server_time` it WRITES:
 > the `playback_sync` group echo and the S446 nudge unicast
 > (`phlix-server/src/Session/SyncPlay/SyncPlayManager.php` `handlePlaybackSync()`,
-> echo `:1636-1643`, nudge `:1694-1711` @ `262f01d3`), the `time_sync` advisory
-> reply (`handleTimeSync()` `:1792-1800`), and the play/pause/seek echo FALLBACK
+> echo `:1636-1643`, nudge `:1694-1711` @ `262f01d3`), the `time_sync` advisory reply
+> (`handleTimeSync()` `:1792-1800`), and the play/pause/seek echo FALLBACK
 > (`:1150` / `:1202` / `:1249` `?? time()`) — a sender-supplied ms stamp is
 > echoed verbatim, so even one frame type can carry either scale depending on
 > the sender. Outside those arms the field is ms: the `:8804` hub relay NEVER
@@ -439,7 +439,7 @@ your_id?: string           (the recipient's own member id)
 > The union has four names, but the live producers only reach it through a few
 > doors — worth recording so a consumer knows which states can actually appear
 > and which are latent vocabulary. The only state MUTATOR a command reaches is
-> `GroupState::updatePlayback()` (`GroupState.php:720-726`), and its two callers
+> `GroupState::updatePlayback()` (`GroupState.php:720-726`) @ `98d7f691`, and its two callers
 > pass exactly two values: `handlePlaybackPlay` → `STATE_PLAYING`,
 > `handlePlaybackPause` → `STATE_PAUSED`.
 >
@@ -447,7 +447,7 @@ your_id?: string           (the recipient's own member id)
 > |-------|----------------------|-------------------------|
 > | `playing` | **yes** | `playback_play` command → `updatePlayback(STATE_PLAYING)` |
 > | `paused` | **yes** | `playback_pause` command → `updatePlayback(STATE_PAUSED)` |
-> | `stopped` | **only via media change / init** | the initial value (`:227`), `setCurrentMedia()` sets it on every media switch or clear (`:702`), and snapshot restore defaults to it (`:1197`); NO command emits `stopped` and there is **no "media ended" producer** — at end-of-media `getAdvancedPlaybackPosition()` merely clamps position to the duration (`:661-665`) and holds, it does not transition the group to `stopped` or auto-advance the queue |
+> | `stopped` | **only via media change / init** | the initial value (`:227` @ `98d7f691`), `setCurrentMedia()` sets it on every media switch or clear (`:702` @ `98d7f691`), and snapshot restore defaults to it (`:1197` @ `98d7f691`); NO command emits `stopped` and there is **no "media ended" producer** — at end-of-media `getAdvancedPlaybackPosition()` merely clamps position to the duration (`:661-665`) and holds, it does not transition the group to `stopped` or auto-advance the queue |
 > | `buffering` | **no producer** | a declared constant (`:108`) and legal `updatePlayback` argument, but nothing on either carrier ever calls it — `buffering` cannot appear on a real frame today |
 >
 > Two lifecycle events the review named are therefore ABSENT from the wire, not
@@ -750,9 +750,10 @@ that EMPTIES the group broadcasts nothing at all (the cleanup branch destroys
 the group silently — phlix-server `SyncPlayManager.php:1008-1011` @ `262f01d3`); when members
 remain, `GroupState::removeMember()` re-elects the oldest surviving member
 before the broadcast reads `getHostId()`, so a LIVE election frame always
-carries a non-null successor (`:938-946`, `GroupState.php` `removeMember()` →
-`electNewHost()` @ `6437e318`; the hub's leave path mirrors the oldest-present
-rule); and the null arm survives only in the DECLARED shape — §4.4's roster
+carries a non-null successor (`GroupState.php:482` `removeMember()`, re-election
+call `:495`, `electNewHost()` def `:582`; broadcast builder
+`SyncPlayManager.php:1014-1021`, `'elected_id'` `:1018` — all @ `262f01d3`; the
+hub's leave path mirrors the oldest-present rule); and the null arm survives only in the DECLARED shape — §4.4's roster
 above and the lib's `HostElectPayload` type (`elected_id: string | null`,
 `src/messages.ts`) — not in any producer: the legacy `Messages::hostElect`
 factory cannot even express it (its `string $electedId` parameter is
@@ -1410,8 +1411,8 @@ reads against the commit it was actually observed in.
 | Bound | Value | Site | On breach |
 |-------|-------|------|-----------|
 | WS handshake rate (per IP) | 30 / 60 s | `RateLimitProfiles.php:137` (`WS_CONNECT`, `max 30`, `window 60`) | handshake refused before `101` |
-| Join-password attempts | throttled per connection | `SyncPlayManager.php:135`, `JoinPasswordThrottle` (see §8.2) | bad-gate attempts throttled; §8.2 |
-| Members per group | 50 | `GroupState.php:118` (`MAX_MEMBERS`), enforced `addMember` :422 / joinGroup `SyncPlayManager.php:840` | `syncplay.group_full` |
+| Join-password attempts | throttled per connection | `SyncPlayManager.php:135` @ `98d7f691`, `JoinPasswordThrottle` (see §8.2) | bad-gate attempts throttled; §8.2 |
+| Members per group | 50 | `GroupState.php:118` (`MAX_MEMBERS`), enforced `addMember` :422 @ `98d7f691` / joinGroup `SyncPlayManager.php:840` @ `98d7f691` | `syncplay.group_full` |
 | Queue length | 1000 | `GroupState.php:128` (`MAX_QUEUE_SIZE`), enforced append :907 / wholesale-set `SyncPlayManager.php:1266-1272` | `syncplay.queue_limit_exceeded` |
 | Per-member nudge rate | 1 / 1000 ms | `GroupState.php:157` (`NUDGE_COOLDOWN_MS`), `claimNudgeSlot` :875 | nudge suppressed (silent, §4.2) |
 | Inbound package size — **hub relay `:8804`** | **CAPPED** — `InboundPackageCap::MAX_INBOUND_PACKAGE_BYTES` = 10485760 (10 MiB), a repo-declared value | `phlix-hub/src/Relay/InboundPackageCap.php` (const); wired at TCP-accept through `InboundHandshakeGuard::compose()` in `src/SyncPlay/SyncPlayRelayWorker.php:631-635` (era `phlix-hub` @ `b7ad2a3e`) | vendor `Input` refuses to buffer past the cap and CLOSES the connection — no `error_code` frame; the socket dies at the boundary. The same declared cap is pinned on all four hub WS surfaces (`:8802` `RelayWorker.php:323`, `:8803` `ClientRelayWorker.php:330`, `:8804` `SyncPlayRelayWorker.php:632`, `:8805` `FederationWorker.php:338`) |
@@ -1551,7 +1552,7 @@ found undefined — and it is already shipped, so it is recorded descriptively
   is the authenticated user id (JWT subject) and NOT a per-socket value, a
   second socket that joins the same group with the same id does NOT create a
   second member — `joinGroup()` detects the membership and re-homes
-  idempotently (`SyncPlayManager.php:791-812`, the S289 branch): the one member
+  idempotently (`SyncPlayManager.php:791-812` @ `98d7f691`, the S289 branch): the one member
   record is kept, its display name is refreshed, its `connection_id` is
   re-pointed to the newest socket, and the stale reverse-map entry for the
   previous socket is dropped. Broadcast delivery follows the stored (newest)

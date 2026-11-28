@@ -207,7 +207,7 @@ describe('SPEC — no second unit authority outside §4', () => {
     expect(sec2).not.toContain('(all ms)');
     // Positive body teeth: the delegated roster is actually restated here.
     expect(sec2).toContain('the hub never stamps a seconds'); // §4 (i): ms server_time on :8804
-    expect(sec2).toContain('SyncPlayRelayWorker.php:1367'); // §4 (ii): hub seconds roster, cited
+    expect(sec2).toContain('SyncPlayRelayWorker.php:2119'); // §4 (ii): hub seconds roster, cited (re-rotated at tip 65a0bc9d by S-syncplay-12; law unchanged — roster cite present, no hub-wide-ms universal)
     expect(sec2).toContain('UNIX');
     expect(sec2).toContain('RFC 7519 seconds'); // `exp` is seconds scale
     expect(sec2).toContain('out-of-§4-scope'); // issued_at is metadata, not a §4 wire unit
