@@ -13,6 +13,9 @@ import {
   DRIFT_RATE_MIN,
   DRIFT_RATE_MAX,
   TIME_SYNC_PROTOCOL_VERSION,
+  PING_INTERVAL_MS,
+  startPinger,
+  timePingAllowed,
 } from '../src/time-sync';
 
 /**
@@ -721,5 +724,182 @@ describe('TimeSync.getSampleAgeMs — sample freshness (W-min124 M-SYNCPLAY-14, 
     ts.addSample(1000, 1100, 1100, 1001);
     ts.reset();
     expect(ts.getSampleAgeMs()).toBeNull();
+  });
+});
+
+/**
+ * The §10.1 ping law, shipped as a reusable seam (finding phlix-syncplay-004).
+ *
+ * Before this seam the pacing law lived ONLY inside `SyncPlayClient.pingTime`,
+ * so every TypeScript consumer re-derived it — and drifted (the mobile client
+ * forked the whole loop with its own interval and its own in-flight guard).
+ * `timePingAllowed` is the law as one pure predicate; `startPinger` wraps it in
+ * a cadence driven entirely by a CONSUMER-injected `{ schedule, cancel }` pair,
+ * which keeps §10's "owns no socket and no periodic timers" law literally true:
+ * the library never touches `setInterval`/`setTimeout` here — the scheduler the
+ * consumer injects owns every timer, and tests own the fake.
+ */
+describe('timePingAllowed — §10.1 single-flight law as one predicate (phlix-syncplay-004)', () => {
+  it('allows the first round (nothing outstanding)', () => {
+    expect(timePingAllowed(null, 1000)).toBe(true);
+  });
+
+  it('refuses a ping while one is in flight across the whole window (age 0 … MAX_ACCEPTABLE_RTT)', () => {
+    for (const age of [0, 1, 500, MAX_ACCEPTABLE_RTT]) {
+      expect(timePingAllowed(1000, 1000 + age)).toBe(false);
+    }
+  });
+
+  it('allows a re-ping once the outstanding round ages PAST the window (its pong could only rtt-reject)', () => {
+    expect(timePingAllowed(1000, 1000 + MAX_ACCEPTABLE_RTT + 1)).toBe(true);
+  });
+
+  it('allows a re-ping through a BACKWARD clock step — a negative age is never a fresh ping (m22 arm)', () => {
+    expect(timePingAllowed(1000, 999)).toBe(true);
+    expect(timePingAllowed(1000, 4000 - 6000)).toBe(true); // age -1000: step back
+  });
+});
+
+describe('startPinger — consumer-owned scheduler, compliant pacing seam (phlix-syncplay-004)', () => {
+  type Arm = { cb: () => void; delayMs: number; cancelled: boolean; consumed: boolean };
+
+  /** A fake scheduler: arms queue up, `fireNext` runs the oldest live one exactly once. */
+  function makeFakeScheduler() {
+    const arms: Arm[] = [];
+    const cancels: number[] = [];
+    const scheduler = {
+      schedule: (cb: () => void, delayMs: number): Arm => {
+        const arm: Arm = { cb, delayMs, cancelled: false, consumed: false };
+        arms.push(arm);
+        return arm;
+      },
+      cancel: (handle: unknown): void => {
+        const arm = handle as Arm;
+        if (arm.cancelled) {
+          throw new Error('double-cancel: the seam must cancel each arm at most once');
+        }
+        arm.cancelled = true;
+        cancels.push(arms.indexOf(arm));
+      },
+    };
+    const live = () => arms.filter((a) => !a.cancelled && !a.consumed);
+    return {
+      scheduler,
+      arms,
+      cancels,
+      live,
+      fireNext(): void {
+        const arm = live()[0];
+        if (!arm) {
+          throw new Error('no armed tick to fire');
+        }
+        arm.consumed = true;
+        arm.cb();
+      },
+    };
+  }
+
+  it('ships the recommended cadence constant', () => {
+    expect(PING_INTERVAL_MS).toBe(30000);
+  });
+
+  it('runs the first round synchronously and arms the next at PING_INTERVAL_MS', () => {
+    const sched = makeFakeScheduler();
+    const clock = makeClock(1000);
+    let pings = 0;
+    startPinger({ ...sched.scheduler, ping: () => { pings += 1; }, now: clock.now });
+    // §10.2: a connect/resume rebuilds the sync window immediately — no timer wait.
+    expect(pings).toBe(1);
+    expect(sched.live()).toHaveLength(1);
+    expect(sched.live()[0].delayMs).toBe(PING_INTERVAL_MS);
+  });
+
+  it('honors a custom intervalMs (the wire enforces no ping rate — §8.5)', () => {
+    const sched = makeFakeScheduler();
+    const clock = makeClock(1000);
+    startPinger({ ...sched.scheduler, ping: () => {}, now: clock.now, intervalMs: 10000 });
+    expect(sched.live()[0].delayMs).toBe(10000);
+  });
+
+  it('rejects a malformed intervalMs at the boundary (fail fast)', () => {
+    const sched = makeFakeScheduler();
+    const clock = makeClock(1000);
+    for (const bad of [0, -5, Number.NaN, 1.5]) {
+      expect(() => startPinger({ ...sched.scheduler, ping: () => {}, now: clock.now, intervalMs: bad })).toThrow(RangeError);
+    }
+    expect(sched.arms).toHaveLength(0); // nothing armed before the throw
+  });
+
+  it('throws a TypeError when a seam function is missing (parse-don\'t-validate at the boundary)', () => {
+    const sched = makeFakeScheduler();
+    const clock = makeClock(1000);
+    expect(() => startPinger({ schedule: sched.scheduler.schedule, cancel: undefined as never, ping: () => {}, now: clock.now })).toThrow(TypeError);
+    expect(() => startPinger({ schedule: undefined as never, cancel: sched.scheduler.cancel, ping: () => {}, now: clock.now })).toThrow(TypeError);
+    expect(() => startPinger({ ...sched.scheduler, ping: undefined as never, now: clock.now })).toThrow(TypeError);
+    expect(() => startPinger({ ...sched.scheduler, ping: () => {}, now: undefined as never })).toThrow(TypeError);
+  });
+
+  it('each lawful tick pings and re-arms — the cadence never dies', () => {
+    const sched = makeFakeScheduler();
+    const clock = makeClock(1000);
+    const stamps: number[] = [];
+    startPinger({
+      ...sched.scheduler,
+      ping: () => { stamps.push(Math.trunc(clock.now())); },
+      now: clock.now,
+    });
+    for (let i = 0; i < 3; i += 1) {
+      clock.advance(PING_INTERVAL_MS);
+      sched.fireNext();
+    }
+    expect(stamps).toEqual([1000, 31000, 61000, 91000]);
+    expect(sched.arms).toHaveLength(4); // synchronous round + one arm per consumed tick
+  });
+
+  it('a tick racing inside the §10.1 window is skipped by the shared predicate — and the cadence re-arms anyway', () => {
+    const sched = makeFakeScheduler();
+    const clock = makeClock(1000);
+    let pings = 0;
+    startPinger({ ...sched.scheduler, ping: () => { pings += 1; }, now: clock.now });
+    clock.advance(10); // a spurious early fire: same in-flight window
+    sched.fireNext();
+    expect(pings).toBe(1); // the slot law refuses a stacked round
+    expect(sched.arms).toHaveLength(2); // the skipped tick re-armed: cadence survives refusals
+    clock.advance(MAX_ACCEPTABLE_RTT); // now the outstanding round is past the window
+    sched.fireNext();
+    expect(pings).toBe(2);
+  });
+
+  it('stop() cancels the armed tick exactly once; post-stop callbacks are inert; double stop idempotent', () => {
+    const sched = makeFakeScheduler();
+    const clock = makeClock(1000);
+    let pings = 0;
+    const handle = startPinger({ ...sched.scheduler, ping: () => { pings += 1; }, now: clock.now });
+    const armed = sched.arms[0];
+    handle.stop();
+    expect(sched.cancels).toHaveLength(1);
+    clock.set(1000 + PING_INTERVAL_MS);
+    armed.cb(); // a scheduler that IGNORES cancel must still not drive the seam
+    expect(pings).toBe(1);
+    expect(sched.arms).toHaveLength(1); // no re-arm after stop
+    handle.stop(); // idempotent — no second cancel (the fake would throw on one)
+    expect(sched.cancels).toHaveLength(1);
+  });
+
+  it('independent pingers do not cross-talk (no global registry)', () => {
+    const schedA = makeFakeScheduler();
+    const schedB = makeFakeScheduler();
+    const clock = makeClock(1000);
+    let a = 0;
+    let b = 0;
+    const handleA = startPinger({ ...schedA.scheduler, ping: () => { a += 1; }, now: clock.now });
+    startPinger({ ...schedB.scheduler, ping: () => { b += 1; }, now: clock.now });
+    expect([a, b]).toEqual([1, 1]);
+    handleA.stop();
+    clock.set(1000 + PING_INTERVAL_MS);
+    schedA.arms[0].cb(); // A is stopped: inert even if its scheduler misfires
+    expect(a).toBe(1);
+    schedB.fireNext();
+    expect(b).toBe(2); // B never noticed A
   });
 });

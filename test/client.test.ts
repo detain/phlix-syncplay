@@ -7,6 +7,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SyncPlayClient, type PlaybackCommand } from '../src/client';
 import { encodeMessage, serializeMessage } from '../src/framing';
+import { PING_INTERVAL_MS, startPinger } from '../src/time-sync';
 import { SYNCPLAY_MESSAGE_TYPES, type GroupListSummaryRow, type PlaybackQueueItem, type RawMessage, type SyncPlayGroup, type TimeSyncPayload, type TimeSyncState, type UnknownFrame } from '../src/messages';
 
 /** A fake transport + clock harness. */
@@ -3953,5 +3954,78 @@ describe('SyncPlayClient — host_elect re-announcing the CURRENT host is a no-o
     expect(h.hostChanges).toEqual(['me']); // fires despite newHostId === cached host
     expect(h.client.getGroup()?.members.map((m) => m.id)).toEqual(['me']);
     expect(h.left.map((m) => m.id)).toEqual(['host1']);
+  });
+});
+
+/**
+ * The §5 pacing seam driving the REAL client (finding phlix-syncplay-004).
+ *
+ * `startPinger` with `ping: () => client.pingTime()` is the compliant loop the
+ * mobile fork re-derived badly. The seam refuses stacked rounds through the
+ * shared §10.1 predicate; the client refuses them through its own slot; either
+ * guard alone holds, and this wiring test proves the composed loop stays lawful
+ * on TIME_PING frames the client actually dispatches.
+ */
+describe('SyncPlayClient × startPinger — the seam drives the real ping loop (phlix-syncplay-004)', () => {
+  type Arm = { cb: () => void; delayMs: number; cancelled: boolean; consumed: boolean };
+  function makeFakeScheduler() {
+    const arms: Arm[] = [];
+    const cancels: number[] = [];
+    const scheduler = {
+      schedule: (cb: () => void, delayMs: number): Arm => {
+        const arm: Arm = { cb, delayMs, cancelled: false, consumed: false };
+        arms.push(arm);
+        return arm;
+      },
+      cancel: (handle: unknown): void => {
+        const arm = handle as Arm;
+        if (arm.cancelled) {
+          throw new Error('double-cancel: the seam must cancel each arm at most once');
+        }
+        arm.cancelled = true;
+        cancels.push(arms.indexOf(arm));
+      },
+    };
+    const live = () => arms.filter((a) => !a.cancelled && !a.consumed);
+    return {
+      scheduler,
+      arms,
+      cancels,
+      live,
+      fireNext(): void {
+        const arm = live()[0];
+        if (!arm) {
+          throw new Error('no armed tick to fire');
+        }
+        arm.consumed = true;
+        arm.cb();
+      },
+    };
+  }
+
+  it('ships TIME_PING rounds at the seam cadence with integer client_time, and dies cleanly on stop()', () => {
+    const h = makeHarness();
+    const sched = makeFakeScheduler();
+    const pings = (sent: RawMessage[]) => sent.filter((m) => m.type === SYNCPLAY_MESSAGE_TYPES.TIME_PING);
+    const handle = startPinger({
+      ...sched.scheduler,
+      ping: () => h.client.pingTime(),
+      now: h.clock.now,
+    });
+    expect(pings(h.sent)).toHaveLength(1);
+    expect(pings(h.sent)[0].client_time).toBe(1000); // harness clock: integer ms (§10.1 quad)
+    expect(sched.live()[0].delayMs).toBe(PING_INTERVAL_MS);
+    sched.fireNext(); // spurious same-instant fire: seam predicate refuses (age 0)
+    expect(pings(h.sent)).toHaveLength(1);
+    h.clock.set(1000 + PING_INTERVAL_MS); // next lawful round
+    sched.fireNext();
+    expect(pings(h.sent)).toHaveLength(2);
+    expect(pings(h.sent)[1].client_time).toBe(31000);
+    handle.stop();
+    expect(sched.cancels).toHaveLength(1);
+    h.clock.set(1000 + 2 * PING_INTERVAL_MS);
+    sched.arms[sched.arms.length - 1].cb(); // misbehaving scheduler fires a cancelled arm
+    expect(pings(h.sent)).toHaveLength(2); // the stopped seam cannot resurrect the loop
+    expect(sched.arms).toHaveLength(3); // synchronous round + one re-arm per live tick, none after stop
   });
 });

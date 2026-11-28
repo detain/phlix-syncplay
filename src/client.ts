@@ -58,7 +58,7 @@ import {
   type TypingPayload,
   type UnknownFrame,
 } from './messages';
-import { MAX_ACCEPTABLE_RTT, TimeSync } from './time-sync';
+import { TimeSync, timePingAllowed } from './time-sync';
 
 /** A play/pause/seek command surfaced to the consumer for local application. */
 export interface PlaybackCommand {
@@ -1367,6 +1367,10 @@ export class SyncPlayClient {
    * on `rtt`), so it is treated as lost and the next call re-pings. A lost
    * pong can therefore never wedge time sync forever; `onDisconnect()` also
    * clears the slot immediately (SPEC §10.1 item 3).
+   *
+   * The pacing itself is reusable: `startPinger()` (SPEC §5) wraps this same
+   * law — through the shared `timePingAllowed` predicate — into a loop a
+   * consumer drives with its own injected scheduler (finding phlix-syncplay-004).
    */
   pingTime(): void {
     // LW-046: a destroyed client owns no connection and no slots — ship nothing.
@@ -1379,18 +1383,16 @@ export class SyncPlayClient {
     // every pong would be refused as a cross-round straggler. Truncate at the
     // source so the sent, recorded, and echoed values are the same integer.
     const t1 = Math.trunc(this.now());
-    const outstanding = this.lastPingSendTime;
     // CONSOLIDATED m22 (review asphp MINOR-3): a BACKWARD wall-clock step made
     // the age NEGATIVE, and a negative age passes `<= MAX_ACCEPTABLE_RTT`
     // forever — the single-flight slot wedged, sync froze, stale offsets
     // served with full confidence. A negative age is not a fresh ping: re-ping
     // and let the newest send time own the slot (SPEC §10's "never wedge"
-    // intent, finally true under clock steps).
-    if (outstanding !== null) {
-      const age = t1 - outstanding;
-      if (age >= 0 && age <= MAX_ACCEPTABLE_RTT) {
-        return;
-      }
+    // intent, finally true under clock steps). The law is ONE shared
+    // predicate now — `timePingAllowed` — so a `startPinger` loop and a manual
+    // ping meet identical pacing rules (SPEC §5, finding phlix-syncplay-004).
+    if (!timePingAllowed(this.lastPingSendTime, t1)) {
+      return;
     }
     this.lastPingSendTime = t1;
     this.pingEpoch = this.connectionEpoch;

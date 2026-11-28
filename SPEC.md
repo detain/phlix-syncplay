@@ -1017,6 +1017,24 @@ existing server/hub law; no wire shape changes.
   members against `MAX_ACCEPTABLE_RTT = 1000`), reset by any acceptance. The
   server's `TimeSync.php` has neither a freshness bound nor a reject
   counter, so this is client-side observability only — no wire meaning.
+- **Pacing (the `startPinger` seam).** When a client may ping is §10.1's law;
+  how often is a quality choice the wire never polices (§8.5: the server
+  absorbs command frames at whatever rate arrives). The library now ships the
+  whole loop so consumers stop re-deriving it — the mobile client had forked
+  its own interval and its own in-flight guard (`phlix-syncplay-004`).
+  `startPinger({ schedule, cancel, ping, now, intervalMs? })` takes a
+  consumer-injected `{ schedule, cancel }` timer pair with opaque handles: the
+  library owns no socket and no periodic timers, so §10's law stays literally
+  true and tests drive a fake scheduler instead of wall-clock semantics. The
+  shipped cadence is `PING_INTERVAL_MS = 30000`; every value is wire-compliant,
+  the constant only states the recommendation. Each tick re-checks §10.1
+  through `timePingAllowed(outstanding, nowMs)` — the ONE shared predicate
+  `SyncPlayClient.pingTime()` itself calls — so a pinger round racing a manual
+  ping cannot stack rounds or wedge the slot, and the backward-clock-step arm
+  (a negative age re-pings) applies to both paths identically. The first tick
+  runs synchronously (a resume rebuilds the window at once, §10.2); a refused
+  tick still re-arms, so refusals never kill the cadence; `stop()` on the
+  returned handle cancels the armed round exactly once and is idempotent.
 
 **Worked-example vectors (`S-syncplay-13`; findings phlix-syncplay-015,
 phlix-syncplay-056).** The table below is the normative acceptance vector set

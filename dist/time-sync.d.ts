@@ -249,3 +249,94 @@ export declare class TimeSync {
         sampleCount: number;
     };
 }
+/**
+ * Recommended ping cadence for the {@link startPinger} seam (finding
+ * phlix-syncplay-004). The wire enforces NO ping rate — the server absorbs
+ * command frames at whatever rate arrives (SPEC §8.5) — so the cadence is a
+ * client-side quality choice: fast enough to keep the §5 window fresh between
+ * rounds, gentle enough not to spam. 30 s matches the interval the mobile
+ * client converged on before it forked the loop; consumers may dial any value
+ * they like, the seam never argues with `intervalMs` beyond sanity.
+ */
+export declare const PING_INTERVAL_MS = 30000;
+/**
+ * The §10.1 ping law as ONE pure predicate (finding phlix-syncplay-004).
+ *
+ * `SyncPlayClient.pingTime()` and {@link startPinger} share this function, so
+ * a consumer driving pings through either path — or both — meets the same
+ * law: a round is in flight exactly while `outstanding` is set within
+ * `[0, MAX_ACCEPTABLE_RTT]` of `nowMs`, and calls inside that window are
+ * refused because a pong can only be attributed to the one recorded send
+ * time. An unanswered round older than the window can never seed a sample
+ * (any such sample would itself be rejected on `rtt`), so it is treated as
+ * lost and the next call may re-ping; a BACKWARD wall-clock step makes the
+ * age negative, which is never a fresh ping — re-ping and let the newest send
+ * time own the slot instead of wedging sync forever (SPEC §10.1's m22 arm).
+ *
+ * @param outstanding send time of the in-flight round, or `null` when none
+ * @param nowMs       current time on the same injected epoch-ms clock
+ * @returns `true` when a `TIME_PING` round may start now
+ */
+export declare function timePingAllowed(outstanding: number | null, nowMs: number): boolean;
+/**
+ * Consumer-injected timer pair for {@link startPinger}. Handles are OPAQUE:
+ * the seam stores whatever `schedule` returns and hands it back to `cancel`,
+ * so the library keeps its §10 promise to own no socket and no periodic
+ * timers — `setInterval`/`setTimeout` never appear on this path, the
+ * consumer's scheduler (or a test fake) owns every timer that ever ticks.
+ */
+export interface PingerScheduler {
+    /** Arm `callback` after `delayMs`; return an opaque handle for {@link cancel}. */
+    schedule(callback: () => void, delayMs: number): unknown;
+    /** Disarm the handle a previous {@link schedule} returned. */
+    cancel(handle: unknown): void;
+}
+/** Options for {@link startPinger}. */
+export interface StartPingerOptions extends PingerScheduler {
+    /** Start one ping round — typically `() => client.pingTime()`. */
+    ping: () => void;
+    /** Epoch-milliseconds clock, the same one handed to `SyncPlayClient`. */
+    now: () => number;
+    /** Arm delay between rounds; defaults to {@link PING_INTERVAL_MS}. */
+    intervalMs?: number;
+}
+/** Stop handle returned by {@link startPinger}. */
+export interface PingerHandle {
+    /** Cancel the armed round exactly once; repeat calls are inert. */
+    stop(): void;
+}
+/**
+ * The §5 pacing seam: a reusable compliant ping loop (finding
+ * phlix-syncplay-004).
+ *
+ * Before this seam the pacing law existed only inside
+ * `SyncPlayClient.pingTime()`, so every TypeScript consumer re-derived the
+ * loop around it — and drifted (the mobile client forked the whole thing:
+ * its own time-sync copy, its own 30 s interval, its own in-flight guard).
+ * `startPinger` ships the loop itself from this library, parameterised by an
+ * injectable `{ schedule, cancel }` pair so it is testable without touching
+ * wall-clock timer semantics and honest about §10: the library arms nothing.
+ *
+ * Semantics (documented choices, pinned by `test/time-sync.test.ts`):
+ * - the FIRST round runs synchronously inside `startPinger()` — a
+ *   connect/resume rebuilds the sync window immediately (§10.2), no timer
+ *   wait for the first pong;
+ * - every tick re-checks the §10.1 law through {@link timePingAllowed} even
+ *   when `ping()` is a dumb callback, so a pinger tick racing a manual ping
+ *   cannot stack rounds; a refused tick still re-arms — refusals never kill
+ *   the cadence;
+ * - ticks truncate `now()` to integer milliseconds for the same reason
+ *   `pingTime()` does (SPY-2: the quad and the echo must be the same
+ *   integer);
+ * - `stop()` cancels the armed handle exactly once and is idempotent; a
+ *   scheduler that ignores `cancel` and fires anyway drives an inert seam —
+ *   no ping, no re-arm;
+ * - there is NO global registry: each call starts an independent pinger, and
+ *   stopping one cannot disturb another.
+ *
+ * @param options the {@link StartPingerOptions} seam contract
+ * @returns a {@link PingerHandle} to end the loop
+ * @throws TypeError when `schedule`/`cancel`/`ping`/`now` is not a function
+ * @throws RangeError when `intervalMs` is present but not an integer >= 1
+ */
+export declare function startPinger(options: StartPingerOptions): PingerHandle;
