@@ -5,6 +5,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- S-syncplay-28: API trim — removed the dead public export
+  `TIME_SYNC_PROTOCOL_VERSION` from `src/time-sync.ts` (plus its docblock, the
+  `test/time-sync.test.ts` import/assertion pinning it to its own literal, and the
+  README public-API enumeration naming it — disclosed rider, not in the step's Files
+  list): a second
+  authority for the wire version with zero estate consumers, re-proven at execution
+  across phlix-server/hub/ui/tizen/windows/mobile/console/roku. No behavior change;
+  `framing.PROTOCOL_VERSION` remains the sole emit/compare authority. Semver-visible
+  public-API removal riding the NEXT release cut — the `v0.1.10` tag is published and
+  IMMOVABLE (its own entry names the 'IDs 01-44 minus the 28 gap'), so this row
+  intentionally post-dates the tag.
+
 ## [0.1.10] - 2026-11-28
 
 Release-integrity cut: folds the whole post-v0.1.9 campaign — the walk

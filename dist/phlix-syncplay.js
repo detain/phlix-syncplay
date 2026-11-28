@@ -136,7 +136,7 @@ function p(e) {
 	return JSON.stringify(e);
 }
 // src/time-sync.ts
-var m = 5, h = 1e3, g = 50, _ = .1, v = .99, y = 1.01, b = 1, x = class {
+var m = 5, h = 1e3, g = 50, _ = .1, v = .99, y = 1.01, b = class {
 	constructor(e) {
 		s(this, "samples", []), s(this, "driftRate", 1), s(this, "now", void 0), s(this, "samplesVersion", 0), s(this, "cacheVersion", -1), s(this, "cachedOffset", 0), s(this, "cachedLatency", 0), s(this, "cachedIsStable", !1), this.now = e;
 	}
@@ -224,22 +224,22 @@ var m = 5, h = 1e3, g = 50, _ = .1, v = .99, y = 1.01, b = 1, x = class {
 			sampleCount: this.samples.length
 		};
 	}
-}, S = 3e4;
-function C(e, t) {
+}, x = 3e4;
+function S(e, t) {
 	if (e === null) return !0;
 	let n = t - e;
 	return !(n >= 0 && n <= 1e3);
 }
-function w(e) {
+function C(e) {
 	var t;
 	let { schedule: n, cancel: r, ping: i, now: a } = e;
 	if (typeof n != "function" || typeof r != "function" || typeof i != "function" || typeof a != "function") throw TypeError("startPinger requires schedule, cancel, ping and now functions");
-	let o = (t = e.intervalMs) == null ? S : t;
+	let o = (t = e.intervalMs) == null ? x : t;
 	if (!Number.isInteger(o) || o < 1) throw RangeError(`startPinger intervalMs must be an integer >= 1, got ${String(o)}`);
 	let s = !1, c = null, l = null, u = () => {
 		if (s) return;
 		let e = Math.trunc(a());
-		C(l, e) && (l = e, i()), s || (c = n(u, o));
+		S(l, e) && (l = e, i()), s || (c = n(u, o));
 	};
 	return u(), { stop() {
 		if (s) return;
@@ -249,13 +249,13 @@ function w(e) {
 	} };
 }
 // src/client.ts
-var T = 250, E = 2e3, D = class t {
+var w = 250, T = 2e3, E = class t {
 	constructor(e) {
 		var n;
-		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "stateFoldStamp", null), s(this, "intendsMembership", !0), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "Host" : n, this.timeSync = new x(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
+		s(this, "send", void 0), s(this, "now", void 0), s(this, "memberId", void 0), s(this, "memberName", void 0), s(this, "options", void 0), s(this, "timeSync", void 0), s(this, "seekThrottleMs", void 0), s(this, "seekWindowOpen", !1), s(this, "pendingSeek", null), s(this, "seekFlushTimer", null), s(this, "group", null), s(this, "stateFoldStamp", null), s(this, "intendsMembership", !0), s(this, "destroyed", !1), s(this, "lastPingSendTime", null), s(this, "connectionEpoch", 0), s(this, "pingEpoch", 0), s(this, "consecutiveSyncRejections", 0), this.options = e, this.send = e.send, this.now = e.now, this.memberId = e.memberId, this.memberName = (n = e.memberName) == null ? "Host" : n, this.timeSync = new b(e.now), this.seekThrottleMs = t.parseSeekThrottleMs(e.seekThrottleMs);
 	}
 	static parseSeekThrottleMs(e) {
-		if (e === void 0) return T;
+		if (e === void 0) return w;
 		if (typeof e != "number" || !Number.isFinite(e) || e < 0 || e > 2147483647) throw TypeError(`SyncPlayClient: seekThrottleMs must be a finite number in [0, 2147483647] (0 disables the seek coalescing throttle), got ${String(e)}`);
 		return e;
 	}
@@ -421,7 +421,7 @@ var T = 250, E = 2e3, D = class t {
 	pingTime() {
 		if (this.destroyed) return;
 		let t = Math.trunc(this.now());
-		C(this.lastPingSendTime, t) && (this.lastPingSendTime = t, this.pingEpoch = this.connectionEpoch, this.dispatch(e.TIME_PING, { client_time: t }));
+		S(this.lastPingSendTime, t) && (this.lastPingSendTime = t, this.pingEpoch = this.connectionEpoch, this.dispatch(e.TIME_PING, { client_time: t }));
 	}
 	onDisconnect() {
 		var e, t;
@@ -643,7 +643,7 @@ var T = 250, E = 2e3, D = class t {
 			return;
 		}
 		let m = s.group_id, h = t.strOrNull(s.host_id), g = t.saneServerStamp(e.timestamp);
-		if (g !== void 0 && this.stateFoldStamp !== null && this.stateFoldStamp.groupId === m && this.stateFoldStamp.stampMs - g > E) {
+		if (g !== void 0 && this.stateFoldStamp !== null && this.stateFoldStamp.groupId === m && this.stateFoldStamp.stampMs - g > T) {
 			var _, v;
 			(_ = (v = this.options).onFrameDropped) == null || _.call(v, "malformed", e);
 			return;
@@ -679,8 +679,8 @@ var T = 250, E = 2e3, D = class t {
 		(n = (r = this.options).onState) == null || n.call(r, this.group, typeof o.your_id == "string" ? o.your_id : void 0);
 		let w = o.your_id;
 		if (typeof w == "string" && w !== this.memberId) {
-			var T, D;
-			(T = (D = this.options).onIdentityMismatch) == null || T.call(D, w, this.memberId);
+			var E, D;
+			(E = (D = this.options).onIdentityMismatch) == null || E.call(D, w, this.memberId);
 		}
 	}
 	handlePlayback(e, n) {
@@ -873,6 +873,6 @@ var T = 250, E = 2e3, D = class t {
 		this.send(u(e, t, this.now));
 	}
 };
-export { n as ALL_MESSAGE_TYPES, _ as DRIFT_CORRECTION_FACTOR, y as DRIFT_RATE_MAX, v as DRIFT_RATE_MIN, h as MAX_ACCEPTABLE_RTT, m as OFFSET_SAMPLE_COUNT, S as PING_INTERVAL_MS, t as PROTOCOL_VERSION, g as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, D as SyncPlayClient, b as TIME_SYNC_PROTOCOL_VERSION, x as TimeSync, d as decodeMessage, u as encodeMessage, f as isCanonicalFrame, r as isValidMessageType, p as serializeMessage, w as startPinger, C as timePingAllowed };
+export { n as ALL_MESSAGE_TYPES, _ as DRIFT_CORRECTION_FACTOR, y as DRIFT_RATE_MAX, v as DRIFT_RATE_MIN, h as MAX_ACCEPTABLE_RTT, m as OFFSET_SAMPLE_COUNT, x as PING_INTERVAL_MS, t as PROTOCOL_VERSION, g as STABILITY_VARIANCE_THRESHOLD, e as SYNCPLAY_MESSAGE_TYPES, E as SyncPlayClient, b as TimeSync, d as decodeMessage, u as encodeMessage, f as isCanonicalFrame, r as isValidMessageType, p as serializeMessage, C as startPinger, S as timePingAllowed };
 
 //# sourceMappingURL=phlix-syncplay.js.map

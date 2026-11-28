@@ -435,8 +435,8 @@ import {
 
 `TimeSync`'s tuning constants ship too: `OFFSET_SAMPLE_COUNT` (5),
 `MAX_ACCEPTABLE_RTT` (ms), `STABILITY_VARIANCE_THRESHOLD`,
-`DRIFT_CORRECTION_FACTOR`, `DRIFT_RATE_MIN`/`DRIFT_RATE_MAX`,
-`TIME_SYNC_PROTOCOL_VERSION`; instances expose `getSampleAgeMs()` (ms since
+`DRIFT_CORRECTION_FACTOR`, `DRIFT_RATE_MIN`/`DRIFT_RATE_MAX`; instances expose
+`getSampleAgeMs()` (ms since
 the last accepted sample, `null` with none).
 
 Types for the two `group_state` shapes are exported too: `SyncPlayGroupWire` /

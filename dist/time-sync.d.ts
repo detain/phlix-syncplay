@@ -90,8 +90,6 @@ export declare const DRIFT_CORRECTION_FACTOR = 0.1;
 export declare const DRIFT_RATE_MIN = 0.99;
 /** Upper bound for the drift-rate multiplier (≤1% fast). See DRIFT_RATE_MIN. */
 export declare const DRIFT_RATE_MAX = 1.01;
-/** Protocol version for time-sync messages (mirrors TimeSync::PROTOCOL_VERSION). */
-export declare const TIME_SYNC_PROTOCOL_VERSION = 1;
 import type { NowFn } from './framing';
 /**
  * A single offset measurement. `offset` and `rtt` are in **milliseconds**;

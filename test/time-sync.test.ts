@@ -12,7 +12,6 @@ import {
   DRIFT_CORRECTION_FACTOR,
   DRIFT_RATE_MIN,
   DRIFT_RATE_MAX,
-  TIME_SYNC_PROTOCOL_VERSION,
   PING_INTERVAL_MS,
   startPinger,
   timePingAllowed,
@@ -56,7 +55,6 @@ describe('TimeSync constants', () => {
     expect(OFFSET_SAMPLE_COUNT).toBe(5);
     expect(MAX_ACCEPTABLE_RTT).toBe(1000);
     expect(DRIFT_CORRECTION_FACTOR).toBe(0.1);
-    expect(TIME_SYNC_PROTOCOL_VERSION).toBe(1);
   });
 
   it('exposes the drift-rate clamp bounds (B1)', () => {
